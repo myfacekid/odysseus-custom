@@ -88,11 +88,32 @@ def _get_public_url(url: str, *, headers: dict, timeout: int) -> httpx.Response:
                 raise httpx.RequestError(f"Blocked redirect to non-public URL: {current}")
     raise httpx.RequestError("Too many redirects")
 
-# PDF extraction (optional dependency)
+# PDF extraction — pypdf is required; pdfminer optional fallback
 try:
     from pdfminer.high_level import extract_text as pdf_extract_text
 except ImportError:
     pdf_extract_text = None  # type: ignore
+
+
+def _extract_pdf_bytes(pdf_bytes: bytes, max_chars: int = 15000) -> str:
+    """Extract text from PDF bytes using pypdf, with pdfminer fallback."""
+    if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
+        return ""
+    text = ""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        text = "\n".join((p.extract_text() or "") for p in reader.pages).strip()
+    except Exception as e:
+        logger.warning(f"pypdf extraction failed: {e}")
+    if not text and pdf_extract_text is not None:
+        try:
+            text = (pdf_extract_text(io.BytesIO(pdf_bytes)) or "").strip()
+        except Exception as e:
+            logger.warning(f"PDF extraction failed: {e}")
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n[PDF content truncated]"
+    return text
 
 
 # ----------------------------------------------------------------------
@@ -258,16 +279,11 @@ def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0) ->
     # PDF handling
     content_type = response.headers.get("Content-Type", "").lower()
     if "application/pdf" in content_type or url.lower().endswith(".pdf"):
-        if pdf_extract_text is None:
-            logger.error("pdfminer.six is not installed; cannot extract PDF text.")
+        try:
+            pdf_text = _extract_pdf_bytes(response.content)
+        except Exception as e:
+            logger.warning(f"PDF extraction failed for {url}: {e}")
             pdf_text = ""
-        else:
-            try:
-                pdf_bytes = io.BytesIO(response.content)
-                pdf_text = pdf_extract_text(pdf_bytes)
-            except Exception as e:
-                logger.warning(f"PDF extraction failed for {url}: {e}")
-                pdf_text = ""
         result = {
             "url": url,
             "title": os.path.basename(url),

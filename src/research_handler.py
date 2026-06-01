@@ -137,9 +137,10 @@ class ResearchHandler:
                 url=llm_endpoint,
                 model=llm_model,
                 messages=[{"role": "user", "content":
-                    "Read this conversation and write a single, specific research query that captures "
-                    "what the user wants to know. Include all relevant context, constraints, and preferences "
-                    "they mentioned. Output ONLY the research query — nothing else.\n\n"
+                    "Read this conversation and write a single, specific academic research question "
+                    "that captures what the user wants to investigate in the scholarly literature. "
+                    "Include relevant context, populations, methods, or time constraints they mentioned. "
+                    "Output ONLY the research question — nothing else.\n\n"
                     f"Conversation:\n{convo}"
                 }],
                 temperature=0.1,
@@ -225,6 +226,8 @@ class ResearchHandler:
         category: str = None,
         extraction_timeout: int = None,
         extraction_concurrency: int = None,
+        include_preprints: bool = True,
+        include_zotero: bool = True,
         owner: str = "",
     ) -> dict:
         """Start research as a background task. Returns task info dict.
@@ -268,7 +271,9 @@ class ResearchHandler:
             "progress": {},
             "result": None,
             "started_at": time.time(),
-            "category": category,
+            "category": "academic",
+            "include_preprints": bool(include_preprints),
+            "include_zotero": bool(include_zotero),
             # SECURITY: track ownership so all reads / saves can filter by user.
             "owner": owner or "",
         }
@@ -303,9 +308,12 @@ class ResearchHandler:
                         prior_urls=prior_urls,
                         max_rounds=max_rounds,
                         search_provider=search_provider,
-                        category=category,
+                        category="academic",
                         extraction_timeout=extraction_timeout,
                         extraction_concurrency=extraction_concurrency,
+                        include_preprints=include_preprints,
+                        include_zotero=include_zotero,
+                        owner=owner,
                     ),
                     timeout=hard_timeout,
                 )
@@ -551,7 +559,8 @@ class ResearchHandler:
                 "sources": sources,
                 "raw_findings": raw_findings,
                 "stats": entry.get("stats"),
-                "category": entry.get("category"),
+                "category": entry.get("category") or "academic",
+                "include_preprints": entry.get("include_preprints", True),
                 "started_at": entry["started_at"],
                 "completed_at": time.time(),
                 # SECURITY: stamp owner so route handlers can filter by user.
@@ -675,6 +684,9 @@ class ResearchHandler:
         category: str = None,
         extraction_timeout: int = None,
         extraction_concurrency: int = None,
+        include_preprints: bool = True,
+        include_zotero: bool = True,
+        owner: str = "",
     ) -> str:
         """
         Run iterative deep research using the LLM-in-the-loop DeepResearcher.
@@ -735,7 +747,10 @@ class ResearchHandler:
                 extraction_concurrency=_extraction_concurrency,
                 progress_callback=progress_callback,
                 search_provider=search_provider,
-                category=category,
+                category="academic",
+                include_preprints=include_preprints,
+                include_zotero=include_zotero,
+                owner=owner or (_task_entry.get("owner") if _task_entry else ""),
             )
             if _task_entry is not None:
                 _task_entry["researcher"] = researcher

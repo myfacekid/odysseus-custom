@@ -319,7 +319,9 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         max_time: int = Field(default=300, ge=60, le=1800)
         extraction_timeout: Optional[int] = Field(default=None, ge=15, le=3600)
         extraction_concurrency: Optional[int] = Field(default=None, ge=1, le=12)
-        category: Optional[str] = None
+        include_preprints: bool = True
+        include_zotero: bool = True
+        category: Optional[str] = None  # ignored — always academic
 
     @router.post("/api/research/start")
     async def research_start(body: ResearchStartRequest, request: Request):
@@ -420,9 +422,11 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             llm_headers=ep_headers,
             max_rounds=effective_max_rounds,
             search_provider=body.search_provider or None,
-            category=body.category or None,
+            category="academic",
             extraction_timeout=body.extraction_timeout,
             extraction_concurrency=body.extraction_concurrency,
+            include_preprints=body.include_preprints,
+            include_zotero=body.include_zotero,
             owner=user,
         )
         return {"session_id": session_id, "status": "running", "query": body.query}
@@ -488,11 +492,9 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
     async def research_spinoff(session_id: str, request: Request):
         """Create a new chat session pre-seeded with this research as context.
 
-        Reads the persisted research result + sources for `session_id`, creates
-        a fresh session (inheriting endpoint/model/headers from the source
-        session if available, otherwise from the resolved chat endpoint), and
-        injects a single system message containing the report and sources so
-        the user can ask follow-up questions in a clean conversation.
+        Reads the persisted research result + per-source summaries for
+        `session_id`, creates a fresh session, and injects a system message
+        so the user can ask follow-up questions in a clean conversation.
         """
         user = _require_user(request)
         _validate_session_id(session_id)
@@ -505,24 +507,26 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         if session_manager is None:
             raise HTTPException(500, "session_manager not configured")
 
-        # Load research data — prefer in-memory result, fall back to disk
-        result = research_handler.get_result(session_id)
-        sources = research_handler.get_sources(session_id) or []
-        query = ""
-
         path = Path("data/deep_research") / f"{session_id}.json"
+        disk: dict = {}
         if path.exists():
             try:
                 disk = json.loads(path.read_text(encoding="utf-8"))
-                if not result:
-                    result = disk.get("result")
-                if not sources:
-                    sources = disk.get("sources", []) or []
-                query = disk.get("query", "") or ""
+                if disk.get("owner") and disk.get("owner") != user:
+                    raise HTTPException(404, "Research not found")
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.warning(f"Could not read research JSON for spinoff: {e}")
 
+        result = research_handler.get_result(session_id)
         if not result:
+            result = disk.get("result") or disk.get("raw_report") or ""
+        sources = research_handler.get_sources(session_id) or disk.get("sources") or []
+        raw_findings = research_handler.get_raw_findings(session_id) or disk.get("raw_findings") or []
+        query = disk.get("query", "") or ""
+
+        if not (result or "").strip():
             raise HTTPException(404, "No research result available for this session")
 
         # Inherit endpoint/model/headers from the source session when possible.
@@ -605,20 +609,32 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         except Exception:
             logger.debug("session_created event dispatch failed", exc_info=True)
 
-        # Build the priming system message — report only, no sources injected.
-        # The user can open the visual report for source details; keeping sources
-        # out of the chat context saves tokens and avoids the AI fabricating
-        # citations.
+        # Build the priming system message — synthesized report plus per-source
+        # summaries so follow-up chat can cite specific evidence, not just the
+        # high-level write-up shown in the UI.
         date_str = datetime.utcnow().strftime("%Y-%m-%d")
         primer = (
             f"[Research context — {date_str}]\n\n"
             f"The user previously ran a deep research investigation. Use the "
-            f"report below as your primary knowledge base when answering "
-            f"follow-up questions. If the user asks something not covered, "
-            f"say so plainly rather than guessing.\n\n"
+            f"report and source summaries below as your primary knowledge base "
+            f"when answering follow-up questions. If the user asks something "
+            f"not covered, say so plainly rather than guessing.\n\n"
             f"=== ORIGINAL QUERY ===\n{query or '(not recorded)'}\n\n"
             f"=== REPORT ===\n{result}"
         )
+        if raw_findings:
+            lines = ["\n\n=== SOURCE SUMMARIES ==="]
+            for i, finding in enumerate(raw_findings[:25], 1):
+                title = (finding.get("title") or "Untitled").strip()
+                summary = (finding.get("summary") or "").strip()
+                url = (finding.get("url") or "").strip()
+                block = f"\n[{i}] {title}"
+                if url:
+                    block += f"\nURL: {url}"
+                if summary:
+                    block += f"\n{summary[:2000]}"
+                lines.append(block)
+            primer += "".join(lines)
 
         from core.models import ChatMessage
         new_sess.add_message(ChatMessage(

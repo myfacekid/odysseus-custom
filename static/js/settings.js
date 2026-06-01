@@ -1507,6 +1507,107 @@ async function initResearchSettings() {
   });
 }
 
+/* ── Zotero Library (AI tab, per-user) ── */
+async function initZoteroSettings() {
+  var uidInput = el('set-zoteroUserId');
+  var keyInput = el('set-zoteroApiKey');
+  var includeCb = el('set-zoteroIncludeResearch');
+  var msg = el('set-zoteroMsg');
+  var saveBtn = el('set-zoteroSave');
+  var testBtn = el('set-zoteroTest');
+  var clearBtn = el('set-zoteroClear');
+  if (!uidInput || !saveBtn) return;
+
+  async function loadConfig() {
+    try {
+      var res = await fetch('/api/zotero/config', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      var cfg = await res.json();
+      if (cfg.user_id) uidInput.value = cfg.user_id;
+      if (cfg.api_key_masked) keyInput.placeholder = cfg.has_api_key ? ('Current: ' + cfg.api_key_masked) : 'API key';
+      if (includeCb) includeCb.checked = cfg.include_in_research !== false;
+      if (cfg.configured) {
+        msg.textContent = 'Connected as user ' + cfg.user_id;
+        msg.style.color = 'var(--fg)';
+      } else {
+        msg.textContent = 'Not connected — enter User ID + API key, then Save';
+        msg.style.color = 'color-mix(in srgb, var(--fg) 55%, transparent)';
+      }
+    } catch (e) { console.warn('Failed to load Zotero config', e); }
+  }
+  await loadConfig();
+
+  saveBtn.addEventListener('click', async function() {
+    msg.textContent = 'Saving…';
+    try {
+      var body = {
+        user_id: uidInput.value.trim(),
+        include_in_research: includeCb ? !!includeCb.checked : true,
+      };
+      if (keyInput.value.trim()) body.api_key = keyInput.value.trim();
+      var res = await fetch('/api/zotero/config', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Save failed');
+      keyInput.value = '';
+      keyInput.placeholder = data.api_key_masked ? ('Current: ' + data.api_key_masked) : 'API key';
+      msg.textContent = 'Saved';
+      msg.style.color = 'var(--fg)';
+    } catch (e) {
+      msg.textContent = '✗ ' + (e.message || e);
+      msg.style.color = 'var(--red)';
+    }
+  });
+
+  testBtn?.addEventListener('click', async function() {
+    msg.textContent = 'Testing…';
+    try {
+      var body = {
+        user_id: uidInput.value.trim(),
+        include_in_research: includeCb ? !!includeCb.checked : true,
+      };
+      if (keyInput.value.trim()) body.api_key = keyInput.value.trim();
+      var res = await fetch('/api/zotero/test', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Test failed');
+      var extra = '';
+      if (data.sample_titles && data.sample_titles.length) {
+        extra = ' — e.g. ' + data.sample_titles[0].slice(0, 48);
+      } else if (data.info && data.info.total === 0) {
+        extra = ' — library is empty; add items in Zotero and sync';
+      }
+      msg.textContent = '✓ ' + (data.message || 'Connected') + extra;
+      msg.style.color = 'var(--fg)';
+    } catch (e) {
+      msg.textContent = '✗ ' + (e.message || e);
+      msg.style.color = 'var(--red)';
+    }
+  });
+
+  clearBtn?.addEventListener('click', async function() {
+    if (!await window.styledConfirm('Remove Zotero credentials from this account?', { confirmText: 'Clear', danger: true })) return;
+    try {
+      await fetch('/api/zotero/config/clear', { method: 'POST', credentials: 'same-origin' });
+      uidInput.value = '';
+      keyInput.value = '';
+      keyInput.placeholder = 'API key';
+      msg.textContent = 'Cleared';
+      msg.style.color = 'var(--fg)';
+    } catch (e) {
+      msg.textContent = '✗ Clear failed';
+      msg.style.color = 'var(--red)';
+    }
+  });
+}
+
 /* ── Deep Research Search (Search tab) ── */
 async function initResearchSearchSettings() {
   var searchSel = el('set-researchSearch');
@@ -1631,8 +1732,8 @@ function initAppearance() {
   modalEl.querySelectorAll('[data-privacy-key]').forEach(function(chk) {
     chk.addEventListener('change', function() {
       if (chk.dataset.privacyKey !== 'sensitive-blur') return;
-      localStorage.setItem('odysseus-sensitive-blur', chk.checked ? 'on' : 'off');
-      window.dispatchEvent(new CustomEvent('odysseus-sensitive-blur-change', {
+      localStorage.setItem('nobody-sensitive-blur', chk.checked ? 'on' : 'off');
+      window.dispatchEvent(new CustomEvent('nobody-sensitive-blur-change', {
         detail: { enabled: chk.checked }
       }));
     });
@@ -1641,7 +1742,7 @@ function initAppearance() {
   var resetBtn = el('set-uiVisResetBtn');
   if (resetBtn) {
     resetBtn.addEventListener('click', function() {
-      localStorage.removeItem('odysseus-ui-visibility');
+      localStorage.removeItem('nobody-ui-visibility');
       syncAppearanceCheckboxes();
       syncPrivacyCheckboxes();
       window.applyUIVis({});
@@ -1660,7 +1761,7 @@ function syncAppearanceCheckboxes() {
 
 function syncPrivacyCheckboxes() {
   modalEl.querySelectorAll('[data-privacy-key="sensitive-blur"]').forEach(function(chk) {
-    chk.checked = localStorage.getItem('odysseus-sensitive-blur') === 'on';
+    chk.checked = localStorage.getItem('nobody-sensitive-blur') === 'on';
   });
 }
 
@@ -1950,7 +2051,7 @@ async function initShortcuts() {
         body: JSON.stringify({ keybinds }),
       });
       // Update global keybinds so they take effect immediately
-      window._odysseusKeybinds = keybinds;
+      window._nobodyKeybinds = keybinds;
       if (uiModule && uiModule.showToast) uiModule.showToast('Shortcut saved');
     } catch (e) {
       console.error('Failed to save keybinds:', e);
@@ -2128,12 +2229,12 @@ function initAccount() {
       // SECURITY: wipe all client-side state on logout so the next user that
       // signs in on this browser doesn't inherit the previous account's
       // session id, last-used model, draft chat input, or any cached lists.
-      // Keep "odysseus-last-user" so the login form remembers the username
+      // Keep "nobody-last-user" so the login form remembers the username
       // (if "Remember me" was on). Without this the chat composer pre-loaded
       // the previous user's last model into a fresh session, which read as
       // cross-account leakage.
       try {
-        const _keepKeys = new Set(['odysseus-last-user']);
+        const _keepKeys = new Set(['nobody-last-user']);
         const _toRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
@@ -2163,6 +2264,7 @@ function initAll() {
   initSttSettings();
   initSearchSettings();
   initResearchSettings();
+  initZoteroSettings();
   initResearchSearchSettings();
   initAgentSettings();
   initAppearance();
@@ -2177,7 +2279,7 @@ function initAll() {
 
 function notifyIntegrationsChanged() {
   try {
-    window.dispatchEvent(new CustomEvent('odysseus-integrations-changed'));
+    window.dispatchEvent(new CustomEvent('nobody-integrations-changed'));
   } catch (_) {}
 }
 
@@ -2363,7 +2465,7 @@ async function initReminderSettings() {
   // regardless of channel). The hint should make that clear so
   // users don't think they have to choose between channels.
   const CHANNEL_HINTS = {
-    browser: 'Reminders appear as browser notifications inside Odysseus.',
+    browser: 'Reminders appear as browser notifications inside Nobody.',
     email: 'Reminders are emailed AND shown as a browser notification.',
     ntfy: 'Reminders are pushed via ntfy AND shown as a browser notification.',
   };
@@ -2371,7 +2473,7 @@ async function initReminderSettings() {
   applyReminderChannelAvailability();
   if (!channelSel.dataset.integrationRefreshWired) {
     channelSel.dataset.integrationRefreshWired = '1';
-    window.addEventListener('odysseus-integrations-changed', () => {
+    window.addEventListener('nobody-integrations-changed', () => {
       refreshReminderChannelAvailability().catch(e => console.warn('Failed to refresh reminder channels', e));
     });
   }
@@ -3313,7 +3415,7 @@ async function initUnifiedIntegrations() {
       if (ntfyHint) {
         ntfyHint.style.display = isNtfy ? 'block' : 'none';
         if (isNtfy) {
-          ntfyHint.innerHTML = 'Enter the ntfy server URL Odysseus can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.';
+          ntfyHint.innerHTML = 'Enter the ntfy server URL Nobody can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.';
         }
       }
       if (url) {
@@ -3527,7 +3629,7 @@ async function initUnifiedIntegrations() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = format === 'csv' ? 'odysseus-contacts.csv' : 'odysseus-contacts.vcf';
+        a.download = format === 'csv' ? 'nobody-contacts.csv' : 'nobody-contacts.vcf';
         document.body.appendChild(a);
         a.click();
         a.remove();

@@ -1107,15 +1107,21 @@ if (document.body.classList.contains('category-comparison')) {{
 # ---------------------------------------------------------------------------
 
 def _category_css(category: Optional[str]) -> str:
-    if not category:
-        return ""
+    category = category or "academic"
     # Per-category palette overrides — applied BEFORE the structural rules so
-    # everything that reads --accent / --aurora-* automatically retints. The
-    # default (no category) keeps the warm terracotta defined in :root.
+    # everything that reads --accent / --aurora-* automatically retints.
     palettes = """
 /* ── Category palettes ───────────────────────────────────
    Override the accent + aurora vars per category so each report
    type has a distinct visual identity. */
+body.category-academic {
+  --accent: #2c5282;
+  --accent-light: #4a7ab8;
+  --accent-bg: rgba(44,82,130,0.07);
+  --aurora-a: rgba(44,82,130,0.11);
+  --aurora-b: rgba(90,120,160,0.06);
+  --aurora-c: rgba(64,98,128,0.06);
+}
 body.category-product {
   --accent: #2a8a8c;
   --accent-light: #4ab0b2;
@@ -1149,6 +1155,13 @@ body.category-landscape {
   --aurora-c: rgba(122,76,184,0.05);
 }
 @media (prefers-color-scheme: dark) {
+  body.category-academic {
+    --accent: #7eb3e8; --accent-light: #a8cdf0;
+    --accent-bg: rgba(126,179,232,0.10);
+    --aurora-a: rgba(126,179,232,0.13);
+    --aurora-b: rgba(160,190,220,0.07);
+    --aurora-c: rgba(125,180,224,0.08);
+  }
   body.category-product {
     --accent: #5cc8cb; --accent-light: #8fdde0;
     --accent-bg: rgba(92,200,203,0.10);
@@ -1688,6 +1701,7 @@ def generate_visual_report(
 ) -> str:
     sources = sources or []
     stats = stats or {}
+    category = category or "academic"
     hidden_images_set = set(hidden_images or [])
 
     # Strip thinking artifacts

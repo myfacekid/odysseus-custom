@@ -49,13 +49,15 @@ try { _settingsCollapsed = localStorage.getItem(_COLLAPSE_KEY) === '1'; } catch 
 
 function _saveSettingsToStorage() {
   try {
-    const activeCat = document.querySelector('.research-cat.active');
+    const preprintsEl = document.getElementById('research-include-preprints');
+    const zoteroEl = document.getElementById('research-include-zotero');
     localStorage.setItem(_SETTINGS_KEY, JSON.stringify({
       max_rounds: document.getElementById('research-rounds')?.value || '0',
       search_provider: document.getElementById('research-search-provider')?.value || '',
       endpoint_id: document.getElementById('research-endpoint')?.value || '',
       model: document.getElementById('research-model')?.value || '',
-      category: activeCat?.dataset.cat || '',
+      include_preprints: preprintsEl ? !!preprintsEl.checked : true,
+      include_zotero: zoteroEl ? !!zoteroEl.checked : true,
     }));
   } catch {}
 }
@@ -338,7 +340,7 @@ function _buildPanelHTML() {
 
   return `
     <div class="modal-header research-pane-header">
-      <h4><span style="position:relative;top:-1px;left:6px;display:inline-flex;vertical-align:middle;">${_searchIcon}</span><span style="margin-left:6px;">Deep Research</span></h4>
+      <h4><span style="position:relative;top:-1px;left:6px;display:inline-flex;vertical-align:middle;">${_searchIcon}</span><span style="margin-left:6px;">Academic Research</span></h4>
       <div class="research-pane-header-actions">
         <button id="research-panel-minimize" class="modal-minimize-btn" type="button" title="Minimize"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="18" x2="19" y2="18"/></svg></button>
         <button id="research-panel-close" class="close-btn" title="Close">&#x2716;</button>
@@ -351,17 +353,18 @@ function _buildPanelHTML() {
         </div>
         <p class="memory-desc doclib-desc" style="margin-top:6px;display:flex;align-items:center;gap:6px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.8;"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h4v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>
-          <span>Multi-step web research with an LLM-in-the-loop agent</span>
+          <span>Scholarly literature synthesis — searches papers, reviews, and primary sources</span>
         </p>
         <div id="research-no-past-hint" class="memory-desc doclib-desc" style="display:none;margin-top:-2px;font-size:11px;opacity:0.7;">All past research found in <button type="button" class="research-library-link">Library, Research</button></div>
-        <textarea id="research-query" class="research-query" placeholder="e.g. Trace Odysseus's ten-year journey home from Troy — every island, monster, and detour, and why each one cost him" rows="4"></textarea>
-        <div class="research-category-row" id="research-category-row">
-          <button class="research-cat active" data-cat="" title="LLM auto-detects the best format">Auto</button>
-          <button class="research-cat" data-cat="product">Product</button>
-          <button class="research-cat" data-cat="comparison">Compare</button>
-          <button class="research-cat" data-cat="howto">How-to</button>
-          <button class="research-cat" data-cat="factcheck">Fact-check</button>
-        </div>
+        <textarea id="research-query" class="research-query" placeholder="e.g. What is the evidence for intermittent fasting on cardiovascular outcomes in adults? Include RCTs and systematic reviews." rows="4"></textarea>
+        <label class="research-preprint-toggle" id="research-preprint-row" title="When off, preprint servers (arXiv, bioRxiv, medRxiv) are excluded from search results">
+          <input type="checkbox" id="research-include-preprints" checked>
+          <span>Include preprints (arXiv, bioRxiv, medRxiv)</span>
+        </label>
+        <label class="research-preprint-toggle" id="research-zotero-row" title="Search your Zotero cloud library and extract PDFs when configured in Settings">
+          <input type="checkbox" id="research-include-zotero" checked>
+          <span>Include my Zotero library</span>
+        </label>
         <button id="research-settings-toggle" class="research-settings-toggle${chevronCls}">
           Settings<span class="research-settings-chevron">${_chevronIcon}</span>
         </button>
@@ -416,12 +419,6 @@ function _dismissKeyboard(input) {
   } catch {}
 }
 
-/** Reset the category selector back to "Auto" (called after each start). */
-function _resetCategoryToAuto() {
-  document.querySelectorAll('.research-cat').forEach(b =>
-    b.classList.toggle('active', (b.dataset.cat || '') === ''));
-}
-
 function _wireEvents(pane) {
   pane.querySelector('#research-panel-close').addEventListener('click', closePanel);
   pane.querySelector('#research-panel-minimize')?.addEventListener('click', () => {
@@ -432,13 +429,6 @@ function _wireEvents(pane) {
   });
   pane.querySelector('#research-start-btn').addEventListener('click', _handleStart);
   pane.querySelector('#research-add-btn').addEventListener('click', _handleAdd);
-
-  pane.querySelectorAll('.research-cat').forEach(btn => {
-    btn.addEventListener('click', () => {
-      pane.querySelectorAll('.research-cat').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  });
 
   pane.querySelector('#research-settings-toggle').addEventListener('click', () => {
     const body = document.getElementById('research-settings-body');
@@ -465,14 +455,15 @@ function _wireEvents(pane) {
 }
 
 function _readSettings() {
-  const activeCat = document.querySelector('.research-cat.active');
-  const category = activeCat?.dataset.cat || undefined;
+  const preprintsEl = document.getElementById('research-include-preprints');
+  const zoteroEl = document.getElementById('research-include-zotero');
   const settings = {
     max_rounds: parseInt(document.getElementById('research-rounds')?.value || '0', 10),
     search_provider: document.getElementById('research-search-provider')?.value || undefined,
     endpoint_id: document.getElementById('research-endpoint')?.value || undefined,
     model: document.getElementById('research-model')?.value || undefined,
-    category: category || undefined,
+    include_preprints: preprintsEl ? !!preprintsEl.checked : true,
+    include_zotero: zoteroEl ? !!zoteroEl.checked : true,
   };
   const epSel = document.getElementById('research-endpoint');
   if (epSel && epSel.value) {
@@ -503,13 +494,12 @@ function _editJob(job) {
     queryEl.focus();
     queryEl.setSelectionRange(queryEl.value.length, queryEl.value.length);
   }
-  // Restore category
-  const cat = job.category || '';
-  document.querySelectorAll('.research-cat').forEach(b => {
-    b.classList.toggle('active', b.dataset.cat === cat);
-  });
-  // Restore settings
+  // Restore preprint toggle and settings
   const s = job.settings || {};
+  const preprintsEl = document.getElementById('research-include-preprints');
+  if (preprintsEl && s.include_preprints !== undefined) preprintsEl.checked = !!s.include_preprints;
+  const zoteroEl = document.getElementById('research-include-zotero');
+  if (zoteroEl && s.include_zotero !== undefined) zoteroEl.checked = !!s.include_zotero;
   const roundsEl = document.getElementById('research-rounds');
   if (roundsEl && s.max_rounds) roundsEl.value = s.max_rounds;
   const spEl = document.getElementById('research-search-provider');
@@ -535,7 +525,6 @@ async function _handleStart() {
   const queuedCount = jobs.getJobs().filter(j => j.status === 'queued').length;
   if (queuedCount > 1) {
     if (query) { _saveSettingsToStorage(); jobs.addToQueue(query, _readSettings()); queryEl.value = ''; }
-    _resetCategoryToAuto();
     if (window.innerWidth <= 768) _dismissKeyboard(queryEl);
     const total = jobs.getJobs().filter(j => j.status === 'queued').length;
     _promptParallelOrSequential(total, startBtn);
@@ -574,7 +563,6 @@ async function _handleStart() {
   const _mobile = window.innerWidth <= 768;
   if (!query) {
     jobs.startAllQueued();
-    _resetCategoryToAuto();
     if (_mobile) _dismissKeyboard(queryEl);
     return;
   }
@@ -583,7 +571,6 @@ async function _handleStart() {
   queryEl.value = '';
   // Mobile: drop the keyboard after sending; desktop: keep focus for fast follow-ups.
   if (_mobile) _dismissKeyboard(queryEl); else queryEl.focus();
-  _resetCategoryToAuto();
   jobs.startJob(query, settings).catch((e) => {
     if (typeof uiModule !== 'undefined' && uiModule?.showError) uiModule.showError('Failed to start research');
     queryEl.value = query; // restore so user can retry
@@ -593,10 +580,13 @@ async function _handleStart() {
 function _restoreSavedSettings() {
   const saved = _loadSettingsFromStorage();
   if (!saved) return;
-  if (saved.category !== undefined) {
-    document.querySelectorAll('.research-cat').forEach(b => {
-      b.classList.toggle('active', b.dataset.cat === saved.category);
-    });
+  const preprintsEl = document.getElementById('research-include-preprints');
+  if (preprintsEl && saved.include_preprints !== undefined) {
+    preprintsEl.checked = !!saved.include_preprints;
+  }
+  const zoteroEl = document.getElementById('research-include-zotero');
+  if (zoteroEl && saved.include_zotero !== undefined) {
+    zoteroEl.checked = !!saved.include_zotero;
   }
   // Rounds intentionally defaults to "Auto" on every open — don't restore.
   // Users can pick a specific cap each time if needed.
@@ -880,6 +870,7 @@ function _buildJobCard(job) {
   card.className = `research-job-card ${job.status}${job._fromLibrary ? ' from-library' : ''}`;
   card.dataset.jobId = job.id;
   if (job.category) card.dataset.category = job.category;
+  else card.dataset.category = 'academic';
 
   const elapsed = jobs.formatElapsed(job.elapsed || 0);
   const isExpanded = _expandedJobId === job.id;
@@ -894,7 +885,7 @@ function _buildJobCard(job) {
     const meta = [mName, epName, roundsLabel].filter(Boolean).join(' -- ');
     card.innerHTML = `
       <div class="research-job-header">
-        <span class="research-job-query">${_esc(job.query)}</span>${job.category ? `<span class="research-cat-badge">${_esc(job.category)}</span>` : ""}
+        <span class="research-job-query">${_esc(job.query)}</span><span class="research-cat-badge research-cat-standard">Academic</span>
       </div>
       <div class="research-job-queued-meta">${_esc(meta)}</div>
       <div class="research-job-actions">
@@ -924,7 +915,7 @@ function _buildJobCard(job) {
     const pct = Math.min(100, Math.round((round / barCap) * 100));
     card.innerHTML = `
       <div class="research-job-header">
-        <span class="research-job-query">${_esc(job.query)}</span>${job.category ? `<span class="research-cat-badge">${_esc(job.category)}</span>` : ""}
+        <span class="research-job-query">${_esc(job.query)}</span><span class="research-cat-badge research-cat-standard">Academic</span>
         ${modelTag}
         <span class="research-job-time">${elapsed}</span>
         <button class="research-synapse-toggle${_synapseMinimized ? ' active' : ''}" title="${_synapseMinimized ? 'Show visualization' : 'Minimize visualization'}">${_synapseMinimized ? _vizExpandIcon : _vizCollapseIcon}</button>
@@ -980,7 +971,7 @@ function _buildJobCard(job) {
     if (failed) card.classList.add('research-job-failed');
     const doneBadge = failed
       ? `<span class="research-cat-badge research-cat-failed">${_cancelIcon} no results</span>`
-      : (job.category ? `<span class="research-cat-badge">${_esc(job.category)}</span>` : `<span class="research-cat-badge research-cat-standard">standard</span>`);
+      : `<span class="research-cat-badge research-cat-standard">Academic</span>`;
     const failNote = failed
       ? `<div class="research-job-failnote">Couldn't extract anything — try rephrasing the question, or switch the search engine in Settings.</div>`
       : '';
@@ -995,6 +986,7 @@ function _buildJobCard(job) {
         <button class="research-job-action" data-action="copy" title="Copy report to clipboard">${_copyIcon}</button>
         <button class="research-job-action" data-action="chat" title="Open follow-up chat with this research as context">${_chatIcon} Discuss</button>
         <button class="research-job-action research-job-action-report" data-action="report" title="Visual report">${_externalIcon} Visual Report</button>
+        <button class="research-job-action" data-action="zotero" title="Export research citations to your Zotero library">Export Citations to Zotero</button>
         <button class="research-job-action research-job-action-dim" data-action="dismiss" title="Clear from list">${_cancelIcon}</button>
         <button class="research-job-action research-job-action-dim" data-action="delete" title="Delete from disk">${_trashIcon} Delete</button>
       </div>
@@ -1020,6 +1012,28 @@ function _buildJobCard(job) {
       e.stopPropagation();
       _chatAboutResearch(job.id, e.currentTarget);
     });
+    card.querySelector('[data-action="zotero"]')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      const orig = btn.textContent;
+      btn.textContent = 'Exporting…';
+      btn.disabled = true;
+      try {
+        const res = await fetch(`${_apiBase}/api/zotero/export`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: job.id }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Export failed');
+        btn.textContent = `Saved ${data.created || 0}`;
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+      } catch (err) {
+        btn.textContent = 'Failed';
+        btn.title = err.message || 'Export failed';
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; btn.title = 'Export research citations to your Zotero library'; }, 2500);
+      }
+    });
     card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (window.styledConfirm) {
@@ -1038,7 +1052,7 @@ function _buildJobCard(job) {
     const errMsg = job.errorMsg ? `<div class="research-job-error">${_esc(job.errorMsg)}</div>` : '';
     card.innerHTML = `
       <div class="research-job-header">
-        <span class="research-job-query">${_esc(job.query)}</span>${job.category ? `<span class="research-cat-badge">${_esc(job.category)}</span>` : ""}
+        <span class="research-job-query">${_esc(job.query)}</span><span class="research-cat-badge research-cat-standard">Academic</span>
         <span class="research-job-status">${job.status}</span>
       </div>
       ${errMsg}
@@ -1063,24 +1077,16 @@ function _buildJobCard(job) {
 }
 
 const _CAT_ICONS = {
-  product:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M7 8V5a5 5 0 0 1 10 0v3"/></svg>',
-  comparison: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v18"/><path d="M16 3v18"/><path d="M3 8h5"/><path d="M16 16h5"/></svg>',
-  howto:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
-  landscape:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
-  factcheck:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>',
+  academic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M8 7h8"/><path d="M8 11h6"/></svg>',
 };
 
 const _CAT_LABELS = {
-  product: 'Product',
-  comparison: 'Comparison',
-  howto: 'How-to Guide',
-  landscape: 'Landscape',
-  factcheck: 'Fact-check',
+  academic: 'Academic Literature Review',
 };
 
 function _renderResult(job) {
   if (!job.result) return '<div class="research-job-loading">Loading result...</div>';
-  const cat = job.category || '';
+  const cat = job.category || 'academic';
   const catIcon = _CAT_ICONS[cat] || '';
   const catLabel = _CAT_LABELS[cat] || '';
 
@@ -1198,8 +1204,9 @@ async function _chatAboutResearch(researchId, btn) {
   if (!researchId) return;
   const origLabel = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = `${_chatIcon} Creating…`; }
+  const sm = window.sessionModule || _sessionModule;
   try {
-    const res = await fetch(`${_apiBase}/api/research/spinoff/${researchId}`, {
+    const res = await fetch(`${_apiBase}/api/research/spinoff/${encodeURIComponent(researchId)}`, {
       method: 'POST', credentials: 'same-origin',
     });
     if (!res.ok) {
@@ -1208,21 +1215,21 @@ async function _chatAboutResearch(researchId, btn) {
       throw new Error(detail || `HTTP ${res.status}`);
     }
     const payload = await res.json();
-    if (_sessionModule && _sessionModule.selectSession && payload.session_id) {
-      if (_sessionModule.loadSessions) await _sessionModule.loadSessions().catch(() => {});
-      await _sessionModule.selectSession(payload.session_id);
-      closePanel();
+    closePanel();
+    if (sm && sm.selectSession && payload.session_id) {
+      if (sm.loadSessions) await sm.loadSessions().catch(() => {});
+      await sm.selectSession(payload.session_id);
     } else if (payload.session_id) {
       window.location.hash = '#' + payload.session_id;
       window.location.reload();
     } else {
-      // 200 OK but no session_id — server contract violation. Don't leave
-      // the button stuck on 'Creating…'; surface the failure instead.
       throw new Error('Server returned no session id');
     }
   } catch (e) {
     if (btn) { btn.disabled = false; btn.innerHTML = origLabel; }
-    alert('Could not start follow-up chat: ' + e.message);
+    const msg = 'Could not start follow-up chat: ' + (e.message || e);
+    if (window.uiModule && window.uiModule.showError) window.uiModule.showError(msg);
+    else alert(msg);
   }
 }
 

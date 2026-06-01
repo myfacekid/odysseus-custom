@@ -917,16 +917,23 @@ function _appendReportButton(container, sessionId) {
     chatBtn.disabled = true;
     chatBtn.innerHTML = CHAT_ABOUT_ICON + ' Creating…';
     try {
-      var res = await fetch(apiBase + '/api/research/spinoff/' + sessionId, { method: 'POST' });
+      var res = await fetch(apiBase + '/api/research/spinoff/' + encodeURIComponent(sessionId), {
+        method: 'POST', credentials: 'same-origin',
+      });
       if (!res.ok) {
         var detail = '';
         try { detail = (await res.json()).detail || ''; } catch {}
         throw new Error(detail || ('HTTP ' + res.status));
       }
       var payload = await res.json();
-      if (window.sessionModule && payload.session_id) {
-        await window.sessionModule.loadSessions().catch(() => {});
+      if (window.sessionModule && window.sessionModule.selectSession && payload.session_id) {
+        await window.sessionModule.loadSessions().catch(function() {});
         await window.sessionModule.selectSession(payload.session_id);
+      } else if (payload.session_id) {
+        window.location.hash = '#' + payload.session_id;
+        window.location.reload();
+      } else {
+        throw new Error('Server returned no session id');
       }
     } catch (e) {
       chatBtn.disabled = false;

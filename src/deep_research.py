@@ -34,145 +34,238 @@ def current_date_context() -> str:
         f"year inferred from training data.\n\n"
     )
 
+
+ACADEMIC_CATEGORY = "academic"
+
+# Host fragments used to detect preprint servers (excluded when include_preprints=False).
+PREPRINT_HOST_FRAGMENTS = (
+    "arxiv.org",
+    "biorxiv.org",
+    "medrxiv.org",
+    "chemrxiv.org",
+    "ssrn.com",
+    "researchsquare.com",
+    "preprints.org",
+    "asapbio.org",
+    "osf.io/preprints",
+)
+
+ACADEMIC_URL_MARKERS = (
+    "doi.org",
+    "pubmed",
+    "ncbi.nlm.nih.gov",
+    "scholar.google",
+    "semanticscholar.org",
+    "openalex.org",
+    "crossref.org",
+    "jstor.org",
+    "springer.com",
+    "sciencedirect.com",
+    "wiley.com",
+    "nature.com",
+    "science.org",
+    "cell.com",
+    "plos.org",
+    "ieee.org",
+    "acm.org",
+    "journals.",
+    ".edu/",
+    ".edu?",
+    "researchgate.net",
+    "arxiv.org",
+    "systematic review",
+    "meta-analysis",
+    "peer-reviewed",
+    "journal",
+)
+
+
+def _is_preprint_url(url: str) -> bool:
+    lower = (url or "").lower()
+    return any(h in lower for h in PREPRINT_HOST_FRAGMENTS)
+
+
+def _is_academic_url(url: str) -> bool:
+    lower = (url or "").lower()
+    if any(m in lower for m in ACADEMIC_URL_MARKERS):
+        return True
+    if lower.endswith(".pdf"):
+        return True
+    return False
+
+
+def _academic_result_score(result: Dict, include_preprints: bool) -> int:
+    url = (result.get("url") or "").lower()
+    title = (result.get("title") or "").lower()
+    score = 0
+    if "doi.org" in url or "pubmed" in url or "ncbi.nlm.nih.gov" in url:
+        score += 12
+    if "systematic review" in title or "meta-analysis" in title or "meta analysis" in title:
+        score += 10
+    if "review" in title and "systematic" in title:
+        score += 8
+    if _is_academic_url(url):
+        score += 4
+    if _is_preprint_url(url):
+        score += 3 if include_preprints else -15
+    if any(x in url for x in ("wikipedia.org", "reddit.com", "quora.com", "medium.com", "blog.")):
+        score -= 8
+    return score
+
+
+def filter_and_rank_academic_results(
+    results: List[Dict],
+    include_preprints: bool = True,
+) -> List[Dict]:
+    """Prefer scholarly URLs; optionally exclude preprint hosts."""
+    if not results:
+        return []
+
+    academic = []
+    for r in results:
+        url = r.get("url", "")
+        if not url:
+            continue
+        if not _is_academic_url(url):
+            continue
+        if not include_preprints and _is_preprint_url(url):
+            continue
+        academic.append(r)
+
+    pool = academic
+    if not pool:
+        # Relax: allow any result except blocked preprints when disabled.
+        pool = [
+            r for r in results
+            if r.get("url") and (include_preprints or not _is_preprint_url(r.get("url", "")))
+        ]
+    if not pool:
+        pool = list(results)
+
+    return sorted(pool, key=lambda r: _academic_result_score(r, include_preprints), reverse=True)
+
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
 RESEARCH_PLAN_PROMPT = """\
-You are a research strategist. Before searching, analyze this question and create a research plan.
+You are an academic research strategist preparing a scholarly literature review plan.
 
-**Question:** {question}
+**Research question:** {question}
 
-Break this question down:
-1. What are the key sub-topics that need to be covered for a comprehensive answer?
-2. What specific data points, facts, or perspectives should we look for?
-3. What would a complete, high-quality answer include?
+Break this question down for rigorous academic investigation:
+1. What sub-questions must be answered from primary literature?
+2. What study types matter (systematic reviews, RCTs, meta-analyses, cohort studies)?
+3. What would a scientifically sound synthesis include — including gaps and limitations?
 
 Return a JSON object with:
-- "sub_questions": Array of 3-6 specific sub-questions to investigate
-- "key_topics": Array of key topics/angles to cover
-- "success_criteria": One sentence describing what a complete answer looks like
+- "sub_questions": Array of 3-6 specific scholarly sub-questions
+- "key_topics": Array of key concepts, methods, or populations to cover
+- "success_criteria": One sentence describing what a complete academic answer looks like
 
 Example:
 {{
-  "sub_questions": ["What is the cost of living in X?", "How is the healthcare system?"],
-  "key_topics": ["economy", "healthcare", "safety", "culture"],
-  "success_criteria": "A balanced comparison covering cost, quality of life, and practical considerations."
+  "sub_questions": ["What RCTs exist on X?", "What do meta-analyses conclude about Y?"],
+  "key_topics": ["mechanism", "effect size", "limitations", "conflicting evidence"],
+  "success_criteria": "A synthesis grounded in peer-reviewed sources with explicit uncertainty."
 }}
 """
 
 QUERY_GEN_PROMPT = """\
-You are a research assistant planning web searches.
+You are an academic research assistant planning scholarly web searches.
 
-**Original question:** {question}
+**Research question:** {question}
 
 **Research plan:**
 {research_plan}
 
-**What we know so far:**
+**Current synthesis:**
 {report}
 
 **Round:** {round_num}
 
-Generate {num_queries} focused search queries that will help answer the question.
+**Source policy:** {source_policy}
+
+Generate {num_queries} search queries to find scholarly sources (papers, reviews, guidelines).
+Prefer queries that surface: PubMed, Google Scholar, DOI pages, journal sites, university repositories.
+Use terms like "systematic review", "meta-analysis", "randomized controlled trial", or "peer-reviewed" when appropriate.
+Avoid blog, news, or SEO-oriented queries.
 {round_instruction}
 
 Return ONLY a JSON array of query strings, nothing else.
-Example: ["query one", "query two", "query three"]
+Example: ["systematic review X mechanism", "meta-analysis Y outcomes site:pubmed.ncbi.nlm.nih.gov"]
 """
 
 SYNTHESIZE_PROMPT = """\
-You are updating an evolving research report.
+You are updating an evolving **academic literature synthesis**.
 
-**Original question:** {question}
+**Research question:** {question}
 
-**Current report:**
+**Current synthesis:**
 {report}
 
 **New findings from this round:**
 {new_findings}
 
-Integrate the new findings into the existing report. Produce an updated, well-organized \
-report that answers the original question as completely as possible given all evidence so far. \
-Remove redundancy, resolve contradictions, and maintain logical flow. \
-Keep source URLs as inline citations where relevant.
+Integrate the new findings into the synthesis. Requirements:
+- Ground every factual claim in the cited sources — do not invent statistics or citations
+- Use numbered inline citations like [1], [2] consistently (reuse numbers for the same source)
+- Note study design and evidence quality where relevant (RCT vs observational, review vs single study)
+- Flag conflicting results and preprints vs peer-reviewed sources
+- Resolve contradictions explicitly; do not gloss over disagreement
+- Maintain scholarly tone — precise, cautious, evidence-first
 
-Write only the updated report — no preamble or meta-commentary.
+Write only the updated synthesis — no preamble or meta-commentary.
 """
 
 STOP_PROMPT = """\
-You are deciding whether a research report is comprehensive enough.
+You are deciding whether an academic literature synthesis is comprehensive enough.
 
-**Original question:** {question}
+**Research question:** {question}
 
-**Current report:**
+**Current synthesis:**
 {report}
 
 **Rounds completed:** {round_num}
 
-Based on the report so far, do we have enough information to answer the question \
-comprehensively?  Consider:
-- Are the key aspects of the question addressed?
-- Are there obvious gaps or unanswered sub-questions?
-- Is the evidence sufficient and from multiple sources?
+Consider scholarly completeness:
+- Are key sub-questions addressed with primary or review-level evidence?
+- Are there obvious gaps (missing study types, populations, or time periods)?
+- Is evidence from multiple independent sources, not a single blog or secondary summary?
+- Are limitations and uncertainty acknowledged?
 
 Reply with ONLY "YES" or "NO" followed by a brief one-sentence reason.
-Example: "YES — The report covers all major aspects with evidence from multiple sources."
-Example: "NO — We still lack information about the economic impact."
+Example: "YES — Major sub-questions are covered with multiple peer-reviewed sources and limitations noted."
+Example: "NO — We still lack primary evidence on the mechanism and long-term outcomes."
 """
 
 FINAL_REPORT_PROMPT = """\
-Write a **long, detailed, comprehensive** research report answering this question:
+Write a rigorous **academic literature synthesis** answering this research question:
 
 **Question:** {question}
 
-**All collected evidence and analysis:**
+**Collected evidence and draft synthesis:**
 {report}
 
 Requirements:
-- Write at MINIMUM 1500 words — this should be a thorough, magazine-quality article
-- Use clear ## headings and ### subheadings to organize into logical sections
-- Each section should have multiple detailed paragraphs, not just bullet points
-- Synthesize and analyze the information — explain WHY things matter, draw comparisons, provide context
-- Include specific data points, numbers, and statistics from the evidence
-- Include source URLs as inline citations [like this](url)
-- Note where sources agree and where they disagree
-- Add a brief executive summary at the top
-- End with a clear conclusion that directly answers the question
-- Write in an engaging, informative style — not dry or robotic
+- Write at MINIMUM 1200 words — thorough but scientifically precise, not promotional
+- Structure with clear ## headings: Executive Summary, Background, Key Findings, Conflicting Evidence, \
+Limitations of the Evidence, Limitations of This Report, Conclusion, References
+- Use numbered inline citations [1], [2], etc. for every substantive claim
+- Include specific data (effect sizes, sample sizes, p-values) ONLY when present in the evidence — never invent numbers
+- Distinguish peer-reviewed sources from preprints where known
+- Note where evidence is strong, weak, or absent
+- End with a ## References section listing every cited source as:
+  [N] Author et al. (Year). Title. Venue/Journal. URL or DOI
+- Use cautious academic language — avoid overstating conclusions
 """
 
-CATEGORY_PROMPTS = {
-    "product": """IMPORTANT FORMAT OVERRIDE — this is a PRODUCT research report:
-- Structure as a RANKED LIST of products/options (best first)
-- For EACH product include: name as ### heading, approximate price, 2-3 sentence summary, **Pros:** bullet list, **Cons:** bullet list, **Where to buy:** URLs as links
-- Start with a quick-compare markdown table of top picks (columns: Name, Price, Best For, Rating)
-- End with a ## Verdict section picking Best Overall and Best Value
-- Still include source citations inline""",
-
-    "comparison": """IMPORTANT FORMAT OVERRIDE — this is a COMPARISON report:
-- Create a ## Comparison Table as a markdown table comparing ALL options across key criteria (rows = criteria, columns = options)
-- Use checkmarks, ratings, or short values in cells
-- Write a ## section per option with its strengths, weaknesses, and ideal use case
-- End with ## Best For verdicts (e.g., "**Best for small teams:** Option A because...")
-- Include a ## Shared Considerations section for things that apply to all options""",
-
-    "howto": """IMPORTANT FORMAT OVERRIDE — this is a HOW-TO guide:
-- Start with ## Quick Guide — a super concise numbered list (one line per step, no details, just the action). Example: 1. Install X  2. Run Y  3. Configure Z
-- Then ## Prerequisites listing what's needed before starting
-- Then the detailed steps: ## Step 1: ..., ## Step 2: ...
-- Each step should have a clear heading and detailed instructions
-- Use blockquotes (> ) for tips and warnings: > **Tip:** ... or > **Warning:** ...
-- End with ## Common Mistakes section
-- Add estimated time and difficulty level near the top""",
-
-    "factcheck": """IMPORTANT FORMAT OVERRIDE — this is a FACT-CHECK report:
-- Start with ## The Claim restating what's being checked
-- Create ## Evidence For and ## Evidence Against sections
-- Each piece of evidence should be a ### with source name, what it found, and how strong the evidence is
-- Include a ## Verdict section with one of: **Supported**, **Mixed Evidence**, or **Unsupported**
-- End with ## Nuance & Caveats for important context and limitations
-- Be balanced and cite sources for every claim""",
-}
+ACADEMIC_REPORT_OVERRIDE = """\
+IMPORTANT — this is exclusively an ACADEMIC research report:
+- Prioritize primary literature, systematic reviews, and meta-analyses over secondary summaries
+- Label preprints explicitly when used
+- Never cite a source not present in the collected evidence
+- The References section must match every [N] citation in the body
+"""
 
 # ---------------------------------------------------------------------------
 # DeepResearcher
@@ -203,12 +296,19 @@ class DeepResearcher:
         progress_callback: Optional[Callable] = None,
         search_provider: Optional[str] = None,
         category: Optional[str] = None,
+        include_preprints: bool = True,
+        include_zotero: bool = True,
+        owner: str = "",
     ):
         self.llm_endpoint = llm_endpoint
         self.llm_model = llm_model
         self.llm_headers = llm_headers
         self.search_provider_override = search_provider
-        self.category = category
+        self.category = ACADEMIC_CATEGORY
+        self.include_preprints = bool(include_preprints)
+        self.include_zotero = bool(include_zotero)
+        self.owner = owner or ""
+        self._zotero_keys_seen: Set[str] = set()
         self.max_rounds = max_rounds
         self.max_time = max_time
         self.max_urls_per_round = max_urls_per_round
@@ -269,15 +369,35 @@ class DeepResearcher:
             self._emit(phase="planning")
             self.research_plan = await self._create_plan(question)
             logger.info(f"Continuation plan: {self.research_plan[:200]}")
-        if not self.category and not prior_report:
-            self.category = await self._classify_category(question)
-            if self.category:
-                logger.info(f"Auto-detected category: {self.category}")
 
         if prior_urls:
             self.urls_fetched.update(prior_urls)
         self.findings = findings  # expose for handler
         consecutive_empty_rounds = 0
+
+        # Seed from the user's Zotero library (cloud API — works on any host).
+        if self.include_zotero and not prior_report:
+            if not self.owner:
+                logger.info("Zotero skipped: no research owner")
+            else:
+                try:
+                    from src.zotero_client import resolve_zotero_credentials
+                    if not resolve_zotero_credentials(self.owner):
+                        logger.info("Zotero skipped: not configured for user %s", self.owner)
+                        self._emit(
+                            phase="reading",
+                            source="zotero",
+                            zotero_status="not_configured",
+                            message="Zotero not configured — add User ID + API key in Settings → AI, then Save",
+                        )
+                except Exception:
+                    pass
+            zotero_seed = await self._fetch_zotero_findings(question, limit=5, seed_library=True)
+            if zotero_seed:
+                findings.extend(zotero_seed)
+                logger.info(f"Zotero seed: {len(zotero_seed)} items from library")
+                self._emit(phase="reading", new_sources=len(zotero_seed),
+                           total_sources=len(self.urls_fetched), source="zotero")
 
         for round_num in range(1, self.max_rounds + 1):
             self.round_count = round_num
@@ -303,6 +423,11 @@ class DeepResearcher:
 
             # SEARCH + EXTRACT
             round_findings = await self._search_and_extract(queries, question)
+            if self.include_zotero and round_num > 1:
+                for q in queries[:2]:
+                    zf = await self._fetch_zotero_findings(q, limit=2)
+                    if zf:
+                        round_findings.extend(zf)
             if round_findings:
                 findings.extend(round_findings)
                 consecutive_empty_rounds = 0
@@ -414,63 +539,44 @@ class DeepResearcher:
             self._emit(phase="warning", message="Planning step failed, proceeding with direct search")
             return ""
 
-    async def _classify_category(self, question: str) -> Optional[str]:
-        """Fast LLM call to classify the research question into a category."""
-        valid = ", ".join(CATEGORY_PROMPTS.keys())
-        prompt = (
-            f"Classify this research question into exactly ONE category.\n"
-            f"Categories: {valid}\n"
-            f"If none fit well, respond with: general\n\n"
-            f"Question: {question}\n\n"
-            f"Respond with ONLY the category name, nothing else."
-        )
-        try:
-            result = await self._llm(
-                [{"role": "user", "content": prompt}],
-                temperature=0, max_tokens=20, timeout=15,
-            )
-            cat = (result or "").strip().lower()
-            # Clean one-word answer first.
-            first = cat.split()[0].strip(".,\"'*:") if cat.split() else ""
-            if first in CATEGORY_PROMPTS:
-                return first
-            # Weak local models often wrap the label in preamble ("the category
-            # is product") — scan the whole reply for any known category word
-            # before giving up (which would default to the generic format).
-            for c in CATEGORY_PROMPTS:
-                if c in cat:
-                    return c
-            return None
-        except Exception as e:
-            logger.warning(f"Category classification failed: {e}")
-            return None
-
     # ------------------------------------------------------------------
     # THINK: generate search queries
     # ------------------------------------------------------------------
     async def _generate_queries(self, question: str, report: str,
                                 round_num: int) -> List[str]:
+        if self.include_preprints:
+            source_policy = (
+                "Include peer-reviewed papers AND preprints (arXiv, bioRxiv, medRxiv) when relevant. "
+                "Label preprints as such in follow-up synthesis."
+            )
+        else:
+            source_policy = (
+                "Peer-reviewed and published sources ONLY — exclude preprints (arXiv, bioRxiv, medRxiv, SSRN). "
+                "Prefer journal articles, systematic reviews, and meta-analyses."
+            )
+
         if round_num == 1:
             num_queries = 4
             round_instruction = (
-                "This is the first round — generate broad, diverse queries "
-                "that explore the key facets of the question."
+                "First round — generate diverse scholarly queries covering definitions, mechanisms, "
+                "empirical evidence, and systematic reviews. Include at least one query targeting "
+                "PubMed or Google Scholar patterns."
             )
         else:
             num_queries = 3
             round_instruction = (
-                "We already have partial findings.  Generate targeted follow-up "
-                "queries to fill gaps, verify claims, or explore specific aspects "
-                "that the report doesn't yet cover well."
+                "Follow-up round — target gaps in the synthesis: missing study types, conflicting claims, "
+                "recent literature, or specific populations not yet covered."
             )
 
         prompt = current_date_context() + QUERY_GEN_PROMPT.format(
             question=question,
-            research_plan=self.research_plan or "(No plan — search broadly.)",
+            research_plan=self.research_plan or "(No plan — search scholarly sources broadly.)",
             report=report or "(No findings yet.)",
             round_num=round_num,
             num_queries=num_queries,
             round_instruction=round_instruction,
+            source_policy=source_policy,
         )
 
         try:
@@ -542,6 +648,50 @@ class DeepResearcher:
 
         return all_findings
 
+    async def _fetch_zotero_findings(
+        self,
+        query: str,
+        limit: int = 5,
+        seed_library: bool = False,
+    ) -> List[Dict]:
+        """Pull matching items from the user's Zotero library via the Web API."""
+        if not self.owner:
+            return []
+        try:
+            from src.zotero_client import fetch_zotero_findings, resolve_zotero_credentials
+            if not resolve_zotero_credentials(self.owner):
+                return []
+            try:
+                from routes.prefs_routes import _load_for_user
+                user_cfg = (_load_for_user(self.owner) or {}).get("zotero") or {}
+                if user_cfg.get("include_in_research") is False:
+                    return []
+            except Exception:
+                pass
+
+            findings = await asyncio.to_thread(
+                fetch_zotero_findings,
+                query,
+                self.owner,
+                limit,
+                True,
+                seed_library,
+            )
+            unique = []
+            for f in findings:
+                zkey = f.get("zotero_key") or f.get("url", "")
+                if zkey in self._zotero_keys_seen:
+                    continue
+                self._zotero_keys_seen.add(zkey)
+                url = f.get("url", "")
+                if url:
+                    self.urls_fetched.add(url)
+                unique.append(f)
+            return unique
+        except Exception as e:
+            logger.warning(f"Zotero fetch failed: {e}")
+            return []
+
     async def _search(self, query: str) -> List[Dict]:
         """Run a search query using the configured research search provider."""
         try:
@@ -566,7 +716,13 @@ class DeepResearcher:
                 try:
                     results = await asyncio.to_thread(_call_provider, prov, query, 10)
                     if results:
-                        logger.info(f"Research search: {prov} returned {len(results)} results")
+                        results = filter_and_rank_academic_results(
+                            results, include_preprints=self.include_preprints,
+                        )
+                        logger.info(
+                            f"Research search: {prov} returned {len(results)} results "
+                            f"(preprints={'on' if self.include_preprints else 'off'})"
+                        )
                         if prov not in self.providers_used:
                             self.providers_used.append(prov)
                         return results
@@ -718,14 +874,12 @@ class DeepResearcher:
     # FINAL REPORT
     # ------------------------------------------------------------------
     async def _final_report(self, question: str, report: str) -> str:
-        """LLM writes a polished final report, retrying if too short."""
+        """LLM writes a polished academic synthesis, retrying if too short."""
         prompt = FINAL_REPORT_PROMPT.format(
             question=question,
             report=report,
         )
-        cat_extra = CATEGORY_PROMPTS.get(self.category or "", "")
-        if cat_extra:
-            prompt += "\n\n" + cat_extra
+        prompt += "\n\n" + ACADEMIC_REPORT_OVERRIDE
 
         try:
             result = await self._llm(
@@ -744,13 +898,13 @@ class DeepResearcher:
                         {"role": "user", "content": prompt},
                         {"role": "assistant", "content": result},
                         {"role": "user", "content":
-                            "This report is too brief. Please expand it significantly:\n"
-                            "- Add detailed paragraphs for each section (not just bullet points)\n"
-                            "- Include specific data, numbers, and comparisons from the evidence\n"
-                            "- Explain context and significance — don't just list facts\n"
-                            "- Use ## headings and ### subheadings\n"
+                            "This academic synthesis is too brief. Expand it significantly:\n"
+                            "- Add detailed paragraphs for Background and Key Findings\n"
+                            "- Include specific data from the evidence only — do not invent statistics\n"
+                            "- Add Limitations of the Evidence and Limitations of This Report sections\n"
+                            "- Use numbered citations [1], [2] and a complete ## References section\n"
                             "- Target at least 1000 words\n"
-                            "Write the full expanded report now."
+                            "Write the full expanded synthesis now."
                         },
                     ],
                     temperature=0.4,
@@ -875,9 +1029,28 @@ class DeepResearcher:
             title = f.get("title", "")
             summary = f.get("summary", "")
             evidence = f.get("evidence", "")
-            # Use summary if available, fall back to truncated evidence
+            authors = f.get("authors", "")
+            year = f.get("year", "")
+            doi = f.get("doi_or_id", "")
+            study_type = f.get("study_type", "")
+            peer = f.get("peer_review_status", "")
+            meta_bits = []
+            if authors:
+                meta_bits.append(f"Authors: {authors}")
+            if year:
+                meta_bits.append(f"Year: {year}")
+            if doi:
+                meta_bits.append(f"ID: {doi}")
+            if study_type:
+                meta_bits.append(f"Type: {study_type}")
+            if peer:
+                meta_bits.append(f"Status: {peer}")
+            meta = " | ".join(meta_bits)
             content = summary if summary else (evidence[:1000] if evidence else "(no content)")
-            parts.append(f"**Finding {i}** — [{title}]({url})\n{content}")
+            header = f"**Finding {i}** — [{title}]({url})"
+            if meta:
+                header += f"\n*{meta}*"
+            parts.append(f"{header}\n{content}")
         return "\n\n".join(parts)
 
     def _fallback_report(self, question: str, findings: List[Dict]) -> str:
@@ -907,6 +1080,14 @@ class DeepResearcher:
         }
         if self.providers_used:
             stats["Search"] = ", ".join(self.providers_used)
-        if self.category:
-            stats["Category"] = self.category.capitalize()
+        stats["Mode"] = "Academic"
+        if not self.include_preprints:
+            stats["Preprints"] = "Excluded"
+        if self.include_zotero and self.owner:
+            try:
+                from src.zotero_client import resolve_zotero_credentials
+                if resolve_zotero_credentials(self.owner):
+                    stats["Zotero"] = "Included"
+            except Exception:
+                pass
         return stats

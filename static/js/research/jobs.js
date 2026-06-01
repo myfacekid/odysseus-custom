@@ -215,7 +215,7 @@ function _makeJob(query, settings) {
     query, settings, status: 'queued',
     progress: {}, startedAt: null, elapsed: 0,
     result: null, sources: null, findings: null,
-    category: settings?.category || '',
+    category: 'academic',
     errorMsg: null, avgDuration: null,
     modelName: null, endpointName: null,
     _es: null, _timerInterval: null,
