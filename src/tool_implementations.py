@@ -3789,6 +3789,29 @@ async def do_manage_research(content: str, owner: Optional[str] = None) -> Dict:
     return {"output": f"Research library ({len(items)} item{'s' if len(items) != 1 else ''}):\n{rows}", "exit_code": 0}
 
 
+async def do_search_zotero(content: str, owner: Optional[str] = None) -> Dict:
+    """Search the user's Zotero library or list collection folders."""
+    import asyncio
+    from src.zotero_client import execute_search_zotero_tool
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    if not isinstance(args, dict):
+        args = {}
+    loop = asyncio.get_running_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: execute_search_zotero_tool(args, owner=owner or ""),
+            ),
+            timeout=90,
+        )
+    except asyncio.TimeoutError:
+        return {"error": "search_zotero timed out", "exit_code": 1}
+
+
 async def do_trigger_research(content: str, owner: Optional[str] = None) -> Dict:
     """Start a live deep-research job that appears in the Deep Research
     sidebar. Hits /api/research/start (the same path the sidebar's
@@ -3810,8 +3833,10 @@ async def do_trigger_research(content: str, owner: Optional[str] = None) -> Dict
     if args.get("max_time") is not None:
         try: payload["max_time"] = int(args["max_time"])
         except (ValueError, TypeError): pass
-    if args.get("category"):
-        payload["category"] = args["category"]
+    if args.get("include_zotero") is not None:
+        payload["include_zotero"] = bool(args["include_zotero"])
+    if args.get("include_preprints") is not None:
+        payload["include_preprints"] = bool(args["include_preprints"])
     if args.get("search_provider"):
         payload["search_provider"] = args["search_provider"]
     try:

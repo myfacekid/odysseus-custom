@@ -361,7 +361,7 @@ function _buildPanelHTML() {
           <input type="checkbox" id="research-include-preprints" checked>
           <span>Include preprints (arXiv, bioRxiv, medRxiv)</span>
         </label>
-        <label class="research-preprint-toggle" id="research-zotero-row" title="Search your Zotero cloud library and extract PDFs when configured in Settings">
+        <label class="research-preprint-toggle" id="research-zotero-row" title="Search your Zotero cloud library and extract PDFs when configured in Settings → Search">
           <input type="checkbox" id="research-include-zotero" checked>
           <span>Include my Zotero library</span>
         </label>

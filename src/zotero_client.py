@@ -9,6 +9,8 @@ from __future__ import annotations
 import io
 import logging
 import re
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -161,6 +163,7 @@ class ZoteroClient:
         limit: int = 10,
         *,
         seed_library: bool = False,
+        start: int = 0,
     ) -> List[dict]:
         """Search the user's library (excludes attachments).
 
@@ -173,7 +176,7 @@ class ZoteroClient:
         search_q = _extract_search_terms(q) if q else ""
 
         if search_q:
-            params = {"q": search_q, "limit": limit, "qmode": "everything"}
+            params = {"q": search_q, "limit": limit, "qmode": "everything", "start": max(start, 0)}
             try:
                 with httpx.Client(timeout=12, headers=self._headers) as client:
                     r = client.get(self._url("/items"), params=params)
@@ -206,6 +209,127 @@ class ZoteroClient:
                 continue
             filtered.append(item)
         return filtered[:limit]
+
+    def list_collections(self) -> List[dict]:
+        """Return all collections with human-readable paths."""
+        try:
+            with httpx.Client(timeout=20, headers=self._headers) as client:
+                r = client.get(self._url("/collections"))
+                r.raise_for_status()
+                raw = r.json()
+                rows = raw if isinstance(raw, list) else []
+        except httpx.HTTPError as e:
+            logger.warning(f"Zotero list_collections failed: {e}")
+            return []
+
+        by_key = {row.get("key"): row for row in rows if row.get("key")}
+
+        def _path_for(key: str) -> str:
+            parts: List[str] = []
+            current = by_key.get(key)
+            seen = set()
+            while current and current.get("key") not in seen:
+                seen.add(current.get("key"))
+                data = current.get("data") or {}
+                parts.insert(0, (data.get("name") or "Untitled").strip())
+                parent = (data.get("parentCollection") or "").strip()
+                current = by_key.get(parent) if parent else None
+            return " / ".join(parts) if parts else "Untitled"
+
+        out: List[dict] = []
+        for row in rows:
+            key = row.get("key") or ""
+            data = row.get("data") or {}
+            if not key:
+                continue
+            out.append({
+                "key": key,
+                "name": (data.get("name") or "Untitled").strip(),
+                "path": _path_for(key),
+                "parent": (data.get("parentCollection") or "").strip(),
+            })
+        return out
+
+    @staticmethod
+    def collection_subtree_keys(root_key: str, collections: List[dict]) -> List[str]:
+        """Return root_key plus all descendant collection keys."""
+        children_by_parent: Dict[str, List[str]] = {}
+        for col in collections or []:
+            parent = (col.get("parent") or "").strip()
+            key = (col.get("key") or "").strip()
+            if parent and key:
+                children_by_parent.setdefault(parent, []).append(key)
+
+        keys: List[str] = []
+        stack = [root_key]
+        seen = set()
+        while stack:
+            key = stack.pop()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            keys.append(key)
+            stack.extend(children_by_parent.get(key, []))
+        return keys
+
+    def get_collection_items(
+        self,
+        collection_key: str,
+        query: str = "",
+        limit: int = 10,
+        start: int = 0,
+    ) -> List[dict]:
+        """Search or list items in one collection (direct members only)."""
+        limit = min(max(limit, 1), 100)
+        params: Dict[str, Any] = {"limit": limit, "start": max(start, 0)}
+        search_q = _extract_search_terms(query) if (query or "").strip() else ""
+        if search_q:
+            params["q"] = search_q
+            params["qmode"] = "everything"
+        try:
+            with httpx.Client(timeout=20, headers=self._headers) as client:
+                r = client.get(self._url(f"/collections/{collection_key}/items"), params=params)
+                r.raise_for_status()
+                items = r.json()
+                return items if isinstance(items, list) else []
+        except httpx.HTTPError as e:
+            logger.warning(f"Zotero get_collection_items failed for {collection_key}: {e}")
+            return []
+
+    def search_scoped(
+        self,
+        query: str = "",
+        limit: int = 10,
+        start: int = 0,
+        collection_keys: Optional[List[str]] = None,
+    ) -> List[dict]:
+        """Search library-wide or within one/more collections (incl. subfolders)."""
+        limit = min(max(limit, 1), 25)
+        start = max(start, 0)
+        need = start + limit
+
+        if not collection_keys:
+            return self.search_items(query, limit=need, start=start)[:limit]
+
+        seen: set = set()
+        merged: List[dict] = []
+        per_col = min(max(need, 10), 100)
+        for ck in collection_keys:
+            batch = self.get_collection_items(ck, query, limit=per_col, start=0)
+            for item in batch:
+                key = item.get("key") or (item.get("data") or {}).get("key")
+                if not key or key in seen:
+                    continue
+                itype = (item.get("data") or {}).get("itemType") or ""
+                if itype in ("attachment", "note", "annotation"):
+                    continue
+                seen.add(key)
+                merged.append(item)
+                if len(merged) >= need:
+                    break
+            if len(merged) >= need:
+                break
+        return merged[start:start + limit]
 
     def get_item(self, item_key: str) -> Optional[dict]:
         try:
@@ -396,6 +520,259 @@ def zotero_item_to_finding(item: dict, user_id: str, pdf_text: str = "") -> dict
         "source_type": "zotero",
         "zotero_key": key,
     }
+
+
+@dataclass
+class ZoteroSearchRequest:
+    """Per-request Zotero search flag (set from the chat composer toggle)."""
+    enabled: bool = False
+    owner: str = ""
+
+
+_zotero_search_ctx: ContextVar[ZoteroSearchRequest] = ContextVar(
+    "zotero_search_request", default=ZoteroSearchRequest(),
+)
+
+
+def set_zotero_search_request(enabled: bool, owner: str = "") -> None:
+    """Enable or disable Zotero library search for the current chat request."""
+    _zotero_search_ctx.set(ZoteroSearchRequest(enabled=bool(enabled), owner=(owner or "").strip()))
+
+
+def get_zotero_search_request() -> ZoteroSearchRequest:
+    return _zotero_search_ctx.get()
+
+
+def format_zotero_search_context(findings: List[dict]) -> Tuple[str, List[dict]]:
+    """Format Zotero findings as LLM context plus source chips for the UI."""
+    if not findings:
+        return "No matching items found in your Zotero library.", []
+
+    parts = [
+        "ZOTERO LIBRARY RESULTS",
+        "=" * 50,
+    ]
+    sources: List[dict] = []
+    for i, finding in enumerate(findings, 1):
+        title = (finding.get("title") or "Untitled").strip()
+        url = (finding.get("url") or "").strip()
+        authors = (finding.get("authors") or "").strip()
+        year = (finding.get("year") or "").strip()
+        summary = (finding.get("summary") or "").strip()
+        evidence = (finding.get("evidence") or "").strip()
+
+        parts.append(f"\n[{i}] {title}")
+        if authors or year:
+            byline = authors or "Unknown author"
+            if year:
+                byline = f"{byline} ({year})"
+            parts.append(f"    {byline}")
+        if url:
+            parts.append(f"    URL: {url}")
+        if summary:
+            parts.append(f"    Summary: {summary[:800]}")
+        if evidence and evidence[:800] != summary[:800]:
+            excerpt = evidence[:3000]
+            if len(evidence) > 3000:
+                excerpt += "... [truncated]"
+            parts.append(f"    Excerpt:\n{excerpt}")
+
+        if url or title:
+            sources.append({"url": url, "title": title, "source": "zotero"})
+
+    return "\n".join(parts), sources
+
+
+def search_zotero_for_chat(query: str, owner: str = "", limit: int = 5) -> Tuple[str, List[dict]]:
+    """Search the user's Zotero library for chat / web-search augmentation."""
+    if not resolve_zotero_credentials(owner):
+        return (
+            "Zotero Library is enabled but not configured. "
+            "Add your User ID and API key in Settings → Search, then Save.",
+            [],
+        )
+    findings = fetch_zotero_findings(
+        query,
+        owner=owner,
+        limit=limit,
+        extract_pdfs=True,
+        seed_library=False,
+    )
+    return format_zotero_search_context(findings)
+
+
+def resolve_collection_match(name_or_key: str, collections: List[dict]) -> Tuple[Optional[str], Optional[str]]:
+    """Match a collection by API key, exact path, or fuzzy name/path.
+
+    Returns (collection_key, error_message). error_message is set when ambiguous
+    or not found; collection_key is set on success.
+    """
+    needle = (name_or_key or "").strip()
+    if not needle:
+        return None, None
+
+    if not collections:
+        return None, "No collections found in your Zotero library."
+
+    # Exact key
+    for col in collections:
+        if col.get("key") == needle:
+            return col["key"], None
+
+    norm = needle.lower()
+    norm_path = norm.replace(">", "/").replace("\\", "/")
+    norm_path = " / ".join(part.strip() for part in norm_path.split("/") if part.strip())
+
+    exact = [
+        col for col in collections
+        if (col.get("path") or "").lower() == norm_path
+        or (col.get("name") or "").lower() == norm
+    ]
+    if len(exact) == 1:
+        return exact[0]["key"], None
+
+    partial = [
+        col for col in collections
+        if norm_path in (col.get("path") or "").lower()
+        or norm == (col.get("name") or "").lower()
+        or (col.get("path") or "").lower().endswith(norm_path)
+    ]
+    matches = exact or partial
+    if len(matches) == 1:
+        return matches[0]["key"], None
+    if len(matches) > 1:
+        lines = [
+            f"Multiple collections match {name_or_key!r}. Be more specific or pass the collection key:",
+        ]
+        for col in sorted(matches, key=lambda c: (c.get("path") or "").lower())[:12]:
+            lines.append(f"- {col.get('path')} (key: {col.get('key')})")
+        return None, "\n".join(lines)
+
+    return None, (
+        f"No collection matching {name_or_key!r}. "
+        "Call search_zotero with action=list_collections to see folder names and keys."
+    )
+
+
+def findings_from_items(
+    client: ZoteroClient,
+    user_id: str,
+    items: List[dict],
+    *,
+    extract_pdfs: bool = True,
+) -> List[dict]:
+    findings: List[dict] = []
+    for item in items or []:
+        key = item.get("key") or (item.get("data") or {}).get("key")
+        if not key:
+            continue
+        full = client.get_item(key) or item
+        pdf_text = ""
+        if extract_pdfs:
+            for child in client.get_children(key):
+                cdata = child.get("data") or {}
+                if not _is_pdf_attachment(cdata):
+                    continue
+                ck = child.get("key") or cdata.get("key")
+                if ck:
+                    pdf_text = client.download_attachment_pdf(
+                        ck, fallback_url=cdata.get("url") or "",
+                    )
+                    if pdf_text:
+                        break
+        findings.append(zotero_item_to_finding(full, user_id, pdf_text=pdf_text))
+    return findings
+
+
+def execute_search_zotero_tool(args: dict, owner: str = "") -> Dict[str, Any]:
+    """Agent tool entry: list collections or search the user's library."""
+    if not isinstance(args, dict):
+        args = {}
+
+    creds = resolve_zotero_credentials(owner)
+    if not creds:
+        return {
+            "output": (
+                "Zotero is not configured for this account. "
+                "Ask the user to add their User ID and API key under Settings → Search → Zotero Library."
+            ),
+            "exit_code": 1,
+        }
+
+    client = ZoteroClient(creds["api_key"], creds["user_id"])
+    action = (args.get("action") or "search").strip().lower()
+
+    if action in ("list_collections", "list_folders", "collections", "folders"):
+        cols = client.list_collections()
+        if not cols:
+            return {"output": "No collections found in your Zotero library.", "exit_code": 0}
+        lines = [
+            "Zotero collections (pass `collection` as the path or key in search_zotero):",
+            "",
+        ]
+        for col in sorted(cols, key=lambda c: (c.get("path") or "").lower()):
+            lines.append(f"- {col.get('path')}  (key: {col.get('key')})")
+        return {"output": "\n".join(lines), "exit_code": 0}
+
+    query = (args.get("query") or args.get("q") or "").strip()
+    collection = (args.get("collection") or args.get("folder") or "").strip()
+    try:
+        limit = int(args.get("limit", 10))
+    except (TypeError, ValueError):
+        limit = 10
+    try:
+        start = int(args.get("start", 0))
+    except (TypeError, ValueError):
+        start = 0
+    include_pdf = args.get("include_pdf", True)
+    if isinstance(include_pdf, str):
+        include_pdf = include_pdf.lower() not in ("false", "0", "no")
+
+    limit = min(max(limit, 1), 25)
+    start = max(start, 0)
+
+    if not query and not collection:
+        return {
+            "output": (
+                "Provide a search `query` and/or a `collection` folder. "
+                "Use action=list_collections to list folders."
+            ),
+            "exit_code": 1,
+        }
+
+    collections = client.list_collections()
+    collection_keys = None
+    scope_label = "entire library"
+    if collection:
+        root_key, err = resolve_collection_match(collection, collections)
+        if err:
+            return {"output": err, "exit_code": 1}
+        if not root_key:
+            return {"output": f"Could not resolve collection {collection!r}.", "exit_code": 1}
+        collection_keys = client.collection_subtree_keys(root_key, collections)
+        scope_label = next((c["path"] for c in collections if c["key"] == root_key), collection)
+        scope_label += " (including subfolders)"
+
+    items = client.search_scoped(
+        query=query,
+        limit=limit,
+        start=start,
+        collection_keys=collection_keys,
+    )
+    findings = findings_from_items(
+        client, creds["user_id"], items, extract_pdfs=bool(include_pdf),
+    )
+    body, sources = format_zotero_search_context(findings)
+    header = f"Zotero search — scope: {scope_label}"
+    if query:
+        header += f" | query: {query}"
+    if start:
+        header += f" | start: {start}"
+    header += f" | returned: {len(findings)}"
+    output = header + "\n\n" + body
+    if sources:
+        output += "\n\n<!-- SOURCES:" + __import__("json").dumps(sources) + " -->"
+    return {"output": output, "exit_code": 0, "sources": sources}
 
 
 def fetch_zotero_findings(

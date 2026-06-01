@@ -1291,10 +1291,12 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
             "documents": "document_editor",
             "doc": "document_editor",
             "docs": "document_editor",
+            "zotero": "zotero",
+            "library": "zotero",
             "private": "incognito",
         }
         toggle_name = _toggle_aliases.get(toggle_name, toggle_name)
-        valid_toggles = {"web", "bash", "rag", "research", "incognito", "document_editor"}
+        valid_toggles = {"web", "bash", "rag", "research", "incognito", "document_editor", "zotero"}
         if toggle_name not in valid_toggles:
             return {"error": f"Unknown toggle '{toggle_name}'. Valid: {', '.join(sorted(valid_toggles))}"}
         return {

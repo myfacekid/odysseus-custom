@@ -9,6 +9,7 @@ class ChatRequest(BaseModel):
     session: str = Field(..., description="Session ID")
     attachments: Optional[List[str]] = Field(default=[], description="Attachment IDs")
     use_web: Optional[bool] = Field(default=False, description="Enable web search")
+    use_zotero: Optional[bool] = Field(default=False, description="Include Zotero library in search context")
     use_research: Optional[bool] = Field(default=False, description="Enable deep research")
     time_filter: Optional[str] = Field(default=None, description="Time filter for search")
     preset_id: Optional[str] = Field(default=None, description="Preset identifier")

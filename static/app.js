@@ -1632,6 +1632,7 @@ function initializeEventListeners() {
     bash: { role: 'Shell Access', text: 'Gives the AI access to a sandboxed shell for running commands, installing packages, and executing scripts. Use with caution.' },
     builder: { role: 'Tool Builder', text: 'Create custom mini-apps and tools the AI can use. Describe what you need and the AI will build a tool you can reuse across conversations.' },
     research: { role: 'Deep Research', text: 'Multi-round web search with source analysis. Takes longer but produces comprehensive, well-sourced answers. Your next message will trigger a deep research cycle.' },
+    zotero: { role: 'Zotero Library', text: 'Searches your synced Zotero library for papers and PDFs related to your message. Configure credentials in Settings → Search. Works alongside web search when both are enabled.' },
   };
   function _showToolSplash(key) {
     const splash = _toolSplashes[key];
@@ -1737,7 +1738,21 @@ function initializeEventListeners() {
     const s = loadToggleState(); s.rag = active; saveToggleState(s);
     updatePlusDot();
   }
+  function _syncZoteroIndicator(active) {
+    const indicator = el('zotero-indicator-btn');
+    const overflow = el('overflow-zotero-btn');
+    const chk = el('zotero-toggle');
+    if (chk) chk.checked = active;
+    if (indicator) {
+      indicator.style.display = active ? '' : 'none';
+      indicator.classList.toggle('active', active);
+    }
+    if (overflow) overflow.classList.toggle('active', active);
+    const s = loadToggleState(); s.zotero = active; saveToggleState(s);
+    updatePlusDot();
+  }
   window._syncRagIndicator = _syncRagIndicator;
+  window._syncZoteroIndicator = _syncZoteroIndicator;
   window._syncResearchIndicator = _syncResearchIndicator;
   // Must be assigned at module level (not inside the function body) so the very
   // first external caller — group.js / sessions.js fire it before it has ever
@@ -1749,6 +1764,8 @@ function initializeEventListeners() {
     const st = loadToggleState();
     const ragState = st.rag || false;
     _syncRagIndicator(ragState);
+    const zoteroState = st.zotero || false;
+    _syncZoteroIndicator(zoteroState);
   }
 
   // ── Overflow "..." menu (Research) ──
@@ -2173,6 +2190,23 @@ function initializeEventListeners() {
     });
   }
 
+  // ── Overflow Zotero toggle ──
+  const overflowZoteroBtn = el('overflow-zotero-btn');
+  const zoteroIndicatorBtn = el('zotero-indicator-btn');
+  if (overflowZoteroBtn) {
+    overflowZoteroBtn.addEventListener('click', () => {
+      const chk = el('zotero-toggle');
+      const isActive = chk ? !chk.checked : true;
+      _syncZoteroIndicator(isActive);
+      if (isActive) _showToolSplash('zotero');
+    });
+  }
+  if (zoteroIndicatorBtn) {
+    zoteroIndicatorBtn.addEventListener('click', () => {
+      _syncZoteroIndicator(false);
+    });
+  }
+
   // ── Overflow Research toggle ──
   const overflowResearchBtn = el('overflow-research-btn');
   if (overflowResearchBtn) {
@@ -2404,6 +2438,7 @@ function initializeEventListeners() {
     'web-toggle-btn':      '#web-toggle-btn',
     'doc-toggle-btn':      '#overflow-doc-btn',
     'rag-toggle-btn':      '#overflow-rag-btn',
+    'zotero-toggle-btn':   '#overflow-zotero-btn',
     'bash-toggle-btn':     '#bash-toggle-btn',
     'overflow-plus-btn':   '.overflow-wrapper',
     'mode-toggle':         '.mode-toggle',

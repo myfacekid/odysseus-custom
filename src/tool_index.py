@@ -61,7 +61,8 @@ COLLECTION_NAME = "odysseus_tool_index"
 BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "bash": "Run shell commands on the server. Install packages, check files, git operations, curl, system info, process management, networking.",
     "python": "Execute Python code for computation, data processing, math, scripting, parsing, API calls. Not for writing code for the user.",
-    "web_search": "Quick single web lookup for a fact, current event, or doc mid-task. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
+    "web_search": "Quick single web lookup for a fact, current event, or doc mid-task. NOT for the user's Zotero library — use search_zotero. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
+    "search_zotero": "Search the user's personal Zotero library — saved papers, citations, PDF excerpts. action=list_collections lists folder paths/keys; action=search with query and/or collection finds items (collection accepts path like 'Projects / ML' or a key). Use for 'my Zotero', 'my papers', 'saved sources', 'papers in folder X'. NOT web_search (public web) or trigger_research (new deep-research job).",
     "web_fetch": "Fetch and read the text content of a specific URL/website the user names (e.g. 'check example.com', 'open this link'). Use when you have a concrete URL; for open-ended lookups use web_search instead.",
     "read_file": "Read a file from disk and return its contents. View source code, config files, logs.",
     "write_file": "Write content to a file on disk. Create new files, save output, update configs.",
@@ -116,7 +117,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "adopt_served_model": "Register an existing tmux model server (one started manually or outside the cookbook flow) into Cookbook tracking AND add it as a chat endpoint. Use when the user (or a previous turn) launched something via ssh+tmux and now wants it visible in the UI, stoppable via stop_served_model, and usable in the model picker.",
     "list_cookbook_servers": "List the cookbook's configured servers (remote GPU boxes + local) and which is the current default. Use this BEFORE download_model/serve_model when the user didn't name a host — to decide where to run, or to ask the user which server when ambiguous. Downloads/serves default to the cookbook's selected server, NOT localhost.",
     "app_api": "Generic loopback to ANY Odysseus internal endpoint. Use this when the user wants something the UI can do but there's no named tool for it. Covers calendar, gallery, library/documents, memory, notes, tasks, settings, research, compare, cookbook GPUs/state — every UI button hits some /api/* endpoint and you can hit it too. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). EMAIL ACCOUNTS: do NOT use /api/email/accounts via app_api; use list_email_accounts, list_emails, and read_email instead. To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead.",
-    "edit_image": "Edit an image in the gallery: upscale (increase resolution), remove background (rembg), inpaint (fill selected area), or harmonize (blend edits). Specify image ID and action.",
+    "edit_image": "Not available — gallery is view-only in this build.",
     "trigger_research": "Start a deep research job on any topic — appears in the Deep Research sidebar, streams progress, produces a detailed report. Use for 'research X', 'look into Y', 'do deep research on Z', 'investigate'. NOT a scheduled task — it runs now and surfaces in the sidebar.",
 }
 
@@ -341,6 +342,10 @@ class ToolIndex:
                    "deep dive", "deep research", "find out about", "study up on",
                    "report on", "do research", "look up everything"}):
             {"trigger_research"},
+        frozenset({"zotero", "my zotero", "my library", "my papers", "saved papers",
+                   "saved sources", "my citations", "zotero folder", "zotero collection",
+                   "in my library", "from zotero", "papers in folder", "papers in my"}):
+            {"search_zotero"},
         # Settings-change intent — "change my…/set my…/use X for…/turn on…".
         frozenset({"change my", "set my", "use the voice", "change the voice",
                    "my voice", "tts voice", "search engine", "default model",

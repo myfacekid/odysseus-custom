@@ -1507,7 +1507,7 @@ async function initResearchSettings() {
   });
 }
 
-/* ── Zotero Library (AI tab, per-user) ── */
+/* ── Zotero Library (Search tab, per-user) ── */
 async function initZoteroSettings() {
   var uidInput = el('set-zoteroUserId');
   var keyInput = el('set-zoteroApiKey');

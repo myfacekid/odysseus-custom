@@ -170,6 +170,7 @@ class ChatProcessor:
         agent_mode: bool = False,
         incognito: bool = False,
         use_skills: bool = True,
+        use_zotero: bool = False,
     ) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]], List[Dict[str, str]]]:
         """Build the context preface for LLM calls.
 
@@ -274,6 +275,23 @@ class ChatProcessor:
             except Exception as e:
                 logger.error(f"Web search failed: {e}")
                 preface.append({"role": "system", "content": "Web search encountered an error and could not retrieve results."})
+
+        if use_zotero:
+            try:
+                from src.zotero_client import search_zotero_for_chat
+                zotero_context, zotero_sources = search_zotero_for_chat(
+                    message, owner=owner or "", limit=5,
+                )
+                preface.append(untrusted_context_message(
+                    "zotero library search results", zotero_context,
+                ))
+                web_sources.extend(zotero_sources)
+            except Exception as e:
+                logger.error(f"Zotero library search failed: {e}")
+                preface.append({
+                    "role": "system",
+                    "content": "Zotero library search encountered an error and could not retrieve results.",
+                })
 
         # Process non-YouTube URLs in message (YouTube handled by preprocess_message)
         # Skip auto-fetch for long pastes (the user already pasted the content —

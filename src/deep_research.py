@@ -388,7 +388,7 @@ class DeepResearcher:
                             phase="reading",
                             source="zotero",
                             zotero_status="not_configured",
-                            message="Zotero not configured — add User ID + API key in Settings → AI, then Save",
+                            message="Zotero not configured — add User ID + API key in Settings → Search, then Save",
                         )
                 except Exception:
                     pass

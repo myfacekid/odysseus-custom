@@ -53,7 +53,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Quick single web lookup for a fact or current event mid-task. NOT for 'research X' / 'do research on X' — those are deep-research jobs; use trigger_research instead.",
+            "description": "Quick single web lookup for a fact or current event mid-task. NOT for the user's Zotero library ('my papers', 'saved sources') — use search_zotero. NOT for 'research X' / 'do research on X' — those are deep-research jobs; use trigger_research instead.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -63,6 +63,31 @@ FUNCTION_TOOL_SCHEMAS = [
                 "required": ["query"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_zotero",
+            "description": "Search the user's personal Zotero library (saved papers, citations, PDF excerpts). Use when they mention Zotero, 'my library', 'my papers', saved sources, or a Zotero folder/collection. NOT for general web lookups (web_search) or deep multi-source research jobs (trigger_research). If the folder name is ambiguous, call action=list_collections first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["search", "list_collections"],
+                        "description": "search (default) finds items; list_collections lists folder paths and keys.",
+                    },
+                    "query": {"type": "string", "description": "Search terms (optional when browsing a collection)"},
+                    "collection": {
+                        "type": "string",
+                        "description": "Zotero folder: full path like 'Projects / ML' or collection key from list_collections. Includes subfolders.",
+                    },
+                    "limit": {"type": "integer", "description": "Max items to return (1-25, default 10)"},
+                    "start": {"type": "integer", "description": "Pagination offset (default 0)"},
+                    "include_pdf": {"type": "boolean", "description": "Extract text from attached PDFs (default true)"},
+                },
+            },
+        },
     },
     {
         "type": "function",
@@ -1226,7 +1251,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = action
     elif tool_type in ("manage_tasks", "manage_skills", "api_call",
                         "manage_endpoints", "manage_mcp", "manage_webhooks",
-                        "manage_tokens", "manage_documents", "manage_settings"):
+                        "manage_tokens", "manage_documents", "manage_settings",
+                        "search_zotero", "manage_research", "trigger_research"):
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")

@@ -1,6 +1,7 @@
 """Tests for Zotero client helpers."""
 
 from src.zotero_client import (
+    format_zotero_search_context,
     mask_api_key,
     sources_to_zotero_items,
     zotero_item_to_finding,
@@ -10,6 +11,8 @@ from src.zotero_client import (
     _extract_pdf_text,
     _is_pdf_attachment,
     fetch_zotero_findings,
+    resolve_collection_match,
+    ZoteroClient,
 )
 
 
@@ -96,6 +99,26 @@ def test_extract_pdf_text_from_bytes():
     assert "attention" in text.lower()
 
 
+def test_format_zotero_search_context():
+    findings = [{
+        "title": "AlphaFold",
+        "url": "https://doi.org/10.1038/s41586-021-03819-2",
+        "authors": "Jumper, J.",
+        "year": "2021",
+        "summary": "Protein structure prediction breakthrough.",
+        "evidence": "Detailed methods and results.",
+    }]
+    text, sources = format_zotero_search_context(findings)
+    assert "AlphaFold" in text
+    assert sources and sources[0]["source"] == "zotero"
+
+
+def test_format_zotero_search_context_empty():
+    text, sources = format_zotero_search_context([])
+    assert "No matching items" in text
+    assert sources == []
+
+
 def test_fetch_zotero_findings_seed_library(monkeypatch):
     """Small-library seed returns top items even when the query does not match."""
     class FakeClient:
@@ -136,3 +159,46 @@ def test_fetch_zotero_findings_seed_library(monkeypatch):
     )
     assert len(findings) == 1
     assert findings[0]["title"] == "AlphaFold paper"
+
+
+def _sample_collections():
+    return [
+        {"key": "ROOT1", "name": "Projects", "path": "Projects", "parent": ""},
+        {"key": "CHILD1", "name": "ML", "path": "Projects / ML", "parent": "ROOT1"},
+        {"key": "CHILD2", "name": "NLP", "path": "Projects / NLP", "parent": "ROOT1"},
+        {"key": "OTHER", "name": "Reading", "path": "Reading", "parent": ""},
+    ]
+
+
+def test_collection_subtree_keys():
+    cols = _sample_collections()
+    keys = ZoteroClient.collection_subtree_keys("ROOT1", cols)
+    assert keys == ["ROOT1", "CHILD1", "CHILD2"]
+
+
+def test_resolve_collection_match_by_path():
+    cols = _sample_collections()
+    key, err = resolve_collection_match("Projects / ML", cols)
+    assert err is None
+    assert key == "CHILD1"
+
+
+def test_resolve_collection_match_by_key():
+    cols = _sample_collections()
+    key, err = resolve_collection_match("CHILD2", cols)
+    assert err is None
+    assert key == "CHILD2"
+
+
+def test_resolve_collection_match_ambiguous():
+    cols = _sample_collections()
+    key, err = resolve_collection_match("project", cols)
+    assert key is None
+    assert err and "Multiple collections" in err
+
+
+def test_resolve_collection_match_missing():
+    cols = _sample_collections()
+    key, err = resolve_collection_match("Nonexistent", cols)
+    assert key is None
+    assert err and "No collection matching" in err

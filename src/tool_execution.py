@@ -606,6 +606,21 @@ async def _direct_fallback(
             output = text[:MAX_OUTPUT_CHARS] if len(text) > MAX_OUTPUT_CHARS else text
             if sources:
                 output += "\n\n<!-- SOURCES:" + _json.dumps(sources) + " -->"
+
+            from src.zotero_client import get_zotero_search_request, search_zotero_for_chat
+            zreq = get_zotero_search_request()
+            if zreq.enabled and zreq.owner:
+                try:
+                    zctx, zsrc = search_zotero_for_chat(query, owner=zreq.owner, limit=5)
+                    if zctx:
+                        output += "\n\n" + zctx
+                    if zsrc:
+                        merged = list(sources or []) + zsrc
+                        output = output.split("\n\n<!-- SOURCES:")[0].rstrip()
+                        output += "\n\n<!-- SOURCES:" + _json.dumps(merged) + " -->"
+                except Exception as e:
+                    logger.warning(f"Zotero augment for web_search failed: {e}")
+
             return {"output": output, "exit_code": 0}
 
         if tool == "web_fetch":
@@ -703,7 +718,8 @@ async def execute_tool_block(
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
         do_list_serve_presets, do_serve_preset, do_adopt_served_model,
         do_list_cookbook_servers,
-        do_edit_image, do_trigger_research, do_manage_research, do_resolve_contact,
+        do_edit_image, do_trigger_research, do_manage_research, do_search_zotero,
+        do_resolve_contact,
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
@@ -900,6 +916,9 @@ async def execute_tool_block(
     elif tool == "manage_research":
         desc = "manage_research"
         result = await do_manage_research(content, owner=owner)
+    elif tool == "search_zotero":
+        desc = "search_zotero"
+        result = await do_search_zotero(content, owner=owner)
     elif tool == "resolve_contact":
         desc = "resolve_contact"
         result = await do_resolve_contact(content, owner=owner)

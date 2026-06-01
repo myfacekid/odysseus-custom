@@ -251,6 +251,7 @@ def setup_chat_routes(
         session = chat_request.session
         att_ids = chat_request.attachments or []
         use_web = chat_request.use_web
+        use_zotero = chat_request.use_zotero
         use_research = chat_request.use_research
         time_filter = chat_request.time_filter
         preset_id = chat_request.preset_id
@@ -294,6 +295,7 @@ def setup_chat_routes(
             preset_id=preset_id,
             att_ids=att_ids,
             use_web=use_web,
+            use_zotero=use_zotero,
             time_filter=time_filter,
             webhook_manager=webhook_manager,
         )
@@ -371,6 +373,7 @@ def setup_chat_routes(
         session = form_data.get("session")
         attachments = form_data.get("attachments")
         use_web = form_data.get("use_web")
+        use_zotero = form_data.get("use_zotero")
         use_research = form_data.get("use_research")
         time_filter = form_data.get("time_filter")
         preset_id = form_data.get("preset_id")
@@ -447,6 +450,11 @@ def setup_chat_routes(
         # Ensure session has auth headers
         resolve_session_auth(sess, session, owner=get_current_user(request))
 
+        from src.zotero_client import set_zotero_search_request
+        _chat_user = get_current_user(request) or ""
+        _use_zotero = str(use_zotero).lower() == "true"
+        set_zotero_search_request(_use_zotero, _chat_user)
+
         # Check for research_pending BEFORE mode persist overwrites it
         do_research = str(use_research).lower() == "true"
         if not do_research:
@@ -478,6 +486,7 @@ def setup_chat_routes(
             preset_id=preset_id,
             att_ids=att_ids,
             use_web=use_web,
+            use_zotero=use_zotero,
             use_rag=use_rag,
             time_filter=time_filter,
             incognito=incognito,
@@ -553,7 +562,7 @@ def setup_chat_routes(
             disabled_tools.add("web_search")
             disabled_tools.add("web_fetch")
 
-        # Nobody/incognito mode: deny tools that would expose the user's
+        # Incognito mode: deny tools that would expose the user's
         # persistent memory, past chats, or other identity-linked data.
         if incognito:
             disabled_tools.update({

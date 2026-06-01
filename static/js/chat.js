@@ -768,6 +768,10 @@ import createResearchSynapse from './researchSynapse.js';
       if (el('bash-toggle').checked) {
         fd.append('allow_bash', 'true');
       }
+      const zoteroChk = el('zotero-toggle');
+      if (zoteroChk && zoteroChk.checked) {
+        fd.append('use_zotero', 'true');
+      }
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');
