@@ -13,8 +13,17 @@ from starlette.responses import Response
 # routes via HTTP loopback (the agent's tool calls don't carry the
 # admin user's session cookie). Set once at import; tools read the
 # same value from this module. Never persisted or exposed externally.
-INTERNAL_TOOL_TOKEN = os.environ.get("ODYSSEUS_INTERNAL_TOKEN") or secrets.token_hex(32)
-INTERNAL_TOOL_HEADER = "X-Odysseus-Internal-Token"
+INTERNAL_TOOL_TOKEN = (
+    os.environ.get("NOBODY_INTERNAL_TOKEN")
+    or os.environ.get("OCULUS_INTERNAL_TOKEN")
+    or os.environ.get("ODYSSEUS_INTERNAL_TOKEN")
+    or secrets.token_hex(32)
+)
+INTERNAL_TOOL_HEADER = "X-Nobody-Internal-Token"
+LEGACY_INTERNAL_TOOL_HEADERS = (
+    "X-Oculus-Internal-Token",
+    "X-Odysseus-Internal-Token",
+)
 
 
 def require_admin(request: Request):
@@ -30,6 +39,9 @@ def require_admin(request: Request):
         hdr = request.headers.get(INTERNAL_TOOL_HEADER)
         if hdr and secrets.compare_digest(hdr, INTERNAL_TOOL_TOKEN):
             return
+        for _legacy_hdr in LEGACY_INTERNAL_TOOL_HEADERS:
+            if request.headers.get(_legacy_hdr) == INTERNAL_TOOL_TOKEN:
+                return
         if getattr(request.state, "current_user", None) == "internal-tool":
             return
     except Exception:

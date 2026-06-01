@@ -440,6 +440,7 @@ async def build_chat_context(
     use_web=None,
     use_rag=None,
     use_research=None,
+    use_zotero=None,
     time_filter=None,
     incognito: bool = False,
     no_memory: bool = False,
@@ -515,6 +516,8 @@ async def build_chat_context(
     )
     if use_rag is not None:
         _preface_kwargs["use_rag"] = use_rag_val
+    use_zotero_val = str(use_zotero).lower() == "true" if use_zotero is not None else False
+    _preface_kwargs["use_zotero"] = use_zotero_val
     preface, rag_sources, web_sources = chat_processor.build_context_preface(**_preface_kwargs)
 
     # Capture used memories immediately

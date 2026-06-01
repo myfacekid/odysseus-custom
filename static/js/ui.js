@@ -237,8 +237,8 @@ export async function copyToClipboard(text) {
 // time a toast is shown. Tracks horizontal touch drag; if the user drags
 // more than DISMISS_PX, the toast slides off in the drag direction and
 // hides early. Anything less snaps back. Desktop unaffected (touch
-// listeners only fire from a touchscreen — mouse is handled by the
-// existing × button and auto-hide timer).
+// listeners only fire from a touchscreen � mouse is handled by the
+// existing � button and auto-hide timer).
 function _wireToastSwipe(el) {
   if (!el || el._swipeWired) return;
   el._swipeWired = true;
@@ -262,7 +262,7 @@ function _wireToastSwipe(el) {
     currentX = t.clientX;
     const dx = currentX - startX;
     el.style.transform = `translateX(${dx}px)`;
-    // Fade as the toast leaves the rest position — visual cue for
+    // Fade as the toast leaves the rest position � visual cue for
     // approaching the dismiss threshold.
     el.style.opacity = String(Math.max(0.2, 1 - Math.abs(dx) / 200));
   }, { passive: true });
@@ -340,7 +340,7 @@ export function showToast(msg, durationOrOpts) {
 
     const btn = document.createElement('button');
     // If the caller supplied an SVG icon, prepend it. We trust the icon string
-    // (only set internally) — never accept caller-controlled HTML otherwise.
+    // (only set internally) � never accept caller-controlled HTML otherwise.
     if (actionIcon) {
       btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;">${actionIcon}<span></span></span>`;
       btn.querySelector('span span').textContent = actionLabel;
@@ -361,7 +361,7 @@ export function showToast(msg, durationOrOpts) {
     });
     stack.appendChild(btn);
 
-    // Keyboard-shortcut hints (Ctrl+Z / ⌘Z) are meaningless on touch devices —
+    // Keyboard-shortcut hints (Ctrl+Z / ?Z) are meaningless on touch devices �
     // skip them on mobile so the toast just shows the Undo button.
     if (actionHint && window.innerWidth > 768) {
       const hint = document.createElement('span');
@@ -372,13 +372,13 @@ export function showToast(msg, durationOrOpts) {
 
     toastEl.appendChild(stack);
 
-    // Small × to dismiss the toast without taking the action. Useful when
+    // Small � to dismiss the toast without taking the action. Useful when
     // the user already acted (or just doesn't want the banner sitting there).
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.setAttribute('aria-label', 'Dismiss');
     closeBtn.title = 'Dismiss';
-    closeBtn.textContent = '×';
+    closeBtn.textContent = '�';
     closeBtn.style.cssText = 'margin-left:8px;padding:0;width:20px;height:20px;line-height:1;border:none;background:none;color:var(--fg);opacity:0.55;cursor:pointer;font-size:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;';
     closeBtn.addEventListener('mouseenter', () => { closeBtn.style.opacity = '1'; });
     closeBtn.addEventListener('mouseleave', () => { closeBtn.style.opacity = '0.55'; });
@@ -393,11 +393,11 @@ export function showToast(msg, durationOrOpts) {
 
     toastEl.style.pointerEvents = 'auto';
   } else {
-    // No action — restore the default non-blocking behavior.
+    // No action � restore the default non-blocking behavior.
     toastEl.style.pointerEvents = '';
   }
 
-  // Pin to top-right via CSS — clear any legacy inline overrides so the
+  // Pin to top-right via CSS � clear any legacy inline overrides so the
   // slide-in-from-right / slide-out-to-left transition can run cleanly.
   toastEl.style.left = '';
   toastEl.style.transform = '';
@@ -487,7 +487,7 @@ function _smoothScrollStep() {
 }
 
 /**
- * Instant scroll to bottom — use for non-streaming contexts
+ * Instant scroll to bottom � use for non-streaming contexts
  * like loading history or switching sessions.
  */
 export function scrollHistoryInstant() {
@@ -583,7 +583,7 @@ export function el(id) {
 }
 
 /**
- * Styled confirm dialog — replaces native browser confirm().
+ * Styled confirm dialog � replaces native browser confirm().
  * Returns a Promise<boolean>.
  */
 export function styledConfirm(message, { confirmText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
@@ -664,7 +664,7 @@ export function styledConfirm(message, { confirmText = 'Confirm', cancelText = '
 }
 
 /**
- * Styled text-input prompt — drop-in replacement for window.prompt().
+ * Styled text-input prompt � drop-in replacement for window.prompt().
  * Resolves to the trimmed string the user typed, or null on Cancel / Escape / backdrop.
  */
 export function styledPrompt(message, {
@@ -770,13 +770,13 @@ export function styledPrompt(message, {
 const _ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 /**
  * HTML-escape a string to prevent XSS.
- * Canonical implementation — other modules should use uiModule.esc() instead of local copies.
+ * Canonical implementation � other modules should use uiModule.esc() instead of local copies.
  */
 export function esc(s) {
   return (s || '').replace(/[&<>"']/g, (m) => _ESC_MAP[m]);
 }
 
-// ── Mobile: suppress synthetic click/mousedown on backdrop ──
+// ?? Mobile: suppress synthetic click/mousedown on backdrop ??
 // When a touch starts inside .modal-content, set a flag so that
 // synthetic mouse events on the backdrop are ignored.
 let _touchInsideModal = false;
@@ -787,7 +787,7 @@ if ('ontouchstart' in window) {
     }
   }, { passive: true });
   document.addEventListener('touchend', () => {
-    // Clear after a short delay — synthetic click fires ~300ms after touchend
+    // Clear after a short delay � synthetic click fires ~300ms after touchend
     setTimeout(() => { _touchInsideModal = false; }, 400);
   }, { passive: true });
 }
@@ -821,8 +821,8 @@ if (document.readyState === 'loading') {
 
 /**
  * Returns the SVG string for an empty-state icon. `kind` is one of
- * 'smiley' | 'sad' | 'neutral'. The returned <svg> has NO inline style —
- * callers wrap with `<span style="vertical-align:-3px;margin-left:6px;">…</span>`
+ * 'smiley' | 'sad' | 'neutral'. The returned <svg> has NO inline style �
+ * callers wrap with `<span style="vertical-align:-3px;margin-left:6px;">�</span>`
  * (or similar) to keep the per-site visual nudge they need.
  */
 export function emptyStateIcon(kind) {
@@ -866,13 +866,13 @@ const uiModule = {
 export default uiModule;
 
 // Expose the styled confirm globally so any module can replace the native
-// browser confirm() with the themed dialog — even files that don't import
+// browser confirm() with the themed dialog � even files that don't import
 // uiModule. Usage: `if (!await window.styledConfirm(msg, { danger:true })) return;`
 if (typeof window !== 'undefined') {
   window.styledConfirm = styledConfirm;
 }
 
-// ── Mobile: clear enter animation so inline transform works for dragging ──
+// ?? Mobile: clear enter animation so inline transform works for dragging ??
 // The CSS `animation: sheet-enter ... forwards` holds the final transform,
 // blocking any inline style changes. We clear it once the animation completes.
 if ('ontouchstart' in window || window.innerWidth <= 768) {
@@ -898,12 +898,12 @@ if ('ontouchstart' in window || window.innerWidth <= 768) {
   }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
 }
 
-// ── Mobile swipe-down-to-dismiss for bottom sheet modals ──
+// ?? Mobile swipe-down-to-dismiss for bottom sheet modals ??
 // Finger-following drag with velocity-based dismiss.
 // Works from grab handle, header, OR anywhere on the sheet when content is scrolled to top.
 if ('ontouchstart' in window) {
-  const DISMISS_THRESHOLD = 50;    // px — dismiss if dragged past this
-  const VELOCITY_THRESHOLD = 0.3;  // px/ms — fast flick dismisses even below threshold
+  const DISMISS_THRESHOLD = 50;    // px � dismiss if dragged past this
+  const VELOCITY_THRESHOLD = 0.3;  // px/ms � fast flick dismisses even below threshold
   const RUBBER_RESISTANCE = 0.35;  // drag resistance when pulling up past origin
 
   let _swipeTarget = null;
@@ -936,7 +936,7 @@ if ('ontouchstart' in window) {
     // can paint / move layers / draw selections without the modal trying
     // to interpret it as a swipe-to-dismiss gesture. Skip the swipe init
     // entirely when the touch starts inside the editor area.
-    if (e.target.closest('.gallery-editor, .gallery-editor-container')) return;
+    if (e.target.closest('.doc-editor-pane')) return;
     // Internal vertical drag handles (e.g. the calendar's cal-splitter that
     // resizes the day-detail pane) consume vertical touches themselves. If
     // we don't bail here, the swipe-dismiss path also tracks the touch and
@@ -953,10 +953,10 @@ if ('ontouchstart' in window) {
     const contentRect = content.getBoundingClientRect();
     const isGrabZone = (touch.clientY - contentRect.top) < 48;
     // Also allow swipe-dismiss from anywhere on the sheet when it's already
-    // scrolled to the top — feels natural and matches iOS bottom-sheet UX.
+    // scrolled to the top � feels natural and matches iOS bottom-sheet UX.
     const isAtScrollTop = content.scrollTop <= 0;
 
-    if (!isHeader && !isGrabZone && !isAtScrollTop) return; // body touches → let native scroll handle it
+    if (!isHeader && !isGrabZone && !isAtScrollTop) return; // body touches ? let native scroll handle it
 
     _swipeTarget = content;
     // Ensure CSS animation is cleared so inline transform works
@@ -1020,7 +1020,7 @@ if ('ontouchstart' in window) {
         _dragging = true;
         _swipeTarget.style.transition = 'none';
         _swipeTarget.style.willChange = 'transform';
-        // A swipe is starting — close any floating menus/dropdowns so they
+        // A swipe is starting � close any floating menus/dropdowns so they
         // don't orphan over the page once the sheet slides away. Covers the
         // email reader More menu, cookbook serve kebab + saved-configs, and
         // anything else hanging off body via _anchor.
@@ -1062,7 +1062,7 @@ if ('ontouchstart' in window) {
     el.style.willChange = '';
 
     if (shouldDismiss) {
-      // Animate out — use remaining distance to calculate duration
+      // Animate out � use remaining distance to calculate duration
       const remaining = el.offsetHeight - dy;
       const speed = Math.max(Math.abs(_velocity), 0.8); // min speed
       const duration = Math.min(Math.max(remaining / speed, 120), 300);
@@ -1073,14 +1073,14 @@ if ('ontouchstart' in window) {
         if (modal) {
           modal.classList.add('hidden');
           // Some modals (calendar, email library) toggle visibility via
-          // inline display style which would override .hidden — clear it
+          // inline display style which would override .hidden � clear it
           // so the modal is actually dismissed.
           modal.style.display = '';
           document.querySelectorAll('#settings-menu-list .list-item.active').forEach(i => i.classList.remove('active'));
           // Notify modules so they can sync internal open-state flags
           window.dispatchEvent(new CustomEvent('modal-dismissed', { detail: { id: modal.id } }));
           // Swiping a tool away to reveal a new/empty chat replays the welcome
-          // "splash" reveal — the same nice effect notes gives on dismiss.
+          // "splash" reveal � the same nice effect notes gives on dismiss.
           // Only when the welcome screen is already the active state (new chat),
           // so we never cover a chat that has messages.
           const ws = document.getElementById('welcome-screen');
@@ -1114,7 +1114,7 @@ if ('ontouchstart' in window) {
     modal.style.zIndex = topModalZ;
   });
 
-  // Backdrop tap to close — delegated for all modals
+  // Backdrop tap to close � delegated for all modals
   document.addEventListener('mousedown', (e) => {
     if (_touchInsideModal) return; // suppress synthetic events from content scrolling
     if (!e.target.classList.contains('modal')) return;
@@ -1139,11 +1139,11 @@ if ('ontouchstart' in window) {
   });
 }
 
-// ── Mobile: keep focused inputs visible above the keyboard ──
+// ?? Mobile: keep focused inputs visible above the keyboard ??
 // When an input inside a modal gets focus on mobile, the OS keyboard
 // covers the bottom half of the screen. The browser is supposed to
 // scroll the input into view, but in bottom-sheet modals with their
-// own scrolling container that often fails — the user types blind.
+// own scrolling container that often fails � the user types blind.
 // Scroll the input into the middle of the still-visible viewport
 // after the keyboard has had a moment to animate in.
 if ('ontouchstart' in window || window.innerWidth <= 768) {
@@ -1161,14 +1161,14 @@ if ('ontouchstart' in window || window.innerWidth <= 768) {
       if (['button','submit','reset','checkbox','radio','range','color','file','image'].includes(t)) return;
     }
     if (_kbScrollTimer) clearTimeout(_kbScrollTimer);
-    // The keyboard typically takes 200–300ms to slide up; do the scroll
+    // The keyboard typically takes 200�300ms to slide up; do the scroll
     // after that so we know the final visible viewport height.
     _kbScrollTimer = setTimeout(() => {
       _kbScrollTimer = null;
       // Skip the scroll if the input is already visible inside the
       // current viewport (with a small comfort margin). Otherwise every
-      // re-focus — including the programmatic refocus that happens when
-      // a typeahead input rebuilds the DOM on every keystroke — would
+      // re-focus � including the programmatic refocus that happens when
+      // a typeahead input rebuilds the DOM on every keystroke � would
       // re-scroll the modal and yank the page up and down as the user
       // types.
       try {
@@ -1185,8 +1185,8 @@ if ('ontouchstart' in window || window.innerWidth <= 768) {
   });
 }
 
-// ── Global Escape arbiter: close exactly one thing per press ──
-// Priority: expanded library card → open chat thinking block → topmost modal.
+// ?? Global Escape arbiter: close exactly one thing per press ??
+// Priority: expanded library card ? open chat thinking block ? topmost modal.
 // Runs capture-phase + stopImmediatePropagation so per-modal ESC listeners
 // never also fire (which would otherwise close several modals at once).
 if (!window._odyEscExpandGuard) {
@@ -1194,7 +1194,7 @@ if (!window._odyEscExpandGuard) {
 
   // Auto-promote any modal that becomes visible to the top of the z-stack.
   // Every modal shares `z-index: 250` from the base `.modal` rule, so visual
-  // stacking falls back to DOM order — which is unpredictable (cookbook is
+  // stacking falls back to DOM order � which is unpredictable (cookbook is
   // a static HTML node, calendar gets appended once and stays, compare and
   // research get re-appended on each open). Result: opening compare AFTER
   // cookbook can render compare UNDER it. Bumping the z-index on every
@@ -1232,7 +1232,7 @@ if (!window._odyEscExpandGuard) {
 
     // Find the single thing to close, in priority order. The first hit wins.
     // Important: if a thinking block is open we MUST handle it ourselves and
-    // not fall through to closing a modal — even if its header is missing
+    // not fall through to closing a modal � even if its header is missing
     // (the live-stream chat rebuilds thinking DOM mid-stream so the header
     // can briefly be absent). Toggling the `expanded` class directly is the
     // fallback so ESC never bypasses the thinking block to hit a modal.
@@ -1263,23 +1263,9 @@ if (!window._odyEscExpandGuard) {
       const thinkHeader = think.closest('.thinking-section')?.querySelector('.thinking-header[data-thinking-id]');
       if (thinkHeader) { try { thinkHeader.click(); } catch {} }
       else {
-        // No header found — collapse the content directly.
+        // No header found � collapse the content directly.
         try { think.classList.remove('expanded'); } catch {}
       }
-      return;
-    }
-    const galleryEditor = document.getElementById('gallery-editor-container');
-    const galleryModal = galleryEditor?.closest('.modal');
-    const galleryEditing = !!(
-      galleryEditor &&
-      galleryModal &&
-      !galleryModal.classList.contains('hidden') &&
-      getComputedStyle(galleryEditor).display !== 'none' &&
-      galleryEditor.querySelector('.gallery-editor')
-    );
-    if (galleryEditing) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
       return;
     }
     const settingsModal = document.getElementById('settings-modal');

@@ -79,8 +79,8 @@ logger = logging.getLogger(__name__)
 # and passed to FastAPI so we can use the modern context-manager lifecycle
 # instead of the deprecated @app.on_event("startup"/"shutdown") decorators.
 app = FastAPI(
-    title="AI Chat Application",
-    description="Comprehensive AI chat with memory, research, and multi-modal capabilities",
+    title="Nobody",
+    description="Personal self-hosted AI workspace — chat, agents, gallery, and tools",
     version="1.0.0",
 )
 
@@ -97,8 +97,8 @@ app.add_middleware(
         "Content-Type",
         "X-API-Key",
         "X-Auth-Token",
-        "X-Odysseus-Internal-Token",
-        "X-Odysseus-Owner",
+        "X-Nobody-Internal-Token",
+        "X-Nobody-Owner",
         "X-Requested-With",
         "X-TZ-Offset",
     ],
@@ -128,7 +128,6 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/model-endpoints", # /probe sub-route also iterates models
     "/api/cookbook/setup",  # remote pacman/apt installs
     "/api/upload",          # large files
-    "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
 )
 
 
@@ -239,7 +238,7 @@ if AUTH_ENABLED:
         forwarding headers. A bare ``client.host in ('127.0.0.1','::1')`` check is
         unsafe behind a Cloudflare tunnel / reverse proxy: those connect from
         loopback, so a remote visitor would otherwise inherit local trust and
-        slip past LOCALHOST_BYPASS or spoof the internal-tool path. Odysseus's own
+        slip past LOCALHOST_BYPASS or spoof the internal-tool path. Nobody's own
         in-process agent loopback calls carry none of these headers, so they still
         qualify."""
         host = request.client.host if request.client else None
@@ -260,14 +259,24 @@ if AUTH_ENABLED:
             # (no admin cookie available in that context). Restricted to
             # loopback clients + matching token to keep it locked down.
             try:
-                from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN as _ITT
+                from core.middleware import INTERNAL_TOOL_HEADER, LEGACY_INTERNAL_TOOL_HEADERS, INTERNAL_TOOL_TOKEN as _ITT
                 _hdr = request.headers.get(INTERNAL_TOOL_HEADER)
+                if not _hdr:
+                    for _lh in LEGACY_INTERNAL_TOOL_HEADERS:
+                        _hdr = request.headers.get(_lh)
+                        if _hdr:
+                            break
                 if _hdr and secrets.compare_digest(_hdr, _ITT) and _is_trusted_loopback(request):
                     # Impersonation: when the agent's loopback call sets
-                    # X-Odysseus-Owner, attribute the request to that user only
+                    # X-Nobody-Owner (legacy X-Oculus-Owner / X-Odysseus-Owner), attribute the request to that user only
                     # if they exist. Authorization checks remain separate; this
                     # is just owner attribution for notes/calendar/etc.
-                    _impersonate = (request.headers.get("X-Odysseus-Owner") or "").strip()
+                    _impersonate = (
+                        request.headers.get("X-Nobody-Owner")
+                        or request.headers.get("X-Oculus-Owner")
+                        or request.headers.get("X-Odysseus-Owner")
+                        or ""
+                    ).strip()
                     _auth_mgr = getattr(request.app.state, "auth_manager", None) or auth_manager
                     if _impersonate and _impersonate in getattr(_auth_mgr, "users", {}):
                         request.state.current_user = _impersonate
@@ -609,10 +618,6 @@ app.include_router(setup_signature_routes())
 # Gallery (image library)
 from routes.gallery_routes import setup_gallery_routes
 app.include_router(setup_gallery_routes())
-
-# Persisted image-editor drafts (server-backed projects)
-from routes.editor_draft_routes import setup_editor_draft_routes
-app.include_router(setup_editor_draft_routes())
 
 # Scheduled tasks + event bus
 from src.task_scheduler import TaskScheduler
@@ -993,13 +998,13 @@ async def _startup_event():
 
     # Start scheduled task runner — skip when running under a cron-driven
     # deployment where an external worker drives task firing. Mirrors
-    # `ODYSSEUS_INPROCESS_POLLERS` from the email pollers.
-    _tasks_inprocess = os.environ.get("ODYSSEUS_INPROCESS_TASKS", "1").strip().lower()
+    # `NOBODY_INPROCESS_POLLERS` from the email pollers.
+    _tasks_inprocess = os.environ.get("NOBODY_INPROCESS_TASKS", "1").strip().lower()
     if _tasks_inprocess not in ("0", "false", "no", "off", ""):
         await task_scheduler.start()
     else:
         logger.info(
-            "In-process task scheduler disabled (ODYSSEUS_INPROCESS_TASKS=0); "
+            "In-process task scheduler disabled (NOBODY_INPROCESS_TASKS=0); "
             "drive task firing externally (e.g. cron)."
         )
     # Periodic null-owner sweep — re-runs the legacy-owner assignment hourly

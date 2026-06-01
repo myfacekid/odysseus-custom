@@ -5488,7 +5488,8 @@ body.bg-pattern-sparkles {
     /* (legacy toolbar-toggle styles removed — now using .vis-* classes) */
 
     /* Demo highlight pulse */
-    .odysseus-highlight {
+    .odysseus-highlight,
+    .nobody-highlight {
       outline: 2px solid var(--accent, var(--red)) !important;
       outline-offset: 1px;
       box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, var(--red)) 18%, transparent);
@@ -34449,6 +34450,22 @@ body.research-panel-view #research-divider { display:none; }
   display:inline-block; width:11px; height:11px; vertical-align:-1px; margin-right:4px;
   border:2px solid currentColor; border-right-color:transparent; border-radius:50%;
   animation: spin 0.7s linear infinite;
+}
+.research-preprint-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.research-preprint-toggle input {
+  accent-color: var(--red);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }
 .research-category-row {
   display:flex; gap:4px; margin-top:8px; flex-wrap:wrap;

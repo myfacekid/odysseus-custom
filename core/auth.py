@@ -409,6 +409,7 @@ class AuthManager:
     # ------------------------------------------------------------------
 
     def verify_password(self, username: str, password: str) -> bool:
+        self._load()  # pick up auth.json edits without a server restart
         username = username.strip().lower()
         if username not in self.users:
             return False

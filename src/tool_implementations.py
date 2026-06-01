@@ -2486,7 +2486,7 @@ def _internal_headers(owner: Optional[str] = None) -> Dict[str, str]:
     from core.middleware import INTERNAL_TOOL_HEADER, INTERNAL_TOOL_TOKEN
     headers = {INTERNAL_TOOL_HEADER: INTERNAL_TOOL_TOKEN}
     if owner:
-        headers["X-Odysseus-Owner"] = owner
+        headers["X-Nobody-Owner"] = owner
     return headers
 
 
@@ -3683,30 +3683,8 @@ async def do_list_cached_models(content: str, owner: Optional[str] = None) -> Di
 # ── Gallery tools ──
 
 async def do_edit_image(content: str, owner: Optional[str] = None) -> Dict:
-    """Edit a gallery image (upscale, rembg, inpaint, harmonize)."""
-    import httpx
-    try:
-        args = _parse_tool_args(content)
-    except ValueError:
-        return {"error": "Invalid JSON arguments", "exit_code": 1}
-    image_id = args.get("image_id", "")
-    action = args.get("action", "")
-    if not image_id or not action:
-        return {"error": "image_id and action are required", "exit_code": 1}
-    payload = {"image_id": image_id}
-    if args.get("prompt"):
-        payload["prompt"] = args["prompt"]
-    if args.get("scale"):
-        payload["scale"] = args["scale"]
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(f"http://localhost:7000/api/gallery/{action}", json=payload)
-            data = resp.json()
-        if data.get("success") or data.get("id"):
-            return {"output": f"Image edited ({action}). New image ID: {data.get('id', '?')}", "exit_code": 0}
-        return {"error": data.get("error", f"{action} failed"), "exit_code": 1}
-    except Exception as e:
-        return {"error": str(e), "exit_code": 1}
+    """Image editing was removed — gallery is view-only."""
+    return {"error": "Image editing is not available in this build (view-only gallery).", "exit_code": 1}
 
 
 # ── Research tools ──

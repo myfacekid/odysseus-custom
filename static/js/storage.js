@@ -2,9 +2,38 @@
 // Centralized localStorage access with key constants and JSON parse safety
 
 // ── Key constants ──
+const LEGACY_KEY_MAP = {
+  'nobody-theme': ['oculus-theme', 'odysseus-theme'],
+  'nobody-toggles': ['oculus-toggles', 'odysseus-toggles'],
+  'nobody-model-expanded': ['oculus-model-expanded', 'odysseus-model-expanded'],
+  'nobody-model-endpoints': ['oculus-model-endpoints', 'odysseus-model-endpoints'],
+  'nobody-selected-model': ['oculus-selected-model', 'odysseus-selected-model'],
+  'nobody-sessions-sort': ['oculus-sessions-sort', 'odysseus-sessions-sort'],
+  'nobody-search-scope': ['oculus-search-scope', 'odysseus-search-scope'],
+  'nobody-incognito': ['oculus-incognito', 'odysseus-incognito'],
+  'nobody-rag-active': ['oculus-rag-active', 'odysseus-rag-active'],
+  'nobody-mcp-active': ['oculus-mcp-active', 'odysseus-mcp-active'],
+  'nobody-density': ['oculus-density', 'odysseus-density'],
+};
+
+function _readKey(key) {
+  try {
+    let val = localStorage.getItem(key);
+    if (val !== null) return val;
+    for (const legacy of LEGACY_KEY_MAP[key] || []) {
+      val = localStorage.getItem(legacy);
+      if (val !== null) {
+        localStorage.setItem(key, val);
+        return val;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
 export const KEYS = {
-  THEME: 'odysseus-theme',
-  TOGGLES: 'odysseus-toggles',
+  THEME: 'nobody-theme',
+  TOGGLES: 'nobody-toggles',
   SIDEBAR_COLLAPSED: 'sidebar-collapsed',
   SIDEBAR_WIDTH: 'sidebar-width',
   SIDEBAR_SIDE: 'sidebar-side',
@@ -13,17 +42,17 @@ export const KEYS = {
   COMPARE_CHAT: 'compare-continue-chat',
   COMPARE_BLIND: 'compare-blind',
   COMPARE_RANDOM: 'compare-randomize',
-  MODELS_EXPANDED: 'odysseus-model-expanded',
-  MODEL_ENDPOINTS: 'odysseus-model-endpoints',
-  MODEL_SELECTED: 'odysseus-selected-model',
-  SORT_ORDER: 'odysseus-sessions-sort',
-  CHAT_SEARCH_SCOPE: 'odysseus-search-scope',
-  INCOGNITO: 'odysseus-incognito',
-  RAG_ACTIVE: 'odysseus-rag-active',
-  MCP_ACTIVE: 'odysseus-mcp-active',
+  MODELS_EXPANDED: 'nobody-model-expanded',
+  MODEL_ENDPOINTS: 'nobody-model-endpoints',
+  MODEL_SELECTED: 'nobody-selected-model',
+  SORT_ORDER: 'nobody-sessions-sort',
+  CHAT_SEARCH_SCOPE: 'nobody-search-scope',
+  INCOGNITO: 'nobody-incognito',
+  RAG_ACTIVE: 'nobody-rag-active',
+  MCP_ACTIVE: 'nobody-mcp-active',
   SECTION_ORDER: 'sidebar-section-order',
   ADMIN_LAST_TAB: 'admin-last-tab',
-  DENSITY: 'odysseus-density'
+  DENSITY: 'nobody-density'
 };
 
 /**
@@ -32,7 +61,7 @@ export const KEYS = {
  */
 export function getJSON(key, fallback) {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = _readKey(key);
     if (raw === null) return fallback !== undefined ? fallback : null;
     return JSON.parse(raw);
   } catch (e) {
@@ -57,7 +86,7 @@ export function setJSON(key, value) {
  */
 export function get(key, fallback) {
   try {
-    const val = localStorage.getItem(key);
+    const val = _readKey(key);
     return val !== null ? val : (fallback !== undefined ? fallback : null);
   } catch (e) {
     return fallback !== undefined ? fallback : null;

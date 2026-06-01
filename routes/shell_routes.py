@@ -98,7 +98,7 @@ PTY_SUPPORTED = pty is not None and fcntl is not None and hasattr(os, "setsid")
 
 
 DOCKER_IN_CONTAINER_HINT = (
-    "Not available inside the Odysseus container by design. The image ships no "
+    "Not available inside the Nobody container by design. The image ships no "
     "docker CLI and no host socket is mounted. Run Docker-backed launches on a "
     "remote server, where docker is checked over SSH. Mounting /var/run/docker.sock "
     "into the container would grant it host-root access, so only do that if you "
@@ -912,10 +912,8 @@ def setup_shell_routes() -> APIRouter:
             {"name": "llama_cpp", "pip": "llama-cpp-python[server]", "desc": "Serve GGUF models via llama.cpp", "category": "LLM", "target": "remote"},
             {"name": "sglang", "pip": "sglang[all]", "desc": "Serve HF safetensors models via SGLang", "category": "LLM", "target": "remote"},
             {"name": "vllm", "pip": "vllm", "desc": "High-throughput LLM serving engine", "category": "LLM", "target": "remote"},
-            # ── Image ── editor + diffusion model serving
+            # ── Image ── diffusion model serving (txt2img)
             {"name": "diffusers", "pip": "diffusers[torch]", "desc": "Image generation pipelines (SD, Flux) with PyTorch", "category": "Image", "target": "remote"},
-            {"name": "rembg", "pip": "rembg[gpu]", "desc": "AI background removal for image editor", "category": "Image", "target": "local"},
-            {"name": "realesrgan", "pip": "realesrgan", "desc": "AI denoise + upscale (Real-ESRGAN). Used by editor's Denoise and Upscale tools.", "category": "Image", "target": "local"},
             # ── Tools ──
             {"name": "playwright", "pip": "playwright", "desc": "Browser automation for web tools", "category": "Tools", "target": "local"},
         ]
@@ -1044,7 +1042,7 @@ def setup_shell_routes() -> APIRouter:
         # Validate against known packages to prevent arbitrary pip install
         known = {
             "rembg[gpu]", "hf_transfer", "llama-cpp-python[server]", "sglang[all]", "diffusers", "diffusers[torch]",
-            "TTS", "bark", "faster-whisper", "playwright", "realesrgan", "gfpgan",
+            "TTS", "bark", "faster-whisper", "playwright",
             "insightface", "onnxruntime-gpu", "onnxruntime", "hdbscan", "vllm",
         }
         if pip_name not in known:

@@ -1123,40 +1123,6 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
   });
   actions.appendChild(dlBtn);
 
-  const editBtn = document.createElement('button');
-  editBtn.className = 'footer-copy-btn';
-  editBtn.type = 'button';
-  editBtn.title = 'Edit in image editor';
-  editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
-  editBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    try {
-      const [galleryMod, editorMod] = await Promise.all([
-        import('./gallery.js'),
-        import('./galleryEditor.js'),
-      ]);
-      // Ensure the Gallery modal is open so the editor has a container
-      // to render into; switch its tabs to the Edit tab.
-      galleryMod.default.openGallery();
-      const modal = document.getElementById('gallery-modal');
-      if (modal) {
-        modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
-        modal.querySelector('.gallery-tab[data-tab="editor"]')?.classList.add('active');
-      }
-      const imagesContainer = document.getElementById('gallery-images-container');
-      const albumsContainer = document.getElementById('gallery-albums-container');
-      if (imagesContainer) imagesContainer.style.display = 'none';
-      if (albumsContainer) albumsContainer.style.display = 'none';
-      const editorContainer = document.getElementById('gallery-editor-container');
-      if (editorContainer) editorContainer.style.display = 'flex';
-      const label = (prompt || '').trim().slice(0, 60) || 'Generated image';
-      editorMod.openEditor(imageUrl, null, null, label);
-    } catch (err) {
-      console.error('[chat] open in editor failed', err);
-    }
-  });
-  actions.appendChild(editBtn);
-
   const delBtn = document.createElement('button');
   delBtn.className = 'footer-copy-btn footer-delete-btn';
   delBtn.type = 'button';
@@ -1772,7 +1738,7 @@ export function displayMetrics(messageElement, metrics) {
           compactMsg.className = 'msg msg-ai';
           const compactRole = document.createElement('div');
           compactRole.className = 'role';
-          compactRole.textContent = 'Odysseus';
+          compactRole.textContent = 'Nobody';
           const compactBody = document.createElement('div');
           compactBody.className = 'body';
           compactBody.innerHTML = 'Compacting context <span class="compact-wave">▁▂▃▅▂▁</span>';
@@ -2005,7 +1971,7 @@ export function addMessage(role, content, modelName, metadata) {
     const isSlash = metadata?.source === 'slash';
     const isCompacted = metadata?.compacted;
     const resolvedModel = modelName || metadata?.model;
-    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Odysseus' : shortModel(resolvedModel);
+    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Nobody' : shortModel(resolvedModel);
     if (role === 'assistant' && (metadata?.research || metadata?.research_clarification)) {
       _roleText += ' (Research)';
     }
