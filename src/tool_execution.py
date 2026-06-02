@@ -718,7 +718,7 @@ async def execute_tool_block(
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
         do_list_serve_presets, do_serve_preset, do_adopt_served_model,
         do_list_cookbook_servers,
-        do_edit_image, do_trigger_research, do_manage_research, do_search_zotero,
+        do_edit_image, do_trigger_research, do_manage_research, do_search_vault, do_search_zotero,
         do_resolve_contact,
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
@@ -916,6 +916,9 @@ async def execute_tool_block(
     elif tool == "manage_research":
         desc = "manage_research"
         result = await do_manage_research(content, owner=owner)
+    elif tool == "search_vault":
+        desc = "search_vault"
+        result = await do_search_vault(content, owner=owner)
     elif tool == "search_zotero":
         desc = "search_zotero"
         result = await do_search_zotero(content, owner=owner)

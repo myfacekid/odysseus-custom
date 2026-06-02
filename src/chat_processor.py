@@ -171,6 +171,7 @@ class ChatProcessor:
         incognito: bool = False,
         use_skills: bool = True,
         use_zotero: bool = False,
+        use_vault: bool = False,
     ) -> Tuple[List[Dict[str, str]], List[Dict[str, Any]], List[Dict[str, str]]]:
         """Build the context preface for LLM calls.
 
@@ -291,6 +292,30 @@ class ChatProcessor:
                 preface.append({
                     "role": "system",
                     "content": "Zotero library search encountered an error and could not retrieve results.",
+                })
+
+        _inject_vault = use_vault
+        if not _inject_vault:
+            try:
+                from src.obsidian_vault import resolve_vault_config, vault_intent_in_query
+                _inject_vault = bool(resolve_vault_config(owner or "")) and vault_intent_in_query(message)
+            except Exception:
+                _inject_vault = False
+        if _inject_vault:
+            try:
+                from src.obsidian_vault import search_vault_for_chat
+                vault_context, vault_sources = search_vault_for_chat(
+                    message, owner=owner or "", limit=8,
+                )
+                preface.append(untrusted_context_message(
+                    "obsidian vault search results", vault_context,
+                ))
+                web_sources.extend(vault_sources)
+            except Exception as e:
+                logger.error(f"Vault search failed: {e}")
+                preface.append({
+                    "role": "system",
+                    "content": "Obsidian vault search encountered an error and could not retrieve results.",
                 })
 
         # Process non-YouTube URLs in message (YouTube handled by preprocess_message)

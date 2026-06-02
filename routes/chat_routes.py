@@ -252,6 +252,7 @@ def setup_chat_routes(
         att_ids = chat_request.attachments or []
         use_web = chat_request.use_web
         use_zotero = chat_request.use_zotero
+        use_vault = chat_request.use_vault
         use_research = chat_request.use_research
         time_filter = chat_request.time_filter
         preset_id = chat_request.preset_id
@@ -296,6 +297,7 @@ def setup_chat_routes(
             att_ids=att_ids,
             use_web=use_web,
             use_zotero=use_zotero,
+            use_vault=use_vault,
             time_filter=time_filter,
             webhook_manager=webhook_manager,
         )
@@ -374,6 +376,7 @@ def setup_chat_routes(
         attachments = form_data.get("attachments")
         use_web = form_data.get("use_web")
         use_zotero = form_data.get("use_zotero")
+        use_vault = form_data.get("use_vault")
         use_research = form_data.get("use_research")
         time_filter = form_data.get("time_filter")
         preset_id = form_data.get("preset_id")
@@ -487,6 +490,7 @@ def setup_chat_routes(
             att_ids=att_ids,
             use_web=use_web,
             use_zotero=use_zotero,
+            use_vault=use_vault,
             use_rag=use_rag,
             time_filter=time_filter,
             incognito=incognito,

@@ -709,6 +709,8 @@ app.include_router(setup_companion_routes())
 
 from routes.zotero_routes import setup_zotero_routes
 app.include_router(setup_zotero_routes())
+from routes.obsidian_vault_routes import setup_obsidian_vault_routes
+app.include_router(setup_obsidian_vault_routes())
 
 # ========= ROUTES (kept in app.py) =========
 

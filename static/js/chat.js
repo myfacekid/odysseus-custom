@@ -772,6 +772,10 @@ import createResearchSynapse from './researchSynapse.js';
       if (zoteroChk && zoteroChk.checked) {
         fd.append('use_zotero', 'true');
       }
+      const vaultChk = el('vault-toggle');
+      if (vaultChk && vaultChk.checked) {
+        fd.append('use_vault', 'true');
+      }
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');

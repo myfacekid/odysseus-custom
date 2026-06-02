@@ -1608,6 +1608,114 @@ async function initZoteroSettings() {
   });
 }
 
+/* ── Obsidian Vault (Search tab, per-user) ── */
+async function initObsidianVaultSettings() {
+  var pathInput = el('set-obsidianVaultPath');
+  var dailyInput = el('set-obsidianDailyFolder');
+  var msg = el('set-obsidianVaultMsg');
+  var saveBtn = el('set-obsidianVaultSave');
+  var testBtn = el('set-obsidianVaultTest');
+  var clearBtn = el('set-obsidianVaultClear');
+  var reindexBtn = el('set-obsidianVaultReindex');
+  if (!pathInput || !saveBtn) return;
+
+  async function loadConfig() {
+    try {
+      var res = await fetch('/api/obsidian-vault/config', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      var cfg = await res.json();
+      if (cfg.vault_path) pathInput.value = cfg.vault_path;
+      else pathInput.placeholder = '~/Documents/Vault_1/Vault_1';
+      if (dailyInput) dailyInput.value = cfg.daily_notes_folder || 'Daily Notes';
+      if (cfg.configured) {
+        msg.textContent = 'Vault: ' + (cfg.vault_path_expanded || cfg.vault_path);
+        msg.style.color = 'var(--fg)';
+      } else if (cfg.exists === false && cfg.vault_path_expanded) {
+        msg.textContent = 'Path not found — check folder exists, then Save';
+        msg.style.color = 'var(--red)';
+      } else {
+        msg.textContent = 'Set vault path and Save (default works if folder exists)';
+        msg.style.color = 'color-mix(in srgb, var(--fg) 55%, transparent)';
+      }
+    } catch (e) { console.warn('Failed to load Obsidian vault config', e); }
+  }
+  await loadConfig();
+
+  saveBtn.addEventListener('click', async function() {
+    msg.textContent = 'Saving…';
+    try {
+      var body = {
+        vault_path: pathInput.value.trim(),
+        daily_notes_folder: dailyInput ? dailyInput.value.trim() : 'Daily Notes',
+      };
+      var res = await fetch('/api/obsidian-vault/config', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Save failed');
+      msg.textContent = 'Saved — ' + (data.vault_path_expanded || data.vault_path);
+      msg.style.color = 'var(--fg)';
+    } catch (e) {
+      msg.textContent = '✗ ' + (e.message || e);
+      msg.style.color = 'var(--red)';
+    }
+  });
+
+  testBtn?.addEventListener('click', async function() {
+    msg.textContent = 'Testing…';
+    try {
+      var body = {
+        vault_path: pathInput.value.trim(),
+        daily_notes_folder: dailyInput ? dailyInput.value.trim() : 'Daily Notes',
+      };
+      var res = await fetch('/api/obsidian-vault/test', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Test failed');
+      msg.textContent = '✓ ' + (data.message || 'Connected');
+      msg.style.color = 'var(--fg)';
+    } catch (e) {
+      msg.textContent = '✗ ' + (e.message || e);
+      msg.style.color = 'var(--red)';
+    }
+  });
+
+  reindexBtn?.addEventListener('click', async function() {
+    msg.textContent = 'Reindexing semantic search…';
+    try {
+      var res = await fetch('/api/obsidian-vault/reindex', {
+        method: 'POST', credentials: 'same-origin',
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Reindex failed');
+      msg.textContent = '✓ ' + (data.message || 'Reindexed');
+      msg.style.color = 'var(--fg)';
+    } catch (e) {
+      msg.textContent = '✗ ' + (e.message || e);
+      msg.style.color = 'var(--red)';
+    }
+  });
+
+  clearBtn?.addEventListener('click', async function() {
+    if (!await window.styledConfirm('Clear saved vault path for this account?', { confirmText: 'Clear', danger: true })) return;
+    try {
+      await fetch('/api/obsidian-vault/config/clear', { method: 'POST', credentials: 'same-origin' });
+      pathInput.value = '';
+      if (dailyInput) dailyInput.value = 'Daily Notes';
+      msg.textContent = 'Cleared — default path used if folder exists';
+      msg.style.color = 'var(--fg)';
+    } catch (e) {
+      msg.textContent = '✗ Clear failed';
+      msg.style.color = 'var(--red)';
+    }
+  });
+}
+
 /* ── Deep Research Search (Search tab) ── */
 async function initResearchSearchSettings() {
   var searchSel = el('set-researchSearch');
@@ -2265,6 +2373,7 @@ function initAll() {
   initSearchSettings();
   initResearchSettings();
   initZoteroSettings();
+  initObsidianVaultSettings();
   initResearchSearchSettings();
   initAgentSettings();
   initAppearance();
@@ -4359,22 +4468,23 @@ async function initUnifiedIntegrations() {
           <h2 style="font-size:13px">Add MCP Server</h2>
           <div class="settings-col">
             <div class="settings-row"><label class="settings-label">Name</label><input id="uf-mcp-name" class="settings-input" placeholder="Server name"></div>
-            <div class="settings-row"><label class="settings-label">Transport</label><select id="uf-mcp-transport" class="settings-input"><option value="stdio">stdio</option><option value="sse">SSE</option></select></div>
+            <div class="settings-row"><label class="settings-label">Transport</label><select id="uf-mcp-transport" class="settings-input"><option value="stdio">stdio</option><option value="streamable_http">Streamable HTTP</option><option value="sse">SSE (legacy)</option></select></div>
             <div id="uf-mcp-stdio-fields" style="display:flex;flex-direction:column;gap:6px;">
               <div class="settings-row"><label class="settings-label">Command</label><input id="uf-mcp-cmd" class="settings-input" placeholder="npx"></div>
               <div class="settings-row"><label class="settings-label">Args</label><input id="uf-mcp-args" class="settings-input" placeholder='["-y", "@modelcontextprotocol/server-filesystem"]'></div>
-              <div class="settings-row"><label class="settings-label">Env</label><input id="uf-mcp-env" class="settings-input" placeholder='{"KEY": "value"}'></div>
+              <div class="settings-row"><label class="settings-label">Env</label><input id="uf-mcp-stdio-env" class="settings-input" placeholder='{"KEY": "value"}'></div>
             </div>
             <div id="uf-mcp-sse-fields" style="display:none;flex-direction:column;gap:6px;">
-              <div class="settings-row"><label class="settings-label">URL</label><input id="uf-mcp-url" class="settings-input" placeholder="http://localhost:3001/sse"></div>
+              <div class="settings-row"><label class="settings-label">URL</label><input id="uf-mcp-url" class="settings-input" placeholder="https://127.0.0.1:27124/mcp/"></div>
+              <div class="settings-row"><label class="settings-label">Env</label><input id="uf-mcp-env" class="settings-input" placeholder='{"OBSIDIAN_API_KEY": "your-key"}'></div>
             </div>
             <div class="settings-row" style="margin-top:4px"><button class="admin-btn-sm" id="uf-mcp-save">Save</button><button class="admin-btn-sm" id="uf-mcp-cancel" style="opacity:0.7">Cancel</button><span id="uf-mcp-msg" style="font-size:11px"></span></div>
           </div>
         </div>`;
       el('uf-mcp-transport').addEventListener('change', () => {
-        const sse = el('uf-mcp-transport').value === 'sse';
-        el('uf-mcp-stdio-fields').style.display = sse ? 'none' : 'flex';
-        el('uf-mcp-sse-fields').style.display = sse ? 'flex' : 'none';
+        const remote = el('uf-mcp-transport').value !== 'stdio';
+        el('uf-mcp-stdio-fields').style.display = remote ? 'none' : 'flex';
+        el('uf-mcp-sse-fields').style.display = remote ? 'flex' : 'none';
       });
       el('uf-mcp-cancel').addEventListener('click', () => { formEl.style.display = 'none'; });
       el('uf-mcp-save').addEventListener('click', async () => {
@@ -4386,11 +4496,13 @@ async function initUnifiedIntegrations() {
         if (transport === 'stdio') {
           fd.append('command', el('uf-mcp-cmd').value);
           let args = '[]'; try { args = JSON.stringify(JSON.parse(el('uf-mcp-args').value || '[]')); } catch (_) {}
-          let env  = '{}'; try { env  = JSON.stringify(JSON.parse(el('uf-mcp-env').value  || '{}')); } catch (_) {}
+          let env  = '{}'; try { env  = JSON.stringify(JSON.parse(el('uf-mcp-stdio-env')?.value  || '{}')); } catch (_) {}
           fd.append('args', args);
           fd.append('env', env);
         } else {
           fd.append('url', el('uf-mcp-url').value);
+          let env = '{}'; try { env = JSON.stringify(JSON.parse(el('uf-mcp-env')?.value || '{}')); } catch (_) {}
+          fd.append('env', env);
         }
         try {
           const r = await fetch('/api/mcp/servers', { method: 'POST', credentials: 'same-origin', body: fd });

@@ -20,12 +20,12 @@ export function handleUIControl(uiData) {
     if (uiEvent === 'toggle' || uiData.ui_event === 'toggle') {
       var toggleMap = {
         web: 'web-toggle', bash: 'bash-toggle', rag: 'rag-toggle',
-        zotero: 'zotero-toggle',
+        zotero: 'zotero-toggle', vault: 'vault-toggle',
         research: 'research-toggle', incognito: 'incognito-toggle',
       };
       var btnMap = {
         web: 'web-toggle-btn', bash: 'bash-toggle-btn', rag: 'rag-indicator-btn',
-        zotero: 'zotero-indicator-btn',
+        zotero: 'zotero-indicator-btn', vault: 'vault-indicator-btn',
       };
       var chkId = toggleMap[uiData.toggle_name];
       var btnId = btnMap[uiData.toggle_name];
@@ -33,6 +33,8 @@ export function handleUIControl(uiData) {
         window._syncRagIndicator(!!uiData.state);
       } else if (uiData.toggle_name === 'zotero' && window._syncZoteroIndicator) {
         window._syncZoteroIndicator(!!uiData.state);
+      } else if (uiData.toggle_name === 'vault' && window._syncVaultIndicator) {
+        window._syncVaultIndicator(!!uiData.state);
       } else {
         if (chkId) {
           var chk = document.getElementById(chkId);

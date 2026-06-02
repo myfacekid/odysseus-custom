@@ -1611,6 +1611,7 @@ function initializeEventListeners() {
     builder: { role: 'Tool Builder', text: 'Create custom mini-apps and tools the AI can use. Describe what you need and the AI will build a tool you can reuse across conversations.' },
     research: { role: 'Academic Research', text: 'Multi-round scholarly literature synthesis with numbered citations and source analysis. Takes longer but produces rigorous, evidence-grounded reports. Your next message will trigger an academic research cycle.' },
     zotero: { role: 'Zotero Library', text: 'Searches your synced Zotero library for papers and PDFs related to your message. Configure credentials in Settings → Search. Works alongside web search when both are enabled.' },
+    vault: { role: 'Obsidian Vault', text: 'Searches, reads, and writes your local Obsidian vault. The agent can follow [[wikilinks]], link notes together, append to daily notes, and patch existing markdown. Configure the folder path in Settings → Search.' },
   };
   function _showToolSplash(key) {
     const splash = _toolSplashes[key];
@@ -1729,8 +1730,22 @@ function initializeEventListeners() {
     const s = loadToggleState(); s.zotero = active; saveToggleState(s);
     updatePlusDot();
   }
+  function _syncVaultIndicator(active) {
+    const indicator = el('vault-indicator-btn');
+    const overflow = el('overflow-vault-btn');
+    const chk = el('vault-toggle');
+    if (chk) chk.checked = active;
+    if (indicator) {
+      indicator.style.display = active ? '' : 'none';
+      indicator.classList.toggle('active', active);
+    }
+    if (overflow) overflow.classList.toggle('active', active);
+    const s = loadToggleState(); s.vault = active; saveToggleState(s);
+    updatePlusDot();
+  }
   window._syncRagIndicator = _syncRagIndicator;
   window._syncZoteroIndicator = _syncZoteroIndicator;
+  window._syncVaultIndicator = _syncVaultIndicator;
   window._syncResearchIndicator = _syncResearchIndicator;
   // Must be assigned at module level (not inside the function body) so the very
   // first external caller — group.js / sessions.js fire it before it has ever
@@ -1744,6 +1759,8 @@ function initializeEventListeners() {
     _syncRagIndicator(ragState);
     const zoteroState = st.zotero || false;
     _syncZoteroIndicator(zoteroState);
+    const vaultState = st.vault || false;
+    _syncVaultIndicator(vaultState);
   }
 
   // ── Overflow "..." menu (Research) ──
@@ -2185,6 +2202,23 @@ function initializeEventListeners() {
     });
   }
 
+  // ── Overflow Vault toggle ──
+  const overflowVaultBtn = el('overflow-vault-btn');
+  const vaultIndicatorBtn = el('vault-indicator-btn');
+  if (overflowVaultBtn) {
+    overflowVaultBtn.addEventListener('click', () => {
+      const chk = el('vault-toggle');
+      const isActive = chk ? !chk.checked : true;
+      _syncVaultIndicator(isActive);
+      if (isActive) _showToolSplash('vault');
+    });
+  }
+  if (vaultIndicatorBtn) {
+    vaultIndicatorBtn.addEventListener('click', () => {
+      _syncVaultIndicator(false);
+    });
+  }
+
   // ── Overflow Research toggle ──
   const overflowResearchBtn = el('overflow-research-btn');
   if (overflowResearchBtn) {
@@ -2417,6 +2451,7 @@ function initializeEventListeners() {
     'doc-toggle-btn':      '#overflow-doc-btn',
     'rag-toggle-btn':      '#overflow-rag-btn',
     'zotero-toggle-btn':   '#overflow-zotero-btn',
+    'vault-toggle-btn':    '#overflow-vault-btn',
     'bash-toggle-btn':     '#bash-toggle-btn',
     'overflow-plus-btn':   '.overflow-wrapper',
     'mode-toggle':         '.mode-toggle',

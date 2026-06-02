@@ -1142,6 +1142,15 @@ const MCP_PRESETS = [
     help: "Replace the connection string in the Args field with your actual Postgres connection URL." },
   { name: "Todoist",         command: "npx", args: ["-y", "todoist-mcp-server"],                         env: { TODOIST_API_TOKEN: "" },
     help: "1. Go to todoist.com > Settings > Integrations > Developer\n2. Copy your API token" },
+  { name: "Obsidian (Local REST API)", transport: "streamable_http",
+    url: "https://127.0.0.1:27124/mcp/",
+    env: { OBSIDIAN_API_KEY: "" },
+    help: `Setup:
+1. In Obsidian install the "Local REST API" community plugin
+2. Settings → Local REST API → copy your API key
+3. Paste it as Obsidian Api Key above
+4. Default URL is https://127.0.0.1:27124/mcp/ (self-signed TLS; HTTP alt: http://127.0.0.1:27123/mcp/)
+5. Click Add Server, then Reconnect if needed` },
 ];
 // ── Built-in tools management ──
 const TOOL_META = {
@@ -1561,10 +1570,10 @@ function initMcpForm() {
   }
 
   transportSel.addEventListener('change', () => {
-    const isSse = transportSel.value === 'sse';
-    sseRow.style.display = isSse ? '' : 'none';
-    cmdRow.style.display = isSse ? 'none' : '';
-    if (isSse) { _clearEnvFields(); helpBox.style.display = 'none'; }
+    const isRemote = transportSel.value === 'sse' || transportSel.value === 'streamable_http';
+    sseRow.style.display = isRemote ? '' : 'none';
+    cmdRow.style.display = isRemote ? 'none' : '';
+    if (isRemote) { _clearEnvFields(); helpBox.style.display = 'none'; }
   });
 
   // Preset catalog
@@ -1580,12 +1589,20 @@ function initMcpForm() {
       if (presetSel.value === '') return;
       const p = MCP_PRESETS[parseInt(presetSel.value)];
       el('adm-mcpName').value = p.name.toLowerCase().replace(/\s+/g, '-');
-      transportSel.value = 'stdio';
-      el('adm-mcpCommand').value = p.command;
-      el('adm-mcpArgs').value = JSON.stringify(p.args);
-      sseRow.style.display = 'none';
-      cmdRow.style.display = '';
-      _buildEnvFields(p.env, p.help || null, p);
+      if (p.transport === 'sse' || p.transport === 'streamable_http') {
+        transportSel.value = p.transport;
+        el('adm-mcpUrl').value = p.url || '';
+        sseRow.style.display = '';
+        cmdRow.style.display = 'none';
+        _buildEnvFields(p.env || {}, p.help || null, p);
+      } else {
+        transportSel.value = 'stdio';
+        el('adm-mcpCommand').value = p.command;
+        el('adm-mcpArgs').value = JSON.stringify(p.args);
+        sseRow.style.display = 'none';
+        cmdRow.style.display = '';
+        _buildEnvFields(p.env, p.help || null, p);
+      }
       _activeOauthFile = p.oauthFile || null;
       _activeOauth = p.oauth || null;
       presetSel.value = '';
@@ -1606,7 +1623,7 @@ function initMcpForm() {
     const msg = el('adm-mcpMsg');
     if (!name) { msg.textContent = 'Name is required'; msg.className = 'admin-error'; return; }
     if (transport === 'stdio' && !command) { msg.textContent = 'Command is required for stdio'; msg.className = 'admin-error'; return; }
-    if (transport === 'sse' && !url) { msg.textContent = 'URL is required for SSE'; msg.className = 'admin-error'; return; }
+    if ((transport === 'sse' || transport === 'streamable_http') && !url) { msg.textContent = 'URL is required for remote MCP'; msg.className = 'admin-error'; return; }
     try { JSON.parse(env); } catch { msg.textContent = 'Env must be valid JSON'; msg.className = 'admin-error'; return; }
     const fd = new FormData();
     fd.append('name', name); fd.append('transport', transport); fd.append('command', command); fd.append('args', args); fd.append('env', env); fd.append('url', url);

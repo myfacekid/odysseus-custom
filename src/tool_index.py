@@ -63,6 +63,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "python": "Execute Python code for computation, data processing, math, scripting, parsing, API calls. Not for writing code for the user.",
     "web_search": "Quick single web lookup for a fact, current event, or doc mid-task. NOT for the user's Zotero library — use search_zotero. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
     "search_zotero": "Search the user's personal Zotero library — saved papers, citations, PDF excerpts. action=list_collections lists folder paths/keys; action=search with query and/or collection finds items (collection accepts path like 'Projects / ML' or a key). Use for 'my Zotero', 'my papers', 'saved sources', 'papers in folder X'. NOT web_search (public web) or trigger_research (new deep-research job).",
+    "search_vault": "Read, search, write, and wikilink the user's Obsidian vault. Hybrid search + graph traversal (follow/backlinks/link). Write via create/append/append_daily/patch/link — use [[wikilinks]] to connect notes. NOT manage_notes or read_file/write_file/bash.",
     "web_fetch": "Fetch and read the text content of a specific URL/website the user names (e.g. 'check example.com', 'open this link'). Use when you have a concrete URL; for open-ended lookups use web_search instead.",
     "read_file": "Read a file from disk and return its contents. View source code, config files, logs.",
     "write_file": "Write content to a file on disk. Create new files, save output, update configs.",
@@ -199,13 +200,11 @@ class ToolIndex:
         if not mcp_mgr:
             return
 
-        # Get current MCP generation to avoid redundant reindexing
         gen = getattr(mcp_mgr, '_generation', 0)
         if gen == self._mcp_generation:
             return
         self._mcp_generation = gen
 
-        # Remove old MCP entries
         try:
             existing = self._collection.get(where={"tool_type": "mcp"})
             if existing and existing["ids"]:
@@ -213,38 +212,29 @@ class ToolIndex:
         except Exception:
             pass
 
-        # Get current MCP tools
         try:
-            all_tools = mcp_mgr.get_tool_descriptions_for_prompt(disabled_map or {})
+            all_tools = mcp_mgr.get_all_tools(disabled_map or {})
         except Exception:
-            all_tools = ""
+            all_tools = []
 
         if not all_tools:
             return
 
-        # Parse MCP tool descriptions from the prompt text
         docs = []
         ids = []
         metadatas = []
-        current_server = ""
-        for line in all_tools.strip().split("\n"):
-            line = line.strip()
-            # Track which server section we're in (for context in descriptions)
-            if line.startswith("**") and line.endswith(":**"):
-                current_server = line.strip("*: ")
-            elif line.startswith("- ") and ":" in line:
-                # Format: "- tool_name: description"
-                name_desc = line[2:].split(":", 1)
-                if len(name_desc) == 2:
-                    name = name_desc[0].strip()
-                    desc = name_desc[1].strip()
-                    # Include server identity in the indexed text so RAG can
-                    # distinguish "list_emails for server-a" from "list_emails for server-b"
-                    server_ctx = f" (server: {current_server})" if current_server else ""
-                    doc_text = f"Tool: {name}{server_ctx}\n{desc}"
-                    docs.append(doc_text)
-                    ids.append(f"mcp_{name}")
-                    metadatas.append({"tool_name": name, "tool_type": "mcp"})
+        for tool in all_tools:
+            if tool.get("is_disabled"):
+                continue
+            qualified = tool.get("qualified_name") or ""
+            if not qualified:
+                continue
+            server_name = tool.get("server_name") or ""
+            desc = tool.get("description") or ""
+            doc_text = f"Tool: {qualified} (server: {server_name})\n{desc}"
+            docs.append(doc_text)
+            ids.append(f"mcp_{qualified.replace('__', '_')}")
+            metadatas.append({"tool_name": qualified, "tool_type": "mcp"})
 
         if not docs:
             return
@@ -346,6 +336,11 @@ class ToolIndex:
                    "saved sources", "my citations", "zotero folder", "zotero collection",
                    "in my library", "from zotero", "papers in folder", "papers in my"}):
             {"search_zotero"},
+        frozenset({"obsidian", "my vault", "vault note", "daily note", "daily notes",
+                   "meeting notes", "meeting transcript", "in my notes", "my notes folder",
+                   "notes folder", "permanent notes", "wikilink", "wiki link", "backlink",
+                   "what did i write", "find my note", "read my note"}):
+            {"search_vault"},
         # Settings-change intent — "change my…/set my…/use X for…/turn on…".
         frozenset({"change my", "set my", "use the voice", "change the voice",
                    "my voice", "tts voice", "search engine", "default model",
@@ -434,7 +429,11 @@ class ToolIndex:
     }
 
     def get_tools_for_query(
-        self, query: str, k: int = 8, always_include: Optional[Set[str]] = None
+        self,
+        query: str,
+        k: int = 8,
+        always_include: Optional[Set[str]] = None,
+        mcp_mgr=None,
     ) -> Set[str]:
         """Get the set of tool names to include for a given user query."""
         base = set(always_include or ALWAYS_AVAILABLE)
@@ -449,6 +448,8 @@ class ToolIndex:
         for keywords, tools in self._KEYWORD_HINTS.items():
             if any(re.search(rf"\b{re.escape(kw)}\b", ql) for kw in keywords):
                 base.update(tools)
+        if "search_vault" in base:
+            base.discard("manage_notes")
         # Structural scheduling-intent detection — typo-resilient (the literal
         # keyword "every day" misses "every dya"). Catches "every <word>",
         # daily/nightly/etc., or a clock time like "at 7:30 am" / "7am", which

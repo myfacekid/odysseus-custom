@@ -81,7 +81,8 @@ _AGENT_RULES = """\
 - Plain "list/show/check my inbox/emails" means latest inbox mail, including read messages. Do not set `unread_only: true` unless the user explicitly asks for unread/needs attention.
 - Multiple email accounts: if tool output says "Other accounts" or the user asks "my Gmail?", "other inbox?", "work mail?", "custom domain mail?", or names any mailbox/account, DO NOT answer from memory. Call `list_email_accounts` if needed, then call `list_emails`/`read_email`/`bulk_email` with the exact `account` value for that mailbox. Account names are user-defined labels; if the user typo-matches a known account, use the closest listed account instead of claiming it does not exist. NEVER use `app_api` or `/api/email/accounts` to discover email accounts; that route is owner-filtered in tool context and can falsely return empty.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
-- "Create/add/write a note" / "notes" / "todos" / "remind me to X at <time>" → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate.
+- "Create/add/write a note" / in-app "todos" / "remind me to X at <time>" (quick reminders, NOT Obsidian vault) → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate.
+- Obsidian vault / linked notes / daily notes / meeting transcripts / "what's in my notes folder" → call `search_vault` (list/read/search/follow/backlinks/create/append/patch/link). Use `follow` to traverse `[[wikilinks]]`; use `link` to connect notes; use `append_daily` for today's daily note. NOT `manage_notes` (in-app quick todos). NOT `read_file`/`write_file`/`bash` for vault paths.
 - "Do X every morning / daily / on a schedule / automatically" (e.g. "summarize my inbox every morning") → this is a request to CREATE A SCHEDULED TASK, not to do X once right now. Call `manage_tasks` with action=create (prompt = what to do, schedule + cron/time). Do NOT just perform the action inline this turn — the user wants it to recur. After creating, return a clickable `[Task name](#task-<id>)` link and tell them it'll run on schedule and show in the Tasks panel. If you also want to show a sample of this run, do that AFTER creating the task, not instead of it.
 
 ## UI conventions
@@ -122,10 +123,12 @@ _API_AGENT_RULES = """\
 - AFTER A TOOL FAILS, DO NOT GO SILENT. The user expects a follow-up: retry with a fix, run a diagnostic (`tail`, `ls`, `which`), or explicitly tell them what didn't work and what you'll try next. Failure is not a stopping condition.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
-- "Create/add/write a note" / "notes" / "todos" / "remind me to X at <time>" → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate. `manage_tasks` is for RECURRING background AI jobs, NOT for one-off user reminders.
+- "Create/add/write a note" / in-app "todos" / "remind me to X at <time>" (quick reminders, NOT Obsidian vault) → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate.
+- Obsidian vault / linked notes / daily notes / meeting transcripts / "what's in my notes folder" → call `search_vault` (list/read/search/follow/backlinks/create/append/patch/link). Use `follow` to traverse `[[wikilinks]]`; use `link` to connect notes; use `append_daily` for today's daily note. NOT `manage_notes` (in-app quick todos). NOT `read_file`/`write_file`/`bash` for vault paths. `manage_tasks` is for RECURRING background AI jobs, NOT for one-off user reminders.
 - "Disable/turn off/enable/turn on <tool>" (shell, search, research, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, search→web, deepresearch→research, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
 - "Research X" / "do research on X" / "look into Y" / "deep dive on Z" → call `trigger_research` with `topic`. This starts a live job that appears in the Deep Research sidebar (streams progress + final report). **Do NOT use `web_search` for these** — saw the agent do a plain web_search for "do research on X" when the user wanted the deep-research job. "research X" is a deep-research request, not a quick lookup. (web_search is only for a single quick fact mid-task.) Do NOT POST /api/research/start via app_api either — blocked. After starting, tell the user it's running in the Deep Research sidebar. Only if the user explicitly wants it inline/quick should you fall back to web_search.
 - "My Zotero library" / "my papers" / "saved sources" / "papers in folder X" / "what do I have on Y in Zotero" → call `search_zotero`. If the user names a folder and you're unsure of the exact path, call `search_zotero` with `action=list_collections` first, then search with `collection` set to the matching path or key. NOT web_search (that's the public web) and NOT trigger_research (that's a new deep-research job).
+- Obsidian vault / linked notes / daily notes / meeting transcripts / "what's in folder X" in my vault → call `search_vault`. Read/search: `action=read|search|follow|backlinks`. Write: `create`, `append`, `append_daily`, `patch`, `link` (insert `[[wikilinks]]`). Use `follow` to read a note plus linked neighbors in one call. NOT `manage_notes`. NOT `read_file`/`write_file`/`bash`.
 - "Open/show <panel>" (documents, library, gallery, email, inbox, sessions, brain/memories, skills, settings, notes, cookbook) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, mail/inbox/emails→email, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open cookbook" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
 - "Open/start a reply", "open a reply to <sender>", "draft a reply window" for email → find/read the email if needed, then call `ui_control` with `open_email_reply <uid> <folder> reply`. This opens the same email document compose window as clicking Reply in the Email UI. Do NOT call `reply_to_email` unless the user explicitly gave body text and wants to SEND immediately.
 - Bulk email actions ("delete all those", "archive these", "mark all read") require a real email tool call. Use `bulk_email` once with UIDs from the latest `list_emails` result and the same `account`; never claim success without the tool result.
@@ -211,6 +214,57 @@ List Zotero folders (returns paths like `Projects / ML` plus collection keys).
 {"query": "transformer attention", "collection": "Projects / ML", "limit": 10}
 ```
 Search the user's personal Zotero library — saved papers, citations, and PDF excerpts. Use when they mention Zotero, "my library", "my papers", saved sources, or a folder name. `collection` accepts the full folder path or key from list_collections (includes subfolders). Use `start` for pagination. NOT for general web lookups (`web_search`) or starting a new deep-research job (`trigger_research`).""",
+
+    "search_vault": """\
+```search_vault
+{"action": "list", "folder": "Meetings"}
+```
+List folders and markdown notes under a vault path.
+
+```search_vault
+{"action": "read", "path": "Daily Notes/2026-06-01.md"}
+```
+Read one note by vault-relative path.
+
+```search_vault
+{"action": "search", "query": "epistasis", "folder": "Notes", "limit": 10}
+```
+Hybrid search: keywords, YAML tags/frontmatter, semantic index, Smart Connections, wikilink neighbors. Use #tag for tag search.
+
+```search_vault
+{"action": "follow", "path": "Epistasis and Influenza.md", "depth": 1}
+```
+Read a note AND follow its `[[wikilinks]]` — returns a link map (outgoing/backlinks) plus connected note bodies. Use this to explore topic clusters before writing.
+
+```search_vault
+{"action": "backlinks", "path": "Epistasis and Influenza.md"}
+```
+List notes linking to/from a note.
+
+```search_vault
+{"action": "create", "folder": "Notes", "title": "New Topic", "content": "# New Topic\\n\\nSee also [[Epistasis and Influenza]].", "tags": ["research"]}
+```
+Create a new markdown note. Include `[[wikilinks]]` in content to fuse with the graph.
+
+```search_vault
+{"action": "append", "path": "Meetings/standup.md", "content": "- [ ] Follow up on [[Epistasis and Influenza]]"}
+```
+Append markdown to an existing note.
+
+```search_vault
+{"action": "append_daily", "content": "- Met with lab about epistasis"}
+```
+Append to today's daily note (creates if missing).
+
+```search_vault
+{"action": "patch", "path": "Notes/foo.md", "find": "old text", "replace": "new text with [[Related Note]]"}
+```
+Targeted find/replace in a note (read first). Multiple edits: `"edits": [{"find":"...","replace":"..."}]`.
+
+```search_vault
+{"action": "link", "from": "Daily Notes/2026-06-01.md", "to": "Epistasis and Influenza"}
+```
+Insert a wikilink from one note to another — builds the knowledge graph. NOT manage_notes or write_file.""",
 
     "web_fetch": """\
 ```web_fetch
@@ -410,6 +464,21 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
             f"Available tools: {tool_list}.",
             _API_AGENT_RULES,
         ]
+        # Local/compact models still need fenced examples for retrieval tools.
+        _FENCE_TOOLS = (
+            "search_vault", "search_zotero", "web_search", "web_fetch",
+            "trigger_research", "manage_notes", "manage_calendar",
+        )
+        fence_blocks = []
+        for name in sorted(included):
+            if name not in _FENCE_TOOLS:
+                continue
+            default = TOOL_SECTIONS.get(name, "")
+            section = _section_text(name, default)
+            if section.startswith("```"):
+                fence_blocks.append(section)
+        if fence_blocks:
+            parts.append("\n\n".join(fence_blocks))
         return "\n\n".join(parts)
 
     parts = [_AGENT_PREAMBLE]
@@ -478,7 +547,8 @@ _API_HOSTS = frozenset([
     "localhost", "127.0.0.1", "host.docker.internal",
 ])
 _MCP_KEYWORDS = frozenset(["browse", "browser", "website", "calendar", "event", "email",
-                           "gmail", "screenshot", "navigate", "click", "miniflux", "rss", "feed"])
+                           "gmail", "screenshot", "navigate", "click", "miniflux", "rss", "feed",
+                           "obsidian", "vault", "wikilink", "daily note", "meeting transcript"])
 _ADMIN_SCHEMA_NAMES = frozenset([
     "manage_session", "manage_skills", "manage_tasks",
     "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
@@ -1408,7 +1478,7 @@ async def stream_agent_loop(
         logger.info(f"[tool-rag] Using caller-provided relevant_tools ({len(_relevant_tools)} tools)")
     if not _relevant_tools:
         try:
-            from src.tool_index import get_tool_index, ALWAYS_AVAILABLE
+            from src.tool_index import get_tool_index, ALWAYS_AVAILABLE, ToolIndex
             tool_idx = get_tool_index()
             if tool_idx:
                 if mcp_mgr:
@@ -1425,7 +1495,9 @@ async def stream_agent_loop(
                 if _retrieval_query:
                     try:
                         _relevant_tools = await asyncio.wait_for(
-                            asyncio.to_thread(tool_idx.get_tools_for_query, _retrieval_query, 8),
+                            asyncio.to_thread(
+                                tool_idx.get_tools_for_query, _retrieval_query, 8, None, mcp_mgr
+                            ),
                             timeout=_TOOL_SELECTION_TIMEOUT_SECONDS,
                         )
                         logger.info(f"[tool-rag] Retrieved tools for query: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
@@ -1435,6 +1507,10 @@ async def stream_agent_loop(
                             _TOOL_SELECTION_TIMEOUT_SECONDS,
                         )
                         _relevant_tools = set(ALWAYS_AVAILABLE)
+                        ql = (_retrieval_query or "").lower()
+                        for keywords, tools in ToolIndex._KEYWORD_HINTS.items():
+                            if any(kw in ql for kw in keywords):
+                                _relevant_tools.update(tools)
         except Exception as e:
             logger.warning(f"[tool-rag] Retrieval failed, using keyword fallback: {e}")
             _relevant_tools = None
@@ -1450,6 +1526,8 @@ async def stream_agent_loop(
                 _relevant_tools.update(tools)
         # Always include core document/memory tools
         _relevant_tools.update({"create_document", "manage_memory", "manage_notes"})
+        if "search_vault" in _relevant_tools:
+            _relevant_tools.discard("manage_notes")
         logger.info(f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
 
     # If a document is open the model needs the editing tools available
@@ -1457,6 +1535,18 @@ async def stream_agent_loop(
     # or what keywords were in the latest user message.
     if _relevant_tools is not None and active_document is not None:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
+
+    # Vault: ensure search_vault reaches the prompt for local models (Gemma, etc.)
+    # when the vault exists and the user is asking vault-ish questions.
+    if _relevant_tools is not None and _retrieval_query:
+        try:
+            from src.obsidian_vault import resolve_vault_config, vault_intent_in_query
+            if resolve_vault_config(owner or "") and vault_intent_in_query(_retrieval_query):
+                _relevant_tools.add("search_vault")
+        except Exception:
+            pass
+        if "search_vault" in _relevant_tools:
+            _relevant_tools.discard("manage_notes")
 
     prep_timings["tool_selection"] = time.time() - _t1
 
@@ -1491,9 +1581,9 @@ async def stream_agent_loop(
         "qwen3", "qwen2.5", "mixtral", "mistral", "llama-3.1", "llama-3.2",
         "llama-3.3", "llama-4",
         # Local-served models that follow OpenAI-style function calling
-        # via vLLM's `--enable-auto-tool-choice`. Belt-and-suspenders
-        # with the per-endpoint flag above.
-        "minimax", "kimi", "yi-", "phi-3", "phi-4", "command-r",
+        # via vLLM's `--enable-auto-tool-choice` (Gemma → pythonic parser).
+        # Belt-and-suspenders with the per-endpoint supports_tools flag above.
+        "gemma", "minimax", "kimi", "yi-", "phi-3", "phi-4", "command-r",
         "glm-4", "internlm", "hermes",
         # deepseek-v2/v3/chat support tools via the cloud API; deepseek-r1
         # (reasoning model) does not — handled by the blocklist below.
@@ -2109,7 +2199,7 @@ async def stream_agent_loop(
             # first so the <!-- SOURCES:…--> marker is found and stripped even
             # when the result doesn't carry a "results" or "stdout" key.
             _src_text = result.get("output") or result.get("results") or result.get("stdout") or ""
-            if block.tool_type in ("web_search", "search_zotero") and _src_text:
+            if block.tool_type in ("web_search", "search_zotero", "search_vault") and _src_text:
                 _src_marker = "<!-- SOURCES:"
                 _src_idx = _src_text.find(_src_marker)
                 if _src_idx >= 0:

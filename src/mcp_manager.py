@@ -8,7 +8,10 @@ Each server exposes tools that are made available to the agent loop.
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlparse, urlunparse
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,75 @@ def _format_mcp_connection_error(name: str, command: str = "", args: Optional[Li
 
     return raw_error
 
+
+# Query terms that should surface Obsidian / vault MCP tools in RAG selection.
+_OBSIDIAN_INTENT_KEYWORDS = frozenset({
+    "obsidian", "vault", "wikilink", "wiki link", "backlink", "daily note",
+    "meeting transcript", "meeting notes", "my notes folder", "in my notes",
+    "periodic note", "tagged #", "my vault", "note in obsidian",
+})
+_OBSIDIAN_TOOL_NAMES = frozenset({
+    "vault_list", "vault_read", "vault_write", "vault_append", "vault_patch",
+    "vault_delete", "vault_move", "vault_get_document_map", "active_file_get_path",
+    "periodic_note_get_path", "search_query", "search_simple", "tag_list",
+    "command_list", "command_execute", "open_file",
+})
+
+
+def _normalize_mcp_url(url: str) -> str:
+    """Ensure remote MCP URLs include the /mcp/ path (Obsidian Local REST API, etc.)."""
+    if not url:
+        return url
+    parsed = urlparse(url.strip())
+    path = (parsed.path or "").rstrip("/")
+    if path in ("", "/"):
+        path = "/mcp"
+    elif parsed.port in (27123, 27124) and not path.endswith("/mcp"):
+        path = f"{path}/mcp" if path else "/mcp"
+    return urlunparse(parsed._replace(path=f"{path}/"))
+
+
+def _is_local_mcp_url(url: str) -> bool:
+    host = urlparse(url).hostname
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
+def _build_http_headers(env: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """Build HTTP headers for remote MCP transports from server env vars."""
+    headers: Dict[str, str] = {}
+    if not env:
+        return headers
+    for key, value in env.items():
+        if not value:
+            continue
+        kl = key.lower()
+        if kl in ("obsidian_api_key", "api_key", "token", "bearer_token"):
+            headers["Authorization"] = value if value.lower().startswith("bearer ") else f"Bearer {value}"
+        elif kl == "authorization":
+            headers["Authorization"] = value
+        elif kl in ("mcp_http_headers", "http_headers"):
+            try:
+                extra = json.loads(value)
+                if isinstance(extra, dict):
+                    headers.update({str(k): str(v) for k, v in extra.items()})
+            except json.JSONDecodeError:
+                logger.warning("Invalid MCP HTTP headers JSON in env.%s", key)
+    return headers
+
+
+def _resolve_effective_transport(transport: str, url: Optional[str]) -> str:
+    """Obsidian's built-in MCP uses Streamable HTTP at /mcp/, not legacy SSE."""
+    if transport == "streamable_http":
+        return "streamable_http"
+    if not url:
+        return transport
+    parsed = urlparse(url)
+    path = (parsed.path or "").rstrip("/")
+    if transport == "sse" and (
+        parsed.port in (27123, 27124) or path.endswith("/mcp") or path.endswith("/mcp/")
+    ):
+        return "streamable_http"
+    return transport
 
 
 class McpManager:
@@ -56,12 +128,18 @@ class McpManager:
         env: Optional[Dict[str, str]] = None,
         url: Optional[str] = None,
     ) -> bool:
-        """Connect to an MCP server via stdio or SSE transport."""
+        """Connect to an MCP server via stdio, SSE, or Streamable HTTP transport."""
+        env = env or {}
+        if url:
+            url = _normalize_mcp_url(url)
+        effective = _resolve_effective_transport(transport, url)
         try:
-            if transport == "stdio":
-                res = await self._connect_stdio(server_id, name, command, args or [], env or {})
-            elif transport == "sse":
-                res = await self._connect_sse(server_id, name, url)
+            if effective == "stdio":
+                res = await self._connect_stdio(server_id, name, command, args or [], env)
+            elif effective == "streamable_http":
+                res = await self._connect_streamable_http(server_id, name, url, env)
+            elif effective == "sse":
+                res = await self._connect_sse(server_id, name, url, env)
             else:
                 logger.error(f"Unknown MCP transport: {transport}")
                 res = False
@@ -74,6 +152,39 @@ class McpManager:
             self._connections[server_id] = {"status": "error", "error": error_message, "name": name}
             self._generation += 1
             return False
+
+    def _store_connection(
+        self,
+        server_id: str,
+        name: str,
+        transport: str,
+        tools: List[Dict],
+        session: Any,
+        stack: Any,
+        env: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Persist a successful MCP connection."""
+        identity_hints = []
+        for k, v in (env or {}).items():
+            k_lower = k.lower()
+            if any(x in k_lower for x in ["email_address", "account", "user", "username"]):
+                identity_hints.append(v)
+        identity = ", ".join(identity_hints) if identity_hints else ""
+
+        self._sessions[server_id] = session
+        self._stacks[server_id] = stack
+        self._tools[server_id] = tools
+        self._connections[server_id] = {
+            "status": "connected",
+            "name": name,
+            "transport": transport,
+            "tool_count": len(tools),
+            "identity": identity,
+        }
+        self._generation += 1
+        self._cached_prompt_desc = None
+        self._cached_prompt_desc_key = None
+        logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via {transport}")
 
     async def _connect_stdio(self, server_id: str, name: str, command: str, args: List[str], env: Dict[str, str]) -> bool:
         """Connect to an MCP server via stdio transport."""
@@ -96,7 +207,6 @@ class McpManager:
 
                 await session.initialize()
 
-                # Discover tools
                 tools_result = await session.list_tools()
             except Exception:
                 await stack.aclose()
@@ -109,28 +219,7 @@ class McpManager:
                     "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
                 })
 
-            self._sessions[server_id] = session
-            self._stacks[server_id] = stack
-            self._tools[server_id] = tools
-            # Extract identity hints from env vars (e.g. email address, API name)
-            # so tool descriptions can distinguish between multiple instances of
-            # the same MCP server (e.g. two email accounts).
-            identity_hints = []
-            for k, v in (env or {}).items():
-                k_lower = k.lower()
-                if any(x in k_lower for x in ['email_address', 'account', 'user', 'username']):
-                    identity_hints.append(v)
-            identity = ", ".join(identity_hints) if identity_hints else ""
-
-            self._connections[server_id] = {
-                "status": "connected",
-                "name": name,
-                "transport": "stdio",
-                "tool_count": len(tools),
-                "identity": identity,
-            }
-
-            logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via stdio")
+            self._store_connection(server_id, name, "stdio", tools, session, stack, env)
             return True
 
         except ImportError:
@@ -138,22 +227,35 @@ class McpManager:
             self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
             return False
 
-    async def _connect_sse(self, server_id: str, name: str, url: str) -> bool:
+    async def _connect_sse(self, server_id: str, name: str, url: str, env: Dict[str, str]) -> bool:
         """Connect to an MCP server via SSE transport."""
         try:
             from mcp import ClientSession
             from mcp.client.sse import sse_client
             from contextlib import AsyncExitStack
 
+            headers = _build_http_headers(env)
+            verify = not _is_local_mcp_url(url)
+
+            def httpx_factory(*, headers=None, auth=None, timeout=None, **kwargs):
+                return httpx.AsyncClient(
+                    headers=headers,
+                    auth=auth,
+                    timeout=timeout,
+                    verify=verify,
+                    **kwargs,
+                )
+
             stack = AsyncExitStack()
             try:
-                transport = await stack.enter_async_context(sse_client(url))
+                transport = await stack.enter_async_context(
+                    sse_client(url, headers=headers or None, httpx_client_factory=httpx_factory)
+                )
                 read_stream, write_stream = transport
                 session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
 
                 await session.initialize()
 
-                # Discover tools
                 tools_result = await session.list_tools()
             except Exception:
                 await stack.aclose()
@@ -166,17 +268,50 @@ class McpManager:
                     "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
                 })
 
-            self._sessions[server_id] = session
-            self._stacks[server_id] = stack
-            self._tools[server_id] = tools
-            self._connections[server_id] = {
-                "status": "connected",
-                "name": name,
-                "transport": "sse",
-                "tool_count": len(tools),
-            }
+            self._store_connection(server_id, name, "sse", tools, session, stack, env)
+            return True
 
-            logger.info(f"MCP server connected: {name} ({server_id}) - {len(tools)} tools via SSE")
+        except ImportError:
+            logger.warning("MCP package not installed. Install with: pip install mcp")
+            self._connections[server_id] = {"status": "error", "error": "mcp package not installed", "name": name}
+            return False
+
+    async def _connect_streamable_http(self, server_id: str, name: str, url: str, env: Dict[str, str]) -> bool:
+        """Connect to an MCP server via Streamable HTTP (Obsidian Local REST API, etc.)."""
+        try:
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamable_http_client
+            from contextlib import AsyncExitStack
+
+            headers = _build_http_headers(env)
+            verify = not _is_local_mcp_url(url)
+
+            stack = AsyncExitStack()
+            client = await stack.enter_async_context(
+                httpx.AsyncClient(
+                    headers=headers,
+                    verify=verify,
+                    timeout=httpx.Timeout(30.0, read=300.0),
+                )
+            )
+            streams = await stack.enter_async_context(
+                streamable_http_client(url, http_client=client)
+            )
+            read_stream, write_stream = streams[0], streams[1]
+            session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+
+            await session.initialize()
+
+            tools_result = await session.list_tools()
+            tools = []
+            for tool in tools_result.tools:
+                tools.append({
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
+                })
+
+            self._store_connection(server_id, name, "streamable_http", tools, session, stack, env)
             return True
 
         except ImportError:
@@ -197,6 +332,8 @@ class McpManager:
         self._tools.pop(server_id, None)
         self._connections.pop(server_id, None)
         self._generation += 1
+        self._cached_prompt_desc = None
+        self._cached_prompt_desc_key = None
         logger.info(f"MCP server disconnected: {server_id}")
 
     async def disconnect_all(self):
@@ -388,6 +525,25 @@ class McpManager:
             "rag",
             "email",
         }
+
+    def match_tools_for_query(self, query: str) -> Set[str]:
+        """Return qualified MCP tool names matching vault/Obsidian intent in a query."""
+        ql = query.lower()
+        if not any(kw in ql for kw in _OBSIDIAN_INTENT_KEYWORDS):
+            return set()
+        matched: Set[str] = set()
+        for tool in self.get_all_tools():
+            server_name = (tool.get("server_name") or "").lower()
+            tool_name = tool.get("name") or ""
+            if tool.get("is_disabled"):
+                continue
+            if (
+                "obsidian" in server_name
+                or tool_name in _OBSIDIAN_TOOL_NAMES
+                or tool_name.startswith("vault_")
+            ):
+                matched.add(tool["qualified_name"])
+        return matched
 
     def get_server_status(self, server_id: str) -> Dict:
         """Get connection status for a server."""

@@ -3767,6 +3767,29 @@ async def do_manage_research(content: str, owner: Optional[str] = None) -> Dict:
     return {"output": f"Research library ({len(items)} item{'s' if len(items) != 1 else ''}):\n{rows}", "exit_code": 0}
 
 
+async def do_search_vault(content: str, owner: Optional[str] = None) -> Dict:
+    """List, read, or search the user's local Obsidian vault."""
+    import asyncio
+    from src.obsidian_vault import execute_search_vault_tool
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    if not isinstance(args, dict):
+        args = {}
+    loop = asyncio.get_running_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: execute_search_vault_tool(args, owner=owner or ""),
+            ),
+            timeout=60,
+        )
+    except asyncio.TimeoutError:
+        return {"error": "search_vault timed out", "exit_code": 1}
+
+
 async def do_search_zotero(content: str, owner: Optional[str] = None) -> Dict:
     """Search the user's Zotero library or list collection folders."""
     import asyncio

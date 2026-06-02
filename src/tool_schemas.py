@@ -92,6 +92,60 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "search_vault",
+            "description": "Read, search, write, and wikilink the user's Obsidian vault. Traverse [[links]] with follow; connect notes with link; write with create/append/patch/append_daily.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "search", "list", "read", "backlinks", "follow",
+                            "create", "append", "append_daily", "patch", "link",
+                        ],
+                        "description": "Vault operation: read/search graph, or write/edit notes with wikilinks.",
+                    },
+                    "query": {"type": "string", "description": "Search terms (filename, body, #tag)"},
+                    "folder": {
+                        "type": "string",
+                        "description": "Vault-relative folder for list/search/create",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Vault-relative note path for read/write/patch/backlinks/follow",
+                    },
+                    "from": {"type": "string", "description": "Source note for link action"},
+                    "to": {"type": "string", "description": "Target note title or path for link action"},
+                    "title": {"type": "string", "description": "Title for create (used if path omitted)"},
+                    "content": {"type": "string", "description": "Markdown body for create/append/append_daily"},
+                    "find": {"type": "string", "description": "Text to find for patch"},
+                    "replace": {"type": "string", "description": "Replacement text for patch (may include [[wikilinks]])"},
+                    "edits": {
+                        "type": "array",
+                        "description": "Multiple find/replace pairs for patch",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "find": {"type": "string"},
+                                "replace": {"type": "string"},
+                            },
+                        },
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "YAML tags for create",
+                    },
+                    "depth": {"type": "integer", "description": "Wikilink follow depth (0-3, default 1)"},
+                    "limit": {"type": "integer", "description": "Max search results (1-30, default 15)"},
+                    "max_chars": {"type": "integer", "description": "Max characters when reading/following notes"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_fetch",
             "description": "Fetch and read the text content of a specific URL the user names (e.g. 'check example.com', 'what's on this page <url>'). Use when you already have a concrete URL/domain. NOT for open-ended searches (use web_search) or 'research X' jobs (use trigger_research).",
             "parameters": {
@@ -1252,7 +1306,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type in ("manage_tasks", "manage_skills", "api_call",
                         "manage_endpoints", "manage_mcp", "manage_webhooks",
                         "manage_tokens", "manage_documents", "manage_settings",
-                        "search_zotero", "manage_research", "trigger_research"):
+                        "search_vault", "search_zotero", "manage_research", "trigger_research"):
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")
