@@ -693,16 +693,8 @@ logger.info("Webhook & API token routes initialized")
 from routes.note_routes import setup_note_routes
 app.include_router(setup_note_routes(task_scheduler))
 
-# Email
-from routes.email_routes import setup_email_routes
-app.include_router(setup_email_routes())
-
 from routes.vault_routes import setup_vault_routes
 app.include_router(setup_vault_routes())
-
-# Contacts (CardDAV)
-from routes.contacts_routes import setup_contacts_routes
-app.include_router(setup_contacts_routes())
 
 from companion import setup_companion_routes
 app.include_router(setup_companion_routes())
@@ -714,6 +706,9 @@ app.include_router(setup_obsidian_vault_routes())
 
 from routes.one_thing_routes import setup_one_thing_routes
 app.include_router(setup_one_thing_routes())
+
+from routes.knowledge_routes import setup_knowledge_routes
+app.include_router(setup_knowledge_routes())
 
 # ========= ROUTES (kept in app.py) =========
 
@@ -751,10 +746,6 @@ async def serve_calendar(request: Request):
 async def serve_cookbook(request: Request):
     return await serve_index(request)
 
-@app.get("/email")
-async def serve_email(request: Request):
-    return await serve_index(request)
-
 @app.get("/memory")
 async def serve_memory(request: Request):
     return await serve_index(request)
@@ -769,6 +760,10 @@ async def serve_tasks(request: Request):
 
 @app.get("/library")
 async def serve_library(request: Request):
+    return await serve_index(request)
+
+@app.get("/links")
+async def serve_links(request: Request):
     return await serve_index(request)
 
 @app.get("/backgrounds")

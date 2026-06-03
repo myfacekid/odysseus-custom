@@ -1,13 +1,14 @@
-"""One Thing task board API — horizons, priorities, Obsidian sync."""
+"""One Thing task board API — horizons, priorities, knowledge graph index."""
 
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from core.database import SessionLocal
 from src.auth_helpers import get_current_user
+from src.knowledge_sync import after_task_change, force_rebuild
 from src.one_thing import (
     HORIZONS,
     PRIORITIES,
@@ -21,7 +22,6 @@ from src.one_thing import (
     toggle_task,
     update_task,
 )
-from src.vault_one_thing_sync import sync_one_thing_to_vault, sync_after_task_change
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ class TaskCreate(BaseModel):
     horizon: str = "focus"
     priority: str = "steady"
     due_date: Optional[str] = None
+    parent_ids: List[str] = Field(default_factory=list)
 
 
 class TaskUpdate(BaseModel):
@@ -39,6 +40,7 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = None
     due_date: Optional[str] = None
     done: Optional[bool] = None
+    parent_ids: Optional[List[str]] = None
 
 
 def setup_one_thing_routes() -> APIRouter:
@@ -51,12 +53,26 @@ def setup_one_thing_routes() -> APIRouter:
         return user
 
     @router.get("")
-    def get_board(request: Request, include_done: bool = True):
+    def get_board(
+        request: Request,
+        include_done: bool = True,
+        include_archived: bool = False,
+        skip_vault_sync: bool = True,
+    ):
         owner = _owner(request)
         db = SessionLocal()
         try:
             archived = archive_stale_completed_tasks(db, owner)
-            board = board_to_dict(db, owner, include_done=include_done)
+            board = board_to_dict(
+                db,
+                owner,
+                include_done=include_done,
+                include_archived=include_archived,
+            )
+            if not include_archived:
+                board["archived_count"] = len(
+                    list_tasks(db, owner, include_done=True, include_archived=True)
+                )
             if archived:
                 board["archived_stale"] = archived
             return board
@@ -68,16 +84,19 @@ def setup_one_thing_routes() -> APIRouter:
         owner = _owner(request)
         db = SessionLocal()
         try:
-            summary = get_daily_summary(db, owner)
-            sync = sync_one_thing_to_vault(owner)
-            summary["vault_sync"] = sync
-            return summary
+            return get_daily_summary(db, owner)
         finally:
             db.close()
 
     @router.get("/meta")
     def get_meta():
-        from src.one_thing import HORIZON_LABELS, HORIZON_TAGLINES, PRIORITY_LABELS
+        from src.one_thing import (
+            HORIZON_LABELS,
+            HORIZON_TAGLINES,
+            PARENT_HORIZON,
+            PRIORITY_LABELS,
+            links_required_for,
+        )
 
         return {
             "horizons": [
@@ -85,6 +104,11 @@ def setup_one_thing_routes() -> APIRouter:
                     "key": h,
                     "label": HORIZON_LABELS[h],
                     "tagline": HORIZON_TAGLINES[h],
+                    "links_required": links_required_for(h),
+                    "parent_horizon": PARENT_HORIZON.get(h),
+                    "parent_label": HORIZON_LABELS[PARENT_HORIZON[h]]
+                    if PARENT_HORIZON.get(h)
+                    else None,
                 }
                 for h in HORIZONS
             ],
@@ -105,9 +129,13 @@ def setup_one_thing_routes() -> APIRouter:
                 horizon=body.horizon,
                 priority=body.priority,
                 due_date=body.due_date,
+                parent_ids=body.parent_ids,
             )
-            sync_after_task_change(owner)
-            return {"ok": True, "task": task.to_item()}
+            after_task_change(owner)
+            from src.one_thing import enrich_task_item, list_tasks as _list_tasks
+
+            all_tasks = _list_tasks(db, owner, include_done=True, include_archived=True)
+            return {"ok": True, "task": enrich_task_item(task, all_tasks)}
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         finally:
@@ -127,11 +155,17 @@ def setup_one_thing_routes() -> APIRouter:
                 priority=body.priority,
                 due_date=body.due_date,
                 done=body.done,
+                parent_ids=body.parent_ids,
             )
             if not task:
                 raise HTTPException(404, "Task not found")
-            sync_after_task_change(owner)
-            return {"ok": True, "task": task.to_item()}
+            after_task_change(owner)
+            from src.one_thing import enrich_task_item, list_tasks as _list_tasks
+
+            all_tasks = _list_tasks(db, owner, include_done=True, include_archived=True)
+            return {"ok": True, "task": enrich_task_item(task, all_tasks)}
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
         finally:
             db.close()
 
@@ -147,7 +181,7 @@ def setup_one_thing_routes() -> APIRouter:
             task = get_task(db, owner, task_id) or task
         finally:
             db.close()
-        sync_after_task_change(owner)
+        after_task_change(owner)
         return {"ok": True, "task": task.to_item()}
 
     @router.delete("/tasks/{task_id}")
@@ -157,17 +191,18 @@ def setup_one_thing_routes() -> APIRouter:
         try:
             if not delete_task(db, owner, task_id):
                 raise HTTPException(404, "Task not found")
-            sync_after_task_change(owner)
+            after_task_change(owner)
             return {"ok": True}
         finally:
             db.close()
 
     @router.post("/sync")
-    def force_sync(request: Request):
+    def rebuild_knowledge_index(request: Request):
+        """Rebuild the portable knowledge graph (replaces legacy vault sync)."""
         owner = _owner(request)
-        result = sync_one_thing_to_vault(owner)
-        if not result.get("synced"):
-            raise HTTPException(400, result.get("error") or "Sync failed")
+        result = force_rebuild(owner)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error") or "Rebuild failed")
         return result
 
     return router

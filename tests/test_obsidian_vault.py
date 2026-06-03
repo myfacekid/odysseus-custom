@@ -1,7 +1,8 @@
-"""Tests for native Obsidian vault read/search."""
+"""Tests for native vault read/search and filesystem mode."""
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +14,9 @@ from src.obsidian_vault import (
     list_vault,
     read_vault_note,
     resolve_vault_config,
+    resolve_vault_mode,
     search_vault_notes,
+    vault_plugins_enabled,
     vault_ui_sources_from_output,
     _resolve_within_vault,
 )
@@ -102,3 +105,24 @@ def test_default_vault_path_exists():
         cfg = resolve_vault_config("")
         assert cfg is not None
         assert cfg.root.is_dir()
+
+
+def test_filesystem_mode_skips_plugins(sample_vault):
+    with patch("src.vault_plugins.search_plugin_sources") as mock_plugins:
+        with patch("src.obsidian_vault.vault_plugins_enabled", return_value=False):
+            found = search_vault_notes(sample_vault, query="epistasis", owner="user")
+        mock_plugins.assert_not_called()
+    assert found["exit_code"] == 0
+    assert "Epistasis and Influenza.md" in found["output"]
+
+
+def test_resolve_vault_mode_defaults_filesystem():
+    with patch("src.obsidian_vault._load_vault_user_cfg", return_value={}):
+        assert resolve_vault_mode("user") == "filesystem"
+        assert vault_plugins_enabled("user") is False
+
+
+def test_resolve_vault_mode_hybrid():
+    with patch("src.obsidian_vault._load_vault_user_cfg", return_value={"vault_mode": "hybrid"}):
+        assert resolve_vault_mode("user") == "hybrid"
+        assert vault_plugins_enabled("user") is True

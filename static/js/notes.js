@@ -1,5 +1,5 @@
 /**
- * Todos Module — Immediate Tasks + Miscellaneous, synced to Obsidian vault.
+ * Todos Module — Immediate Tasks + goal horizons, indexed in the knowledge graph.
  */
 
 import uiModule from './ui.js';
@@ -22,7 +22,6 @@ let _activeFilter = null; // null | 'default' | 'reminders' | 'no-reminders'
 // state the next click should land on after passing through null.
 let _reminderChipNext = 'reminders';
 let _searchQuery = '';
-let _viewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('odysseus-notes-view')) || 'list'; // 'list' or 'grid'
 let _showingArchived = false;
 let _selectMode = false;
 let _reminderTimer = null;
@@ -64,6 +63,93 @@ const _ONE_THING_PRIORITY_CLASS = {
   steady: 'one-thing-priority-steady',
 };
 
+const _TODO_PARENT_HORIZON = {
+  focus: 'build',
+  build: 'aim',
+};
+const _TODO_LINKS_REQUIRED = new Set(['focus', 'build']);
+const _oneThingRowTab = {};
+
+function _oneThingLinkingRules(horizon) {
+  return (_oneThingBoard && _oneThingBoard.linking && _oneThingBoard.linking[horizon]) || {};
+}
+
+function _oneThingParentCandidates(horizon) {
+  const parentHz = _TODO_PARENT_HORIZON[horizon];
+  if (!parentHz || !_oneThingBoard?.horizons) return [];
+  return (_oneThingBoard.horizons[parentHz]?.tasks || []).filter(t => !t.archived);
+}
+
+function _oneThingSelectedParentIds(root) {
+  if (!root) return [];
+  return [...root.querySelectorAll('.one-thing-link-option input[type="checkbox"]:checked')]
+    .map(el => el.value)
+    .filter(Boolean);
+}
+
+function _oneThingRenderLinkPicker(horizon, selectedIds = [], { inputName = 'one-thing-parent' } = {}) {
+  const rules = _oneThingLinkingRules(horizon);
+  if (!rules.parent_horizon) return '';
+  const required = !!rules.required;
+  const label = rules.parent_label || 'parent goals';
+  const candidates = _oneThingParentCandidates(horizon);
+  const selected = new Set(selectedIds || []);
+  let html = `<div class="one-thing-link-picker" data-required="${required ? '1' : '0'}">`;
+  html += `<div class="one-thing-link-picker-label">Link to ${ _esc(label)}${required ? ' <span class="one-thing-link-required">*</span>' : ''}</div>`;
+  if (!candidates.length) {
+    html += `<div class="one-thing-link-empty">Create a ${ _esc(label)} goal first — linking keeps daily work tied to longer-term outcomes.</div>`;
+  } else {
+    html += '<div class="one-thing-link-options">';
+    for (const candidate of candidates) {
+      const checked = selected.has(candidate.id) ? ' checked' : '';
+      html += `<label class="one-thing-link-option"><input type="checkbox" name="${inputName}" value="${_esc(candidate.id)}"${checked} /><span>${_esc(candidate.text || '')}</span></label>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _oneThingHorizonHasParentLinks(horizon) {
+  return !!_oneThingLinkingRules(horizon).parent_horizon;
+}
+
+function _oneThingParentsFromIds(horizon, parentIds) {
+  const parentHz = _oneThingLinkingRules(horizon).parent_horizon;
+  const candidates = _oneThingParentCandidates(horizon);
+  return (parentIds || []).map(id => {
+    const match = candidates.find(t => t.id === id || t.id?.startsWith?.(id));
+    if (match) {
+      return {
+        id: match.id,
+        text: match.text,
+        horizon: match.horizon,
+        label: match.label || parentHz,
+      };
+    }
+    return { id, text: 'Linked goal', horizon: parentHz || '', label: '' };
+  });
+}
+
+function _oneThingBuildOptimisticTask({ text, horizon, priority, due_date, parent_ids }) {
+  return {
+    id: `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    text,
+    horizon,
+    priority: priority || 'steady',
+    due_date: due_date || null,
+    parent_ids: parent_ids || [],
+    parents: _oneThingParentsFromIds(horizon, parent_ids || []),
+    done: false,
+    archived: false,
+  };
+}
+
+function _oneThingParentChipHtml(parent) {
+  if (!parent) return '';
+  return `<button type="button" class="one-thing-link-chip" data-parent-horizon="${_esc(parent.horizon || '')}" title="${_esc(parent.label || '')}">${_esc(parent.text || '')}</button>`;
+}
+
 let _oneThingBoard = null;
 let _oneThingMeta = null;
 let _oneThingHorizon = 'focus';
@@ -104,7 +190,7 @@ function _showNotesFirstOpenHint(pane) {
   hint.id = 'notes-first-open-hint';
   hint.className = 'tour-hint';
   hint.innerHTML = `
-    <div class="tour-hint-text"><b>Todos</b> tracks Immediate Tasks, Intermediate Goals, Long Horizon, and Miscellaneous — synced to your Obsidian vault.</div>
+    <div class="tour-hint-text"><b>Todos</b> tracks Immediate Tasks, Intermediate Goals, Long Horizon, and Miscellaneous — linked in your knowledge graph.</div>
     <button type="button" class="tour-hint-dismiss">OK</button>
   `;
   document.body.appendChild(hint);
@@ -1142,30 +1228,14 @@ export function openPanel() {
     <div class="notes-pane-header">
       <h4 class="notes-pane-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>Todos</h4>
       <span style="flex:1"></span>
-      <button id="notes-archive-toggle" class="doc-action-icon-btn notes-header-text-btn" title="View archive" style="opacity:0.8;gap:5px;">
+      <button id="notes-archive-toggle" class="doc-action-icon-btn notes-header-text-btn" title="View completed archive" style="opacity:0.8;gap:5px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 002 2h12a2 2 0 002-2V8"/><path d="M10 12h4"/></svg>
         <span class="notes-header-btn-label">Archive</span>
       </button>
-      <button id="notes-view-toggle" class="doc-action-icon-btn notes-header-text-btn" title="Toggle view" style="opacity:0.8;gap:5px;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        <span class="notes-header-btn-label">Toggle</span>
-      </button>
-      <button id="notes-minimize-btn" class="modal-minimize-btn" title="Minimize" aria-label="Minimize notes" style="position:relative;left:2px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="18" x2="18" y2="18"/></svg></button>
+      <button id="notes-minimize-btn" class="modal-minimize-btn" title="Minimize" aria-label="Minimize Todos" style="position:relative;left:2px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="18" x2="18" y2="18"/></svg></button>
     </div>
-    <div class="notes-search-bar">
-      <input type="text" id="notes-search" class="memory-search-input" placeholder="Search notes…" autocomplete="off" />
-      <button id="notes-select-btn" class="notes-select-trigger" type="button">Select</button>
-    </div>
-    <div id="notes-bulk-bar" class="memory-bulk-bar hidden">
-      <label class="memory-bulk-check-all"><input type="checkbox" id="notes-select-all" /> All</label>
-      <span id="notes-selected-count">0 Selected</span>
-      <span style="flex:1"></span>
-      <button id="notes-bulk-archive" class="memory-toolbar-btn" disabled>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 002 2h12a2 2 0 002-2V8"/><path d="M10 12h4"/></svg>Archive
-      </button>
-      <button id="notes-bulk-delete" class="memory-toolbar-btn danger" disabled>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>Delete
-      </button>
+    <div class="notes-search-bar notes-todos-search-bar">
+      <input type="text" id="notes-search" class="memory-search-input" placeholder="Search tasks…" autocomplete="off" />
     </div>
     <div class="notes-pane-body"></div>
   `;
@@ -1222,35 +1292,35 @@ export function openPanel() {
     });
   }
 
-  // View toggle
+  // Completed-task archive toggle
   const archiveBtn = document.getElementById('notes-archive-toggle');
   if (archiveBtn) {
     const ARCHIVE_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 002 2h12a2 2 0 002-2V8"/><path d="M10 12h4"/></svg><span class="notes-header-btn-label">Archive</span>';
-    const CLOSE_ICON   = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg><span class="notes-header-btn-label">Archive</span>';
+    const CLOSE_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg><span class="notes-header-btn-label">Done</span>';
     const syncArchiveBtn = () => {
+      const count = _oneThingBoard?.archived_count || 0;
       archiveBtn.classList.toggle('active', _showingArchived);
-      archiveBtn.title = _showingArchived ? 'Exit archive' : 'View archive';
+      archiveBtn.title = _showingArchived
+        ? 'Back to active tasks'
+        : (count ? `View ${count} archived completed task${count === 1 ? '' : 's'}` : 'View completed archive');
       archiveBtn.style.opacity = _showingArchived ? '1' : '0.8';
-      // Swap to an X while in archive view so it doubles as a close-back-
-      // to-active-notes toggle.
       archiveBtn.innerHTML = _showingArchived ? CLOSE_ICON : ARCHIVE_ICON;
-      // Tint the whole pane so it's obvious you're not in the active list.
       pane.classList.toggle('notes-pane-archive', _showingArchived);
     };
     syncArchiveBtn();
+    pane._syncTodosArchiveBtn = syncArchiveBtn;
     archiveBtn.addEventListener('click', async () => {
       _showingArchived = !_showingArchived;
-      _selectedIds.clear();
+      if (!_showingArchived) _searchQuery = '';
+      if (searchEl) searchEl.value = '';
       syncArchiveBtn();
-      // Brief fade so the body content swap doesn't snap — the bg-tint
-      // change is already eased by CSS transitions on .notes-pane*.
       const _bodyEl = document.querySelector('#notes-pane .notes-pane-body');
       if (_bodyEl) {
         _bodyEl.style.transition = 'opacity 0.18s ease';
         _bodyEl.style.opacity = '0.25';
       }
-      await _fetchNotes();
-      _renderNotes();
+      await _fetchOneThingBoard({ skipVault: true });
+      if (_bodyEl) void _renderOneThingView(_bodyEl, { refresh: 'none' });
       if (_bodyEl) {
         requestAnimationFrame(() => {
           _bodyEl.style.opacity = '';
@@ -1259,67 +1329,6 @@ export function openPanel() {
       }
     });
   }
-  const viewBtn = document.getElementById('notes-view-toggle');
-  if (viewBtn) {
-    pane.classList.toggle('notes-view-grid', _viewMode === 'grid');
-    // Label shows what you'll switch TO — "Grid" while in list, "List" while in grid.
-    const _setViewLabel = () => {
-      const lbl = viewBtn.querySelector('.notes-header-btn-label');
-      if (lbl) lbl.textContent = _viewMode === 'grid' ? 'List' : 'Grid';
-    };
-    _setViewLabel();
-    requestAnimationFrame(() => _applyMasonry(document.querySelector('#notes-pane .notes-pane-body')));
-    viewBtn.addEventListener('click', () => {
-      _viewMode = _viewMode === 'grid' ? 'list' : 'grid';
-      try { localStorage.setItem('odysseus-notes-view', _viewMode); } catch {}
-      pane.classList.toggle('notes-view-grid', _viewMode === 'grid');
-      _setViewLabel();
-      requestAnimationFrame(() => _applyMasonry(document.querySelector('#notes-pane .notes-pane-body')));
-    });
-  }
-  // Select mode
-  document.getElementById('notes-select-btn').addEventListener('click', () => {
-    if (_selectMode) _exitSelectMode(); else _enterSelectMode();
-  });
-  // Esc cancels select mode. Notes uses a toggle "Select" button rather
-  // than a *-bulk-cancel button, so the global Esc-cancel handler in
-  // keyboard-shortcuts.js can't reach it — handle it here. Capture phase
-  // + stopPropagation so Esc cancels select instead of closing the panel.
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && _selectMode) {
-      e.preventDefault();
-      e.stopPropagation();
-      _exitSelectMode();
-    }
-  }, true);
-  document.getElementById('notes-select-all').addEventListener('change', (e) => {
-    if (e.target.checked) _notes.forEach(n => _selectedIds.add(n.id));
-    else _selectedIds.clear();
-    _renderNotes();
-    _updateBulkBar();
-  });
-  document.getElementById('notes-bulk-archive').addEventListener('click', async () => {
-    const ids = [..._selectedIds];
-    if (!ids.length) return;
-    await Promise.all(ids.map(id => _patchNote(id, { archived: true }).catch(() => {})));
-    _exitSelectMode();
-    await _fetchNotes();
-    _renderNotes();
-    uiModule.showToast(`Archived ${ids.length}`);
-  });
-  document.getElementById('notes-bulk-delete').addEventListener('click', async () => {
-    const ids = [..._selectedIds];
-    if (!ids.length) return;
-    if (uiModule && uiModule.styledConfirm) {
-      const ok = await uiModule.styledConfirm(`Delete ${ids.length} note${ids.length === 1 ? '' : 's'}?`, { confirmText: 'Delete', danger: true });
-      if (!ok) return;
-    }
-    await Promise.all(ids.map(id => _deleteNoteApi(id).catch(() => {})));
-    _exitSelectMode();
-    await _fetchNotes();
-    _renderNotes();
-    uiModule.showToast(`Deleted ${ids.length}`);
-  });
   // Escape: exit select mode first (if active), otherwise close the panel.
   // Skip when the user is editing a form field — those have their own
   // ESC-to-cancel handlers and we don't want to nuke the whole panel
@@ -1474,17 +1483,79 @@ async function _clearPastReminders() {
   uiModule.showToast?.(`Cleared ${targets.length} past reminder${targets.length === 1 ? '' : 's'}`);
 }
 
-async function _fetchOneThingBoard() {
+async function _fetchOneThingBoard({ skipVault = false } = {}) {
   try {
-    const res = await fetch(`${API_BASE}/api/one-thing?include_done=true`, { credentials: 'same-origin' });
+    const params = new URLSearchParams({ include_done: 'true' });
+    if (_showingArchived) params.set('include_archived', 'true');
+    if (skipVault) params.set('skip_vault_sync', 'true');
+    const res = await fetch(`${API_BASE}/api/one-thing?${params}`, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('fetch failed');
     _oneThingBoard = await res.json();
+    document.getElementById('notes-pane')?._syncTodosArchiveBtn?.();
     return _oneThingBoard;
   } catch (e) {
     console.warn('One Thing board load failed', e);
     _oneThingBoard = null;
     return null;
   }
+}
+
+function _oneThingPaneBody() {
+  return document.querySelector('#notes-pane .notes-pane-body');
+}
+
+function _removeTaskFromLocalBoard(taskId) {
+  if (!_oneThingBoard?.horizons || !taskId) return;
+  const prefix = String(taskId).toLowerCase();
+  for (const key of Object.keys(_oneThingBoard.horizons)) {
+    const tasks = _oneThingBoard.horizons[key].tasks || [];
+    _oneThingBoard.horizons[key].tasks = tasks.filter(t => {
+      const id = (t.id || '').toLowerCase();
+      return id !== prefix && !id.startsWith(prefix);
+    });
+  }
+}
+
+function _upsertTaskInLocalBoard(task) {
+  if (!_oneThingBoard?.horizons || !task?.id) return;
+  _removeTaskFromLocalBoard(task.id);
+  const hz = task.horizon || _oneThingHorizon;
+  if (!_oneThingBoard.horizons[hz]) return;
+  if (!_oneThingBoard.horizons[hz].tasks) _oneThingBoard.horizons[hz].tasks = [];
+  _oneThingBoard.horizons[hz].tasks.push(task);
+}
+
+async function _confirmDeleteTask() {
+  if (uiModule?.styledConfirm) {
+    return uiModule.styledConfirm('Delete this task?', { confirmText: 'Delete', danger: true });
+  }
+  return confirm('Delete this task?');
+}
+
+function _oneThingApiError(data, fallback = 'Request failed') {
+  const detail = data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(item => item?.msg || item?.message || String(item)).join(', ');
+  }
+  return fallback;
+}
+
+function _filterOneThingTasks(tasks) {
+  let list = [...(tasks || [])];
+  if (_showingArchived) {
+    list = list.filter(t => t.archived);
+  } else {
+    list = list.filter(t => !t.archived);
+  }
+  if (_searchQuery) {
+    const q = _searchQuery;
+    list = list.filter(t => (t.text || '').toLowerCase().includes(q));
+  }
+  return list.sort((a, b) => {
+    if (!!a.done !== !!b.done) return a.done ? 1 : -1;
+    return 0;
+  });
 }
 
 async function _fetchOneThingMeta() {
@@ -1657,6 +1728,12 @@ function _showOneThingDatePopover(anchor, { value = '', onPick, onClear } = {}) 
     });
   };
 
+  const accentWrap = anchor.closest('.one-thing-wrap');
+  if (accentWrap) {
+    const accent = getComputedStyle(accentWrap).getPropertyValue('--todo-accent').trim();
+    if (accent) pop.style.setProperty('--todo-accent', accent);
+  }
+
   document.body.appendChild(pop);
   paint();
   requestAnimationFrame(() => _positionOneThingDatePopover(pop, anchor));
@@ -1671,7 +1748,71 @@ async function _patchOneThingDue(taskId, dueDate) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ due_date: dueDate || null }),
   });
-  if (!res.ok) throw new Error('update failed');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(_oneThingApiError(data, 'update failed'));
+  return data.task;
+}
+
+async function _patchOneThingTask(taskId, fields) {
+  const res = await fetch(`${API_BASE}/api/one-thing/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(_oneThingApiError(data, 'update failed'));
+  return data.task;
+}
+
+async function _deleteOneThingTask(taskId) {
+  const res = await fetch(`${API_BASE}/api/one-thing/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(_oneThingApiError(data, 'delete failed'));
+}
+
+function _oneThingPriorityOptions(selected) {
+  return ['steady', 'elevated', 'critical'].map(value => {
+    const label = _oneThingPriorityLabel(value);
+    const sel = value === selected ? ' selected' : '';
+    return `<option value="${value}"${sel}>${label}</option>`;
+  }).join('');
+}
+
+function _oneThingRenderEditPanel(task) {
+  const dueValue = task.due_date || '';
+  const linkPicker = _oneThingHorizonHasParentLinks(_oneThingHorizon)
+    ? `<div class="one-thing-edit-links">${_oneThingRenderLinkPicker(_oneThingHorizon, task.parent_ids || [], { inputName: `edit-links-${task.id}` })}</div>`
+    : '';
+  return `<div class="one-thing-row-edit-panel" data-task-id="${_esc(task.id)}">
+    <label class="one-thing-edit-label">Description</label>
+    <input type="text" class="one-thing-edit-text" data-task-id="${_esc(task.id)}" value="${_esc(task.text || '')}" maxlength="500" />
+    <div class="one-thing-edit-fields">
+      <button type="button" class="one-thing-date-trigger one-thing-edit-due-trigger one-thing-add-field" data-task-id="${_esc(task.id)}" title="Planned completion">Due date</button>
+      <input type="hidden" class="one-thing-edit-due" data-task-id="${_esc(task.id)}" value="${_esc(dueValue)}" />
+      <select class="one-thing-edit-priority one-thing-add-field" data-task-id="${_esc(task.id)}" title="Priority">${_oneThingPriorityOptions(task.priority)}</select>
+    </div>
+    ${linkPicker}
+    <div class="one-thing-edit-actions">
+      <button type="button" class="one-thing-edit-save" data-task-id="${_esc(task.id)}">Save changes</button>
+      <button type="button" class="one-thing-edit-delete" data-task-id="${_esc(task.id)}" title="Delete task">Delete</button>
+    </div>
+  </div>`;
+}
+
+async function _patchOneThingLinks(taskId, parentIds) {
+  const res = await fetch(`${API_BASE}/api/one-thing/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parent_ids: parentIds }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(_oneThingApiError(data, 'update failed'));
+  return data.task;
 }
 
 let _oneThingRenderToken = 0;
@@ -1715,35 +1856,251 @@ async function _toggleOneThingTask(taskId, body, markBtn) {
 }
 
 function _ensureOneThingClickDelegation(body) {
-  if (!body || body.dataset.oneThingClickBound) return;
-  body.dataset.oneThingClickBound = '1';
+  if (!body || body.dataset.oneThingDelegated) return;
+  body.dataset.oneThingDelegated = '1';
+
   body.addEventListener('click', (e) => {
+    if (_showingArchived) return;
+
     const mark = e.target.closest('.one-thing-mark');
     if (mark && body.contains(mark)) {
       e.preventDefault();
       e.stopPropagation();
       void _toggleOneThingTask(mark.dataset.taskId, body, mark);
+      return;
+    }
+
+    const tabBtn = e.target.closest('.one-thing-row-tab');
+    if (tabBtn && body.contains(tabBtn)) {
+      e.preventDefault();
+      e.stopPropagation();
+      const tid = tabBtn.dataset.taskId;
+      const tab = tabBtn.dataset.tab;
+      if (!tid || !tab) return;
+      _oneThingRowTab[tid] = _oneThingRowTab[tid] === tab ? undefined : tab;
+      if (!_oneThingRowTab[tid]) delete _oneThingRowTab[tid];
+      void _renderOneThingView(body, { refresh: 'none' });
+      return;
+    }
+
+    const delBtn = e.target.closest('.one-thing-row-delete');
+    if (delBtn && body.contains(delBtn)) {
+      e.preventDefault();
+      e.stopPropagation();
+      void _handleOneThingDelete(delBtn.dataset.taskId, body, delBtn);
+      return;
+    }
+
+    const saveEditBtn = e.target.closest('.one-thing-edit-save');
+    if (saveEditBtn && body.contains(saveEditBtn)) {
+      e.preventDefault();
+      e.stopPropagation();
+      void _handleOneThingEditSave(saveEditBtn.dataset.taskId, body, saveEditBtn);
+      return;
+    }
+
+    const saveLinksBtn = e.target.closest('.one-thing-link-save');
+    if (saveLinksBtn && body.contains(saveLinksBtn)) {
+      e.preventDefault();
+      e.stopPropagation();
+      void _handleOneThingLinksSave(saveLinksBtn.dataset.taskId, body, saveLinksBtn);
+      return;
+    }
+
+    const titleEl = e.target.closest('.one-thing-row-title');
+    if (titleEl && body.contains(titleEl)) {
+      e.preventDefault();
+      e.stopPropagation();
+      const tid = titleEl.closest('.one-thing-row')?.dataset.taskId;
+      if (!tid) return;
+      _oneThingRowTab[tid] = 'details';
+      void _renderOneThingView(body, { refresh: 'none' });
+      return;
+    }
+
+    const linkChip = e.target.closest('.one-thing-link-chip');
+    if (linkChip && body.contains(linkChip)) {
+      e.preventDefault();
+      e.stopPropagation();
+      const parentHz = linkChip.dataset.parentHorizon;
+      if (!parentHz) return;
+      _oneThingHorizon = parentHz;
+      void _renderOneThingView(body, { refresh: 'none' });
+      return;
+    }
+
+    const dueBtn = e.target.closest('.one-thing-due[data-task-id]');
+    if (dueBtn && body.contains(dueBtn)) {
+      e.preventDefault();
+      e.stopPropagation();
+      void _handleOneThingDueClick(dueBtn, body);
     }
   });
 }
 
-async function _renderOneThingView(body) {
+async function _handleOneThingDelete(taskId, body, btn) {
+  if (!taskId || btn?.disabled) return;
+  if (!(await _confirmDeleteTask())) return;
+  btn.disabled = true;
+  try {
+    await _deleteOneThingTask(taskId);
+    _removeTaskFromLocalBoard(taskId);
+    delete _oneThingRowTab[taskId];
+    await _renderOneThingView(body, { refresh: 'none' });
+    _renderLabels(body);
+    uiModule.showToast?.('Task deleted');
+  } catch (err) {
+    uiModule.showToast?.(err.message || 'Could not delete task', 3500);
+    btn.disabled = false;
+  }
+}
+
+async function _handleOneThingEditSave(taskId, body, btn) {
+  if (!taskId || btn?.disabled) return;
+  const panel = btn.closest('.one-thing-row-edit-panel');
+  if (!panel) return;
+  const text = panel.querySelector('.one-thing-edit-text')?.value?.trim();
+  if (!text) {
+    uiModule.showToast?.('Description cannot be empty', 3000);
+    return;
+  }
+  const dueInput = panel.querySelector('.one-thing-edit-due');
+  const linkRoot = panel.querySelector('.one-thing-edit-links');
+  const parentIds = linkRoot ? _oneThingSelectedParentIds(linkRoot) : null;
+  if (linkRoot && _TODO_LINKS_REQUIRED.has(_oneThingHorizon) && !(parentIds || []).length) {
+    const label = _oneThingLinkingRules(_oneThingHorizon).parent_label || 'parent goal';
+    uiModule.showToast?.(`Select at least one ${label}`, 3500);
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const payload = {
+      text,
+      due_date: dueInput?.value || null,
+      priority: panel.querySelector('.one-thing-edit-priority')?.value || 'steady',
+    };
+    if (parentIds !== null) payload.parent_ids = parentIds;
+    const task = await _patchOneThingTask(taskId, payload);
+    _upsertTaskInLocalBoard(task);
+    delete _oneThingRowTab[taskId];
+    await _renderOneThingView(body, { refresh: 'none' });
+    uiModule.showToast?.('Task updated');
+  } catch (err) {
+    uiModule.showToast?.(err.message || 'Could not update task', 3500);
+    btn.disabled = false;
+  }
+}
+
+async function _handleOneThingLinksSave(taskId, body, btn) {
+  if (!taskId || btn?.disabled) return;
+  const panel = btn.closest('.one-thing-row-links-panel');
+  const parentIds = _oneThingSelectedParentIds(panel);
+  if (_TODO_LINKS_REQUIRED.has(_oneThingHorizon) && !parentIds.length) {
+    const label = _oneThingLinkingRules(_oneThingHorizon).parent_label || 'parent goal';
+    uiModule.showToast?.(`Select at least one ${label}`, 3500);
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const task = await _patchOneThingLinks(taskId, parentIds);
+    _upsertTaskInLocalBoard(task);
+    delete _oneThingRowTab[taskId];
+    await _renderOneThingView(body, { refresh: 'none' });
+    uiModule.showToast?.('Links updated');
+  } catch (err) {
+    uiModule.showToast?.(err.message || 'Could not update links', 3500);
+    btn.disabled = false;
+  }
+}
+
+async function _handleOneThingDueClick(dueBtn, body) {
+  const tid = dueBtn.dataset.taskId;
+  if (!tid) return;
+  const current = dueBtn.classList.contains('one-thing-due-empty') ? '' : dueBtn.textContent.trim();
+  _showOneThingDatePopover(dueBtn, {
+    value: current,
+    onPick: async (ymd) => {
+      try {
+        const task = await _patchOneThingDue(tid, ymd);
+        if (task) _upsertTaskInLocalBoard(task);
+        await _renderOneThingView(body, { refresh: 'none' });
+      } catch (err) {
+        uiModule.showToast?.(err.message || 'Could not update due date', 3000);
+      }
+    },
+    onClear: async () => {
+      try {
+        const task = await _patchOneThingDue(tid, null);
+        if (task) _upsertTaskInLocalBoard(task);
+        await _renderOneThingView(body, { refresh: 'none' });
+      } catch (err) {
+        uiModule.showToast?.(err.message || 'Could not clear due date', 3000);
+      }
+    },
+  });
+}
+
+function _wireOneThingEditPanels(body) {
+  body.querySelectorAll('.one-thing-row-edit-panel').forEach(panel => {
+    const dueTrigger = panel.querySelector('.one-thing-edit-due-trigger');
+    const dueInput = panel.querySelector('.one-thing-edit-due');
+    if (!dueTrigger || dueTrigger.dataset.wired === '1') return;
+    dueTrigger.dataset.wired = '1';
+    _syncOneThingDueTrigger(dueTrigger, dueInput);
+    dueTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _showOneThingDatePopover(dueTrigger, {
+        value: dueInput?.value || '',
+        onPick: (ymd) => {
+          if (dueInput) dueInput.value = ymd;
+          _syncOneThingDueTrigger(dueTrigger, dueInput);
+        },
+        onClear: () => {
+          if (dueInput) dueInput.value = '';
+          _syncOneThingDueTrigger(dueTrigger, dueInput);
+        },
+      });
+    });
+    panel.querySelector('.one-thing-edit-text')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        panel.querySelector('.one-thing-edit-save')?.click();
+      }
+    });
+  });
+}
+
+async function _renderOneThingView(body, { refresh = 'full' } = {}) {
   const token = ++_oneThingRenderToken;
-  await _fetchOneThingMeta();
-  await _fetchOneThingBoard();
+  if (refresh === 'full') {
+    await _fetchOneThingMeta();
+    await _fetchOneThingBoard({ skipVault: false });
+  } else if (refresh === 'light') {
+    await _fetchOneThingBoard({ skipVault: true });
+  }
   if (token !== _oneThingRenderToken || !body) return;
+  if (refresh !== 'none' && !_oneThingBoard) return;
   body.innerHTML = '';
   _renderLabelsInto(body);
   const horizons = (_oneThingBoard && _oneThingBoard.horizons) || {};
   const bucket = horizons[_oneThingHorizon] || {};
+  const tasks = _filterOneThingTasks(bucket.tasks);
+  const tagline = _showingArchived
+    ? 'Completed tasks from prior weeks — read-only history.'
+    : (bucket.tagline || '');
 
-  let html = `<div class="one-thing-wrap">
-    <div class="one-thing-section ${_ONE_THING_HORIZON_CLASS[_oneThingHorizon] || ''}">
+  const hzCls = _ONE_THING_HORIZON_CLASS[_oneThingHorizon] || '';
+  let html = `<div class="one-thing-wrap${hzCls ? ` ${hzCls}` : ''}">`;
+  if (_showingArchived) {
+    html += `<div class="one-thing-archive-banner">Showing archived completed tasks. Toggle <b>Done</b> in the header to return to active todos.</div>`;
+  }
+  html += `<div class="one-thing-section${hzCls ? ` ${hzCls}` : ''}">
     <div class="one-thing-section-head">
       <div class="one-thing-section-label">${_esc(bucket.label || _oneThingHorizon)}</div>
-      <div class="one-thing-section-tagline">${_esc(bucket.tagline || '')}</div>
-    </div>
-    <div class="one-thing-add">
+      <div class="one-thing-section-tagline">${_esc(tagline)}</div>
+    </div>`;
+  if (!_showingArchived) {
+    html += `<div class="one-thing-add">
       <input type="text" class="one-thing-add-text" placeholder="What needs your attention?" maxlength="500" />
       <button type="button" class="one-thing-date-trigger one-thing-add-field" title="Planned completion">Due date</button>
       <input type="hidden" class="one-thing-add-due" value="" />
@@ -1753,27 +2110,60 @@ async function _renderOneThingView(body) {
         <option value="critical">Critical</option>
       </select>
       <button type="button" class="one-thing-add-btn">Add</button>
-    </div>
-    <div class="one-thing-list">`;
+    </div>`;
+    if (_TODO_LINKS_REQUIRED.has(_oneThingHorizon)) {
+      html += `<div class="one-thing-add-links">${_oneThingRenderLinkPicker(_oneThingHorizon)}</div>`;
+    }
+  }
+  html += `<div class="one-thing-list">`;
 
-  const tasks = [...(bucket.tasks || [])].sort((a, b) => {
-    if (!!a.done !== !!b.done) return a.done ? 1 : -1;
-    return 0;
-  });
   if (!tasks.length) {
-    html += `<div class="notes-empty one-thing-empty">Nothing here yet — add one clear commitment.</div>`;
+    const emptyMsg = _showingArchived
+      ? (_searchQuery ? 'No archived tasks match your search.' : 'No archived tasks in this category yet.')
+      : (_searchQuery ? 'No tasks match your search.' : 'Nothing here yet — add one clear commitment.');
+    html += `<div class="notes-empty one-thing-empty">${emptyMsg}</div>`;
   } else {
     for (const task of tasks) {
       const doneCls = task.done ? ' done' : '';
+      const archivedCls = task.archived ? ' archived' : '';
       const priCls = _ONE_THING_PRIORITY_CLASS[task.priority] || '';
-      const due = task.due_date ? `<button type="button" class="one-thing-due" data-task-id="${_esc(task.id)}" title="Change due date">${_esc(task.due_date)}</button>` : '';
+      const due = !_showingArchived
+        ? (task.due_date
+          ? `<button type="button" class="one-thing-due" data-task-id="${_esc(task.id)}" title="Change due date">${_esc(task.due_date)}</button>`
+          : `<button type="button" class="one-thing-due one-thing-due-empty" data-task-id="${_esc(task.id)}" title="Set due date">Set due date</button>`)
+        : (task.due_date ? `<span class="one-thing-due-static">${_esc(task.due_date)}</span>` : '');
+      const completed = task.completed_at
+        ? `<span class="one-thing-completed-at">done ${ _esc(task.completed_at)}</span>`
+        : '';
+      const parents = task.parents || [];
+      const parentChips = parents.length
+        ? `<div class="one-thing-row-links">${parents.map(_oneThingParentChipHtml).join('')}</div>`
+        : '';
+      const missingLinks = _TODO_LINKS_REQUIRED.has(_oneThingHorizon)
+        && !(task.parent_ids && task.parent_ids.length);
+      const rowTab = _oneThingRowTab[task.id] || '';
+      const showEditPanel = rowTab === 'details' && !_showingArchived;
+      const showLinksPanel = rowTab === 'links' && !_showingArchived;
       const mark = task.done ? '[x]' : '[ ]';
-      html += `<div class="one-thing-row${doneCls}" data-task-id="${_esc(task.id)}">
-        <button type="button" class="one-thing-mark" data-task-id="${_esc(task.id)}" title="${task.done ? 'Mark not done' : 'Mark done'}" aria-label="${task.done ? 'Mark not done' : 'Mark done'}"><span class="one-thing-mark-box" aria-hidden="true">${mark}</span></button>
+      const toggleDisabled = _showingArchived ? ' disabled' : '';
+      const rowActions = _showingArchived ? '' : `<div class="one-thing-row-actions">
+              <button type="button" class="one-thing-row-tab${rowTab === 'details' ? ' active' : ''}" data-task-id="${_esc(task.id)}" data-tab="details">Edit</button>
+              <button type="button" class="one-thing-row-tab${rowTab === 'links' ? ' active' : ''}" data-task-id="${_esc(task.id)}" data-tab="links">Links${parents.length ? ` (${parents.length})` : ''}</button>
+              <button type="button" class="one-thing-row-delete" data-task-id="${_esc(task.id)}" title="Delete task">Delete</button>
+            </div>`;
+      html += `<div class="one-thing-row${doneCls}${archivedCls}${missingLinks ? ' needs-links' : ''}" data-task-id="${_esc(task.id)}">
+        <button type="button" class="one-thing-mark" data-task-id="${_esc(task.id)}" title="${task.done ? 'Mark not done' : 'Mark done'}" aria-label="${task.done ? 'Mark not done' : 'Mark done'}"${toggleDisabled}><span class="one-thing-mark-box" aria-hidden="true">${mark}</span></button>
         <div class="one-thing-row-text">
-          <div class="one-thing-row-title${task.done ? ' is-done' : ''}">${_esc(task.text || '')}</div>
-          <div class="one-thing-row-meta">
-            <span class="one-thing-priority ${priCls}">${_esc(_oneThingPriorityLabel(task.priority))}</span>${due}
+          <div class="one-thing-row-head">
+            <div class="one-thing-row-main">
+              ${showEditPanel ? '' : `<div class="one-thing-row-title${task.done ? ' is-done' : ''}">${_esc(task.text || '')}</div>`}
+              ${showEditPanel ? _oneThingRenderEditPanel(task) : ''}
+              ${showLinksPanel ? `<div class="one-thing-row-links-panel">${_oneThingRenderLinkPicker(_oneThingHorizon, task.parent_ids || [], { inputName: `links-${task.id}` })}<button type="button" class="one-thing-link-save" data-task-id="${_esc(task.id)}">Save links</button></div>` : ''}
+              ${!showEditPanel && !showLinksPanel ? `<div class="one-thing-row-meta">
+                <span class="one-thing-priority ${priCls}">${_esc(_oneThingPriorityLabel(task.priority))}</span>${due}${completed}${missingLinks ? '<span class="one-thing-link-warning">Needs parent goal</span>' : ''}
+              </div>${parentChips}` : ''}
+            </div>
+            ${rowActions}
           </div>
         </div>
       </div>`;
@@ -1781,21 +2171,27 @@ async function _renderOneThingView(body) {
   }
   html += `</div></div>
     <div class="one-thing-footer">
-      <button type="button" class="one-thing-sync-btn" title="Push tasks to Obsidian vault">Sync to Obsidian</button>
-      <span class="one-thing-sync-hint">Immediate tasks mirror to today's daily note</span>
+      <button type="button" class="one-thing-sync-btn" title="Rebuild knowledge graph index">Rebuild links</button>
+      <span class="one-thing-sync-hint">${_showingArchived ? 'Archived tasks stay in Nobody until restored.' : 'Changes save instantly · graph updates in the background · use Rebuild links to refresh the index'}</span>
     </div>
   </div>`;
   body.insertAdjacentHTML('beforeend', html);
   _ensureOneThingClickDelegation(body);
+  _wireOneThingEditPanels(body);
   _wireOneThingView(body);
 }
 
 function _wireOneThingView(body) {
-  const addBtn = body.querySelector('.one-thing-add-btn');
-  const addInput = body.querySelector('.one-thing-add-text');
-  const dueInput = body.querySelector('.one-thing-add-due');
-  const dueTrigger = body.querySelector('.one-thing-date-trigger');
-  const priInput = body.querySelector('.one-thing-add-priority');
+  _wireOneThingSyncBtn(body);
+  const addForm = body.querySelector('.one-thing-add');
+  if (!addForm || addForm.dataset.oneThingWired === '1') return;
+  addForm.dataset.oneThingWired = '1';
+
+  const addBtn = addForm.querySelector('.one-thing-add-btn');
+  const addInput = addForm.querySelector('.one-thing-add-text');
+  const dueInput = addForm.querySelector('.one-thing-add-due');
+  const dueTrigger = addForm.querySelector('.one-thing-date-trigger');
+  const priInput = addForm.querySelector('.one-thing-add-priority');
 
   _syncOneThingDueTrigger(dueTrigger, dueInput);
   dueTrigger?.addEventListener('click', (e) => {
@@ -1816,7 +2212,31 @@ function _wireOneThingView(body) {
   const submitAdd = async () => {
     const text = (addInput?.value || '').trim();
     if (!text) return;
-    addBtn.disabled = true;
+    const linkRoot = body.querySelector('.one-thing-add-links');
+    const parentIds = _oneThingSelectedParentIds(linkRoot);
+    if (_TODO_LINKS_REQUIRED.has(_oneThingHorizon) && !parentIds.length) {
+      const label = _oneThingLinkingRules(_oneThingHorizon).parent_label || 'parent goal';
+      uiModule.showToast?.(`Link this to at least one ${label}`, 3500);
+      return;
+    }
+    const priority = priInput?.value || 'steady';
+    const dueDate = dueInput?.value || null;
+    const optimistic = _oneThingBuildOptimisticTask({
+      text,
+      horizon: _oneThingHorizon,
+      priority,
+      due_date: dueDate,
+      parent_ids: parentIds,
+    });
+
+    addInput.value = '';
+    if (dueInput) dueInput.value = '';
+    _syncOneThingDueTrigger(dueTrigger, dueInput);
+    _upsertTaskInLocalBoard(optimistic);
+    await _renderOneThingView(body, { refresh: 'none' });
+    _renderLabels(body);
+    addInput?.focus();
+
     try {
       const res = await fetch(`${API_BASE}/api/one-thing/tasks`, {
         method: 'POST',
@@ -1825,67 +2245,47 @@ function _wireOneThingView(body) {
         body: JSON.stringify({
           text,
           horizon: _oneThingHorizon,
-          priority: priInput?.value || 'steady',
-          due_date: dueInput?.value || null,
+          priority,
+          due_date: dueDate,
+          parent_ids: parentIds,
         }),
       });
-      if (!res.ok) throw new Error('add failed');
-      addInput.value = '';
-      if (dueInput) dueInput.value = '';
-      _syncOneThingDueTrigger(dueTrigger, dueInput);
-      _oneThingBoard = null;
-      await _renderOneThingView(body);
-      uiModule.showToast?.('Added to todos');
-    } catch {
-      uiModule.showToast?.('Could not add task', 3000);
-    } finally {
-      addBtn.disabled = false;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(_oneThingApiError(data, 'add failed'));
+      _removeTaskFromLocalBoard(optimistic.id);
+      if (data.task) _upsertTaskInLocalBoard(data.task);
+      await _renderOneThingView(body, { refresh: 'none' });
+      _renderLabels(body);
+    } catch (err) {
+      _removeTaskFromLocalBoard(optimistic.id);
+      await _renderOneThingView(body, { refresh: 'none' });
+      _renderLabels(body);
+      uiModule.showToast?.(err.message || 'Could not add task', 3500);
     }
   };
+
   addBtn?.addEventListener('click', submitAdd);
   addInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); submitAdd(); }
   });
+}
 
-  body.querySelectorAll('.one-thing-due[data-task-id]').forEach(dueBtn => {
-    dueBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const tid = dueBtn.dataset.taskId;
-      if (!tid) return;
-      _showOneThingDatePopover(dueBtn, {
-        value: dueBtn.textContent.trim(),
-        onPick: async (ymd) => {
-          try {
-            await _patchOneThingDue(tid, ymd);
-            _oneThingBoard = null;
-            await _renderOneThingView(body);
-          } catch {
-            uiModule.showToast?.('Could not update due date', 3000);
-          }
-        },
-        onClear: async () => {
-          try {
-            await _patchOneThingDue(tid, null);
-            _oneThingBoard = null;
-            await _renderOneThingView(body);
-          } catch {
-            uiModule.showToast?.('Could not clear due date', 3000);
-          }
-        },
-      });
-    });
-  });
-
-  body.querySelector('.one-thing-sync-btn')?.addEventListener('click', async (ev) => {
+function _wireOneThingSyncBtn(body) {
+  const syncBtn = body.querySelector('.one-thing-sync-btn');
+  if (!syncBtn || syncBtn.dataset.oneThingWired === '1') return;
+  syncBtn.dataset.oneThingWired = '1';
+  syncBtn.addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
     btn.disabled = true;
     try {
       const res = await fetch(`${API_BASE}/api/one-thing/sync`, { method: 'POST', credentials: 'same-origin' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || 'sync failed');
-      uiModule.showToast?.('Synced to Obsidian vault');
+      _oneThingBoard = null;
+      await _renderOneThingView(body, { refresh: 'full' });
+      uiModule.showToast?.('Knowledge graph rebuilt');
     } catch {
-      uiModule.showToast?.('Vault sync failed — check Settings → Obsidian Vault', 4000);
+      uiModule.showToast?.('Graph rebuild failed', 4000);
     } finally {
       btn.disabled = false;
     }
@@ -1897,9 +2297,15 @@ function _renderLabels(root = document) {
   if (!bar) return;
   bar.style.display = '';
   const horizons = (_oneThingBoard && _oneThingBoard.horizons) || {};
-  let html = `<button type="button" class="notes-label-chip notes-label-chip-add-todo" data-action="add-todo" title="Add a todo in the current category">+ Add a Todo</button>`;
+  let html = '';
+  if (!_showingArchived) {
+    html += `<button type="button" class="notes-label-chip notes-label-chip-add-todo" data-action="add-todo" title="Add a todo in the current category">+ Add a Todo</button>`;
+  }
   for (const chip of _TODO_HORIZON_CHIPS) {
-    const count = (horizons[chip.key]?.tasks || []).filter(t => !t.done).length;
+    const pool = (horizons[chip.key]?.tasks || []).filter(t => (_showingArchived ? t.archived : !t.archived));
+    const count = _showingArchived
+      ? pool.length
+      : pool.filter(t => !t.done).length;
     const cls = _ONE_THING_HORIZON_CLASS[chip.key] || '';
     const active = _oneThingHorizon === chip.key ? ' active' : '';
     html += `<button type="button" class="notes-label-chip ${cls}${active}" data-action="todo-horizon" data-horizon="${chip.key}">${_esc(chip.label)} <span class="notes-label-chip-count">${count}</span></button>`;
@@ -1916,7 +2322,7 @@ function _renderLabels(root = document) {
       }
       if (chip.dataset.action === 'todo-horizon') {
         _oneThingHorizon = chip.dataset.horizon || 'focus';
-        if (paneBody) void _renderOneThingView(paneBody);
+        if (paneBody) void _renderOneThingView(paneBody, { refresh: 'none' });
       }
     });
   });
@@ -2054,7 +2460,7 @@ function _animateReflow(prevPositions) {
 function _renderNotes() {
   const body = document.querySelector('#notes-pane .notes-pane-body');
   if (!body) return;
-  void _renderOneThingView(body);
+  void _renderOneThingView(body, { refresh: _oneThingBoard ? 'none' : 'full' });
   return;
 
   _updateRailBadge();
@@ -2110,7 +2516,7 @@ function _renderNotes() {
 
   let html = '';
   if (_activeFilter === 'one-thing') {
-    void _renderOneThingView(body);
+    void _renderOneThingView(body, { refresh: 'none' });
     return;
   }
   // Today view: render a compact card listing the next-unchecked step from

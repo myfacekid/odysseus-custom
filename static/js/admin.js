@@ -1095,22 +1095,6 @@ const MCP_PRESETS = [
 7. Copy the Client ID and Client Secret into the fields above
 8. Click Add Server, then click the Authorize button
 9. Sign in with Google, copy the URL from the error page, paste it back` },
-  { name: "Email (IMAP/SMTP)", command: "npx", args: ["-y", "@codefuturist/email-mcp", "stdio"],        env: { MCP_EMAIL_ADDRESS: "", MCP_EMAIL_PASSWORD: "", MCP_EMAIL_IMAP_HOST: "", MCP_EMAIL_SMTP_HOST: "" },
-    providerDropdown: {
-      label: "Provider",
-      targets: { MCP_EMAIL_IMAP_HOST: "imap", MCP_EMAIL_SMTP_HOST: "smtp" },
-      options: [
-        { name: "Migadu",        imap: "imap.migadu.com",     smtp: "smtp.migadu.com" },
-        { name: "Fastmail",      imap: "imap.fastmail.com",   smtp: "smtp.fastmail.com" },
-        { name: "Proton Bridge", imap: "127.0.0.1",           smtp: "127.0.0.1" },
-        { name: "Outlook/Hotmail", imap: "outlook.office365.com", smtp: "smtp.office365.com" },
-        { name: "Yahoo",         imap: "imap.mail.yahoo.com", smtp: "smtp.mail.yahoo.com" },
-        { name: "iCloud",        imap: "imap.mail.me.com",    smtp: "smtp.mail.me.com" },
-        { name: "Zoho",          imap: "imap.zoho.com",       smtp: "smtp.zoho.com" },
-        { name: "Custom",        imap: "",                    smtp: "" },
-      ],
-    },
-    help: "Works with any IMAP/SMTP email provider.\n1. Pick your provider from the dropdown (or choose Custom)\n2. Enter your email address and password (or app password)\n3. Click Add Server" },
   { name: "CalDAV (Radicale/Nextcloud)", command: "npx", args: ["-y", "caldav-mcp"],                     env: { CALDAV_BASE_URL: "http://localhost:5232", CALDAV_USERNAME: "", CALDAV_PASSWORD: "" },
     help: "Works with any CalDAV server (Radicale, Nextcloud, etc.).\n1. Enter your CalDAV server URL (e.g. http://localhost:5232)\n2. Enter your username and password\n3. Click Add Server" },
   { name: "Google Calendar", command: "npx", args: ["-y", "@cocal/google-calendar-mcp"],                 env: { GOOGLE_OAUTH_CREDENTIALS: "" },

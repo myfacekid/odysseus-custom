@@ -321,15 +321,7 @@ const _TASK_ICONS = {
   // Research (magnifying glass)
   tidy_research:       '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
   // Calendar
-  tidy_calendar:       '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
-  // Email
-  summarize_emails:    '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
-  draft_email_replies: '<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
-  extract_email_events:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M7 14h5"/><path d="M7 18h8"/>',
   classify_events:    '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 15h.01M12 15h.01M16 15h.01"/>',
-  mark_email_boundaries:'<path d="M4 4h16v16H4z"/><path d="M4 9h16"/><path d="M9 4v16"/>',
-  learn_sender_signatures:'<path d="M20 6 9 17l-5-5"/><path d="M14 6h6v6"/>',
-  check_email_urgency: '<path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>',
   // Skills
   test_skills:         '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   audit_skills:        '<path d="M9 11l3 3L22 4"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v15H6.5A2.5 2.5 0 0 0 4 19.5z"/>',
@@ -351,13 +343,7 @@ function _taskIcon(task) {
 }
 
 const _MODEL_BACKED_ACTIONS = new Set([
-  'summarize_emails',
-  'draft_email_replies',
-  'extract_email_events',
   'classify_events',
-  'mark_email_boundaries',
-  'learn_sender_signatures',
-  'check_email_urgency',
   'test_skills',
   'audit_skills',
   'consolidate_memory',
@@ -495,12 +481,6 @@ const _CATEGORY_MAP = {
   tidy_calendar:        'Calendar',
   classify_events:      'Calendar',
   ping_events:          'Calendar',
-  extract_email_events: 'Calendar',
-  summarize_emails:           'Email',
-  draft_email_replies:        'Email',
-  mark_email_boundaries:      'Email',
-  learn_sender_signatures:    'Email',
-  check_email_urgency:        'Email',
   daily_brief:                'Assistant',
   test_skills:                'Skills',
   audit_skills:               'Skills',
@@ -508,10 +488,9 @@ const _CATEGORY_MAP = {
   run_script:           'System',
   run_local:            'System',
 };
-const _CATEGORY_ORDER = ['Other', 'Calendar', 'Email', 'Chats', 'Documents', 'Memory', 'Research', 'Skills', 'Assistant', 'System'];
+const _CATEGORY_ORDER = ['Other', 'Calendar', 'Chats', 'Documents', 'Memory', 'Research', 'Skills', 'Assistant', 'System'];
 const _CATEGORY_ICONS = {
   Calendar:  '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
-  Email:     '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
   Chats:     '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   Documents: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
   Memory:    '<path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/>',
@@ -606,12 +585,6 @@ function _renderTaskChips() {
 }
 
 const _TASK_CACHE_LABELS = {
-  summarize_emails: 'email summaries',
-  draft_email_replies: 'AI reply drafts',
-  extract_email_events: 'email calendar cache',
-  mark_email_boundaries: 'email boundaries',
-  learn_sender_signatures: 'sender signatures',
-  check_email_urgency: 'email tags',
 };
 
 function _taskClearCacheLabel(taskOrEntry) {
@@ -1082,28 +1055,6 @@ function _showForm(existing, initTaskType, initTriggerType) {
         </select>
         <div id="task-form-action-extra"></div>
       `;
-      const syncActionExtra = async () => {
-        const sel = document.getElementById('task-form-action');
-        const extra = document.getElementById('task-form-action-extra');
-        if (!sel || !extra) return;
-        if (sel.value !== 'check_email_urgency') {
-          extra.innerHTML = '';
-          return;
-        }
-        extra.innerHTML = `
-          <label class="task-form-label">Email triage rules</label>
-          <textarea id="task-form-urgent-email-prompt" class="task-form-input task-form-textarea" rows="4" placeholder="What should count as urgent? e.g. deadlines, blockers, people waiting outside."></textarea>
-          <div class="memory-desc" style="font-size:11px;margin-top:4px;">Pause/resume and schedule are controlled by this task. It tags urgent, reply-soon, newsletter, marketing, and spam. Urgent/reply-soon emails use your reminder settings.</div>
-        `;
-        const settings = await _fetchUrgentEmailSettings();
-        const promptEl = document.getElementById('task-form-urgent-email-prompt');
-        if (promptEl && !promptEl.dataset.loaded) {
-          promptEl.value = settings.urgent_email_prompt || '';
-          promptEl.dataset.loaded = '1';
-        }
-        const notifEl = document.getElementById('task-form-notif');
-        if (notifEl && !existing?.id) notifEl.checked = false;
-      };
       _fetchActions().then(actions => {
         const sel = document.getElementById('task-form-action');
         if (!sel) return;
@@ -1115,8 +1066,6 @@ function _showForm(existing, initTaskType, initTriggerType) {
           if (existing?.action === a.name) opt.selected = true;
           sel.appendChild(opt);
         }
-        sel.addEventListener('change', syncActionExtra);
-        syncActionExtra();
       });
     }
   }
@@ -1437,15 +1386,6 @@ function _showForm(existing, initTaskType, initTriggerType) {
         return;
       }
       payload.action = action;
-      if (action === 'check_email_urgency') {
-        const urgentPrompt = document.getElementById('task-form-urgent-email-prompt')?.value || '';
-        try {
-          await _saveUrgentEmailSettings(urgentPrompt);
-        } catch (e) {
-          if (uiModule) uiModule.showError('Failed to save urgency rules');
-          return;
-        }
-      }
     }
 
     // Trigger specifics

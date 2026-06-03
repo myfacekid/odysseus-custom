@@ -1,4 +1,9 @@
-"""Optional Obsidian plugin search integrations."""
+"""Optional Obsidian plugin search integrations (hybrid mode only).
+
+Smart Connections and Omnisearch provide semantic *similarity* boosts from on-disk
+caches — they are not used for [[wikilink]] resolution (see vault_graph.py).
+Local REST API requires Obsidian running; skipped in filesystem mode.
+"""
 from __future__ import annotations
 
 import json

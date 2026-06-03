@@ -1277,12 +1277,6 @@ async function _cmdToolPanel(tool, args, ctx) {
     await cookbookModule?.open?.({ tab: 'Download', usecase: rest || undefined });
     return true;
   }
-  if (target === 'email') {
-    const btn = document.getElementById('rail-email') || document.getElementById('email-section-title');
-    if (btn) btn.click();
-    else slashReply('Could not open Email.');
-    return true;
-  }
   if (target === 'settings') {
     if (settingsModule && typeof settingsModule.open === 'function') settingsModule.open(rest || undefined);
     else document.getElementById('user-bar-settings')?.click();

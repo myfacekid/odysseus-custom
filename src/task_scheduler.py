@@ -1034,14 +1034,6 @@ class TaskScheduler:
     # a check-in source. Add new patterns here to support new integrations —
     # no code changes needed elsewhere.
     CHECKIN_MCP_PATTERNS = [
-        {"detect": "list_emails",   "section": "Email",    "tool": "list_emails",
-         "args": {"mailbox": "INBOX", "limit": 10, "unread_only": True},
-         "label_from_identity": True,
-         "formatter": "_format_email_output"},
-        {"detect": "search_emails", "section": "Email",    "tool": "search_emails",
-         "args": {"query": "is:unread", "limit": 10},
-         "label_from_identity": True,
-         "formatter": "_format_email_output"},
         {"detect": "get_feed",      "section": "RSS",      "tool": "get_feed",
          "args": {},
          "label_from_identity": False},
@@ -1415,7 +1407,7 @@ class TaskScheduler:
             return
 
         if self._is_email_output_target(output):
-            await self._deliver_via_email(output, task, result)
+            logger.warning("Task %s: email output target %r is no longer supported", task.id, output)
             return
 
         if output != "session":
@@ -1505,46 +1497,6 @@ class TaskScheduler:
         if target.startswith("email:"):
             return True
         return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", target))
-
-    async def _deliver_via_email(self, output: str, task, result: str):
-        """Send task output through the app's configured SMTP account.
-
-        Supported output_target values:
-        - email / email:self: send to the account's From address
-        - email:name@example.com or raw name@example.com: send there
-        """
-        from email.message import EmailMessage
-
-        target = (output or "").strip()
-        explicit = ""
-        if target.startswith("email:"):
-            explicit = target.split(":", 1)[1].strip()
-        elif "@" in target:
-            explicit = target
-
-        try:
-            from routes.email_routes import _resolve_send_config
-            from routes.email_helpers import _send_smtp_message
-
-            cfg = _resolve_send_config(owner=task.owner or "")
-            to_addr = explicit or cfg.get("from_address") or cfg.get("smtp_user") or ""
-            if not to_addr:
-                raise RuntimeError("No email recipient resolved for task output")
-
-            from_addr = cfg.get("from_address") or cfg.get("smtp_user") or to_addr
-            msg = EmailMessage()
-            msg["From"] = from_addr
-            msg["To"] = to_addr
-            msg["Subject"] = f"[Task] {task.name}"
-            msg["X-Odysseus-Origin"] = "odysseus-ui"
-            msg["X-Odysseus-Kind"] = "task"
-            msg["X-Odysseus-Ref"] = str(task.id)
-            msg.set_content(result or "")
-            _send_smtp_message(cfg, from_addr, [to_addr], msg.as_string(), timeout=30)
-            logger.info("Task %s emailed result to %s (%sb)", task.id, to_addr, len(result or ""))
-        except Exception as e:
-            logger.error("Task %s email delivery failed: %s", task.id, e, exc_info=True)
-            raise
 
     async def _run_agent_loop(self, endpoint_url: str, model: str, task, session_id: str,
                               system_prompt: str | None = None,
@@ -1834,13 +1786,7 @@ class TaskScheduler:
         # `_get_email_config()` is the single source of truth that handles both
         # the legacy `email_from` setting and the per-account DB rows.
         recipient = None
-        try:
-            from routes.email_helpers import _get_email_config
-            cfg = _get_email_config() or {}
-            recipient = cfg.get("from_address") or None
-        except Exception as _e:
-            logger.debug(f"_deliver_via_mcp: email config lookup failed: {_e}")
-        if not recipient and task.owner and "@" in str(task.owner):
+        if task.owner and "@" in str(task.owner):
             recipient = task.owner
 
         args = {
@@ -2133,7 +2079,7 @@ class TaskScheduler:
 
             default_personality = (
                 "You are the user's personal assistant. Concise, warm, a little dry. "
-                "Never waste time with fluff. Default to English. Only match the other language when replying to a non-English email.\n\n"
+                "Never waste time with fluff. Default to English.\n\n"
 
                 "CORE RULE: You MUST use your tools to take action — do not describe what you would do. "
                 "Never say 'I would check your calendar' — actually call manage_calendar. "
@@ -2142,19 +2088,10 @@ class TaskScheduler:
 
                 "DECISION FRAMEWORK — follow these rules, not just tool descriptions:\n\n"
 
-                "CONTEXT GATHERING (before any response involving a specific person):\n"
-                "1. resolve_contact if you only have a name and need their email\n"
-                "2. search_chats for recent conversations mentioning them or their topic\n"
-                "3. manage_memory to check stored facts about them\n"
-                "Skip steps you already have answers for. Don't search for the user themselves.\n\n"
-
-                "EMAIL HANDLING:\n"
-                "- If a document is open in the editor, that IS the email. Use update_document to write the reply.\n"
-                "- BEFORE drafting any reply: gather context (steps above) about the sender and topic.\n"
-                "- When an email mentions a date/meeting: check calendar for conflicts, add if clear.\n"
-                "- When an email asks a question you can't answer from context: say so honestly. Never fabricate.\n"
-                "- Skip automated/marketing emails in check-ins. Only surface human-sent, actionable ones.\n"
-                "- Never duplicate information the user already saw in a previous check-in.\n\n"
+                "CONTEXT GATHERING (before any response involving a specific person or topic):\n"
+                "1. search_chats for recent conversations mentioning them or their topic\n"
+                "2. manage_memory to check stored facts about them\n"
+                "Skip steps you already have answers for.\n\n"
 
                 "ESCALATION LADDER (when you need info you don't have):\n"
                 "1. search_chats (fast, free)\n"
@@ -2163,26 +2100,17 @@ class TaskScheduler:
                 "4. trigger_research (expensive, async — only for complex multi-source questions)\n"
                 "Stop as soon as you have a sufficient answer.\n\n"
 
-                "'SEND TO [NAME]' FLOW:\n"
-                "1. resolve_contact to find their email\n"
-                "2. If a document is open, use its content as the body\n"
-                "3. Draft the email in a document (create_document with language='email')\n"
-                "4. Tell the user to review — NEVER auto-send\n\n"
-
                 "SELF-IMPROVEMENT — use manage_memory constantly:\n"
                 "- When the user corrects you, IMMEDIATELY store the correction as a memory.\n"
-                "- After every check-in or task, store new facts you learned (contacts, preferences, patterns).\n"
+                "- After every check-in or task, store new facts you learned (preferences, patterns).\n"
                 "- Before responding about a person or topic, search_chats and manage_memory FIRST.\n"
                 "- Build knowledge over time: who people are, what projects are active, how the user likes things done.\n"
                 "- If something failed or you got corrected, store WHY so you never repeat it.\n"
                 "- When you figure out a multi-step workflow that works, save it as a SKILL using manage_skills.\n"
-                "  A skill is a reusable procedure. Next time, recall the skill instead of figuring it out again.\n"
                 "- Before starting a complex task, check manage_skills for an existing procedure.\n\n"
 
                 "AUTONOMY RULES:\n"
                 "- Auto-add calendar events from clear meeting invitations (mention what you added)\n"
-                "- Auto-draft email replies (cached for when user clicks Reply)\n"
-                "- NEVER send emails without explicit user instruction\n"
                 "- NEVER delete anything without explicit instruction\n"
                 "- If uncertain, ask rather than guess"
             )
@@ -2218,8 +2146,6 @@ class TaskScheduler:
                 greeting=None,
                 enabled_tools=json.dumps([
                     "manage_calendar", "manage_notes", "manage_tasks", "manage_memory",
-                    "list_email_accounts", "list_emails", "read_email", "send_email", "reply_to_email", "archive_email",
-                    "mark_email_read", "delete_email", "resolve_contact",
                     "search_chats", "web_search", "web_fetch", "read_file",
                     "create_document", "update_document", "edit_document",
                     "generate_image", "trigger_research",

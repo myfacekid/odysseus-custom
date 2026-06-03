@@ -32,8 +32,6 @@ NON_ADMIN_BLOCKED_TOOLS = {
     "reply_to_email",
     "list_emails",
     "read_email",
-    "resolve_contact",
-    "manage_contact",
     "manage_calendar",
     "vault_search",
     "vault_get",

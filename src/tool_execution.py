@@ -718,9 +718,7 @@ async def execute_tool_block(
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
         do_list_serve_presets, do_serve_preset, do_adopt_served_model,
         do_list_cookbook_servers,
-        do_edit_image, do_trigger_research, do_manage_research, do_search_vault, do_search_zotero,
-        do_resolve_contact,
-        do_manage_contact,
+        do_edit_image, do_trigger_research, do_manage_research,         do_search_vault, do_search_knowledge, do_search_zotero,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
     )
@@ -741,12 +739,8 @@ async def execute_tool_block(
                     "error": (
                         f"You wrote a JSON object inside a ```{tool}``` block, but that's not a tool call.\n"
                         "To call a tool, use the tool name as the fence tag, e.g.\n"
-                        "```resolve_contact\n"
-                        "{\"name\": \"...\"}\n"
-                        "```\n"
-                        "or\n"
-                        "```send_email\n"
-                        "{\"to\": \"...\", \"subject\": \"...\", \"body\": \"...\"}\n"
+                        "```create_document\n"
+                        "{\"title\": \"...\", \"content\": \"...\"}\n"
                         "```"
                     ),
                     "exit_code": 1,
@@ -919,15 +913,12 @@ async def execute_tool_block(
     elif tool == "search_vault":
         desc = "search_vault"
         result = await do_search_vault(content, owner=owner)
+    elif tool == "search_knowledge":
+        desc = "search_knowledge"
+        result = await do_search_knowledge(content, owner=owner)
     elif tool == "search_zotero":
         desc = "search_zotero"
         result = await do_search_zotero(content, owner=owner)
-    elif tool == "resolve_contact":
-        desc = "resolve_contact"
-        result = await do_resolve_contact(content, owner=owner)
-    elif tool == "manage_contact":
-        desc = "manage_contact"
-        result = await do_manage_contact(content, owner=owner)
     elif tool == "vault_search":
         desc = "vault_search"
         result = await do_vault_search(content, owner=owner)

@@ -146,8 +146,6 @@ def _sniff_doc_language(text: str) -> str:
         return "markdown"
     head = s[:600]
     hl = head.lower()
-    if _looks_like_email_document(s):
-        return "email"
     # Markup (unambiguous)
     if "<svg" in hl:
         return "svg"
@@ -179,41 +177,6 @@ def _sniff_doc_language(text: str) -> str:
     return "markdown"
 
 
-def _looks_like_email_document(text: str = "", title: str = "") -> bool:
-    import re as _re
-    title_l = (title or "").strip().lower()
-    if title_l in {"new email", "new mail", "new message"}:
-        return True
-    s = (text or "").lstrip()
-    if "\n---\n" in s and _re.search(r"(?im)^To:\s*", s) and _re.search(r"(?im)^Subject:\s*", s):
-        return True
-    return bool(_re.search(r"(?im)^To:\s*", s) and _re.search(r"(?im)^Subject:\s*", s))
-
-
-def _coerce_email_document_content(existing: str, incoming: str) -> str:
-    """Keep email docs in the To/Subject/---/body shape even if a model writes
-    only the body or dumps header labels without the separator."""
-    import re as _re
-    old = existing or ""
-    new = (incoming or "").strip()
-    if "\n---\n" in new:
-        return new
-    header = old.split("\n---\n", 1)[0] if "\n---\n" in old else "To: \nSubject: "
-    if _looks_like_email_document(new):
-        lines = new.splitlines()
-        last_header_idx = -1
-        header_re = _re.compile(r"^(To|Cc|Bcc|Subject|In-Reply-To|References|X-Source-UID|X-Source-Folder|X-Attachments):", _re.I)
-        for i, line in enumerate(lines):
-            if header_re.match(line.strip()):
-                last_header_idx = i
-        body_lines = lines[last_header_idx + 1:] if last_header_idx >= 0 else lines
-        while body_lines and not body_lines[0].strip():
-            body_lines.pop(0)
-        body = "\n".join(body_lines).strip()
-    else:
-        body = new
-    return header.rstrip() + "\n---\n" + body
-
 
 async def do_create_document(content_block: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
     """Create a new document. Supports two formats:
@@ -229,7 +192,7 @@ async def do_create_document(content_block: str, session_id: Optional[str] = Non
     _KNOWN_LANGS = {
         "python", "javascript", "typescript", "html", "css", "markdown", "json",
         "yaml", "bash", "sql", "rust", "go", "java", "c", "cpp", "xml", "toml",
-        "ini", "ruby", "php", "csv", "email", "text", "plain", "svg",
+        "ini", "ruby", "php", "csv", "text", "plain", "svg",
     }
 
     # Try XML tag extraction first
@@ -267,9 +230,6 @@ async def do_create_document(content_block: str, session_id: Optional[str] = Non
         # No explicit language — sniff it from the content so an SVG / HTML / JSON
         # / code document isn't silently saved as markdown. Prose → markdown.
         language = _sniff_doc_language(content)
-    if _looks_like_email_document(content, title):
-        language = "email"
-
     if not title:
         title = "Untitled"
 
@@ -353,10 +313,7 @@ async def do_update_document(content: str, doc_id: Optional[str] = None, owner: 
         if not doc:
             return {"error": "No documents exist to update"}
 
-        is_email_doc = doc.language == "email" or _looks_like_email_document(doc.current_content or "", doc.title or "")
-        new_content = _coerce_email_document_content(doc.current_content or "", content) if is_email_doc else content.strip()
-        if is_email_doc:
-            doc.language = "email"
+        new_content = content.strip()
 
         new_ver = doc.version_count + 1
         ver = DocumentVersion(
@@ -1580,7 +1537,7 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
 
         _ENUMS = {
             "image_quality": ["low", "medium", "high"],
-            "reminder_channel": ["browser", "email", "ntfy"],
+            "reminder_channel": ["browser", "ntfy"],
         }
         def _coerce(value, default):
             if isinstance(default, bool):
@@ -2028,7 +1985,6 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
 
         elif action in ("list_one_thing", "one_thing_list", "list_tasks"):
             from src.one_thing import format_agent_list, list_tasks as ot_list
-            from src.vault_one_thing_sync import sync_one_thing_to_vault
 
             horizon = args.get("horizon") or args.get("bucket")
             include_done = bool(args.get("include_done", False))
@@ -2037,7 +1993,7 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
 
         elif action in ("add_one_thing", "add_task"):
             from src.one_thing import add_task as ot_add
-            from src.vault_one_thing_sync import sync_one_thing_to_vault
+            from src.knowledge_sync import after_task_change
 
             text = (args.get("text") or args.get("title") or args.get("content") or "").strip()
             if not text:
@@ -2050,7 +2006,7 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
                 priority=args.get("priority") or "steady",
                 due_date=args.get("due_date"),
             )
-            sync_one_thing_to_vault(owner or "")
+            after_task_change(owner or "")
             return {
                 "response": f"One Thing task added ({task.horizon}, {task.priority}): {task.text} (id: {task.id[:8]})",
                 "task_id": task.id,
@@ -2059,7 +2015,7 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
 
         elif action in ("toggle_one_thing", "toggle_task"):
             from src.one_thing import toggle_task as ot_toggle
-            from src.vault_one_thing_sync import sync_one_thing_to_vault
+            from src.knowledge_sync import after_task_change
 
             tid = (args.get("id") or args.get("task_id") or "").strip()
             if not tid:
@@ -2067,7 +2023,7 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
             task = ot_toggle(db, owner or "", tid)
             if not task:
                 return {"error": f"Task '{tid}' not found", "exit_code": 1}
-            sync_one_thing_to_vault(owner or "")
+            after_task_change(owner or "")
             state = "done" if task.done else "open"
             return {"response": f"Task marked {state}: {task.text} (id: {task.id[:8]})", "exit_code": 0}
 
@@ -2737,7 +2693,6 @@ _APP_API_BLOCKLIST_PREFIXES = (
 # /api/cookbook/state, which overwrote the whole file. Use the
 # dedicated preset/task tools instead.
 _APP_API_BLOCKLIST_METHOD_PATH = (
-    ("GET",    "/api/email/accounts"),  # owner-filtered in tool context; use list_email_accounts MCP tool
     ("POST",   "/api/cookbook/state"),   # whole-file overwrite — agent must use serve_preset/serve_model instead
     ("DELETE", "/api/cookbook/state"),
     # Use the named tools (download_model / serve_model) — they handle
@@ -2844,8 +2799,8 @@ async def do_app_api(content: str, owner: Optional[str] = None) -> Dict:
     if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         return {"error": f"Unsupported method: {method}", "exit_code": 1}
     if any(method == m and path.startswith(p) for m, p in _APP_API_BLOCKLIST_METHOD_PATH):
-        if "/api/email/accounts" in path:
-            return {"error": "Don't use /api/email/accounts via app_api — it is owner-filtered in tool context and may return empty. Use the `list_email_accounts` email tool, then pass `account` to list_emails/read_email.", "exit_code": 1}
+        if "/api/email/" in path:
+            return {"error": "Email features are not available in this build.", "exit_code": 1}
         if "/api/model/download" in path:
             return {"error": "Don't POST /api/model/download directly — use the `download_model` tool (it resolves the server name, sets the venv env_prefix, and registers the task so it shows in the UI).", "exit_code": 1}
         if "/api/model/serve" in path:
@@ -3813,7 +3768,7 @@ async def do_manage_research(content: str, owner: Optional[str] = None) -> Dict:
 
 
 async def do_search_vault(content: str, owner: Optional[str] = None) -> Dict:
-    """List, read, or search the user's local Obsidian vault."""
+    """List, read, or search the user's local markdown vault."""
     import asyncio
     from src.obsidian_vault import execute_search_vault_tool
     try:
@@ -3833,6 +3788,29 @@ async def do_search_vault(content: str, owner: Optional[str] = None) -> Dict:
         )
     except asyncio.TimeoutError:
         return {"error": "search_vault timed out", "exit_code": 1}
+
+
+async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict:
+    """Search the unified knowledge graph (tasks, documents, memories, skills, notes)."""
+    import asyncio
+    from src.knowledge_graph import execute_knowledge_tool
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    if not isinstance(args, dict):
+        args = {}
+    loop = asyncio.get_running_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: execute_knowledge_tool(args, owner=owner or ""),
+            ),
+            timeout=45,
+        )
+    except asyncio.TimeoutError:
+        return {"error": "search_knowledge timed out", "exit_code": 1}
 
 
 async def do_search_zotero(content: str, owner: Optional[str] = None) -> Dict:
@@ -3908,132 +3886,6 @@ async def do_trigger_research(content: str, owner: Optional[str] = None) -> Dict
     except Exception as e:
         return {"error": str(e), "exit_code": 1}
 
-
-# ── Contact tools ──
-
-async def do_resolve_contact(content: str, owner: Optional[str] = None) -> Dict:
-    """Look up a contact by name. Searches: CardDAV -> email history -> memory."""
-    import httpx
-    try:
-        args = _parse_tool_args(content)
-    except ValueError:
-        return {"error": "Invalid JSON arguments", "exit_code": 1}
-    name = args.get("name", "")
-    if not name:
-        return {"error": "name is required", "exit_code": 1}
-
-    contacts = {}  # email -> {name, source}
-
-    # 1. CardDAV (Radicale) — structured contacts. Call in-process: a
-    # server-side httpx GET to /api/contacts/search carries no session
-    # cookie and would 401 under require_user.
-    try:
-        import asyncio
-        from routes import contacts_routes as cc
-        all_contacts = await asyncio.to_thread(cc._fetch_contacts)
-        q = name.lower()
-        for c in (all_contacts or []):
-            hay_name = (c.get("name") or "").lower()
-            match = q in hay_name or any(q in (e or "").lower() for e in c.get("emails", []))
-            if not match:
-                continue
-            for email in (c.get("emails") or []):
-                email = (email or "").strip().lower()
-                if email and "@" in email:
-                    contacts[email] = {"name": c.get("name") or email, "source": "contacts"}
-    except Exception:
-        pass
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        # 2. Email history (sent/received)
-        try:
-            resp = await client.get("http://localhost:7000/api/email/resolve-contact", params={"name": name})
-            if resp.status_code == 200:
-                for c in (resp.json().get("contacts") or []):
-                    email = (c.get("email") or "").strip().lower()
-                    if email and email not in contacts:
-                        contacts[email] = {"name": c.get("name") or email, "source": "email history"}
-        except Exception:
-            pass
-
-    if not contacts:
-        return {"output": f"No contacts found matching '{name}'.", "exit_code": 0}
-
-    lines = [f"Contacts matching '{name}':"]
-    for email, info in contacts.items():
-        lines.append(f"- {info['name']} <{email}> ({info['source']})")
-    return {"output": "\n".join(lines), "exit_code": 0}
-
-
-async def do_manage_contact(content: str, owner: Optional[str] = None) -> Dict:
-    """Add / update / delete / list CardDAV contacts. Calls the contacts
-    helpers IN-PROCESS rather than over HTTP — a server-side httpx call to
-    /api/contacts/* carries no session cookie and would be rejected by
-    require_user (401), so the tool would see zero contacts even though
-    the browser-side UI works fine."""
-    try:
-        args = _parse_tool_args(content)
-    except ValueError:
-        return {"error": "Invalid JSON arguments", "exit_code": 1}
-    action = (args.get("action") or "").strip().lower()
-    try:
-        from routes import contacts_routes as cc
-    except Exception as e:
-        return {"error": f"Contacts module unavailable: {e}", "exit_code": 1}
-    # The contacts helpers are sync (httpx blocking calls to CardDAV) — run
-    # them in a thread so we don't block the event loop.
-    import asyncio
-    try:
-        if action == "list":
-            rows = await asyncio.to_thread(cc._fetch_contacts, True)
-            if not rows:
-                return {"output": "No contacts.", "exit_code": 0}
-            lines = [f"{len(rows)} contacts:"]
-            for c in rows:
-                em = ", ".join(c.get("emails") or [])
-                lines.append(f"- {c.get('name') or '(no name)'} <{em}>  [uid={c.get('uid','')}]")
-            return {"output": "\n".join(lines), "exit_code": 0}
-
-        if action == "add":
-            email = (args.get("email") or "").strip()
-            if not email:
-                return {"error": "email is required for add", "exit_code": 1}
-            name = (args.get("name") or "").strip() or email.split("@")[0]
-            # Dedupe by email (same as the /add route).
-            existing = await asyncio.to_thread(cc._fetch_contacts)
-            for c in existing:
-                if email.lower() in [e.lower() for e in c.get("emails", [])]:
-                    return {"output": f"{email} is already a contact ({c.get('name','')}).", "exit_code": 0}
-            ok = await asyncio.to_thread(cc._create_contact, name, email)
-            return {"output": f"{'Added' if ok else 'Failed to add'} {name} <{email}>.", "exit_code": 0 if ok else 1}
-
-        if action in ("update", "edit"):
-            uid = (args.get("uid") or "").strip()
-            if not uid:
-                return {"error": "uid is required for update (use action=list to find it)", "exit_code": 1}
-            name = (args.get("name") or "").strip()
-            emails = args.get("emails")
-            if emails is None and args.get("email"):
-                emails = [args["email"]]
-            emails = [e.strip() for e in (emails or []) if e and e.strip()]
-            phones = [p.strip() for p in (args.get("phones") or []) if p and p.strip()]
-            if not name and not emails:
-                return {"error": "Provide a name or emails to update", "exit_code": 1}
-            if not name and emails:
-                name = emails[0].split("@")[0]
-            ok = await asyncio.to_thread(cc._update_contact, uid, name, emails, phones)
-            return {"output": "Contact updated." if ok else "Update failed.", "exit_code": 0 if ok else 1}
-
-        if action == "delete":
-            uid = (args.get("uid") or "").strip()
-            if not uid:
-                return {"error": "uid is required for delete (use action=list to find it)", "exit_code": 1}
-            ok = await asyncio.to_thread(cc._delete_contact, uid)
-            return {"output": "Contact deleted." if ok else "Delete failed.", "exit_code": 0 if ok else 1}
-
-        return {"error": f"Unknown action '{action}'. Use list, add, update, or delete.", "exit_code": 1}
-    except Exception as e:
-        return {"error": f"Contact operation failed: {e}", "exit_code": 1}
 
 
 # ── Vaultwarden / Bitwarden CLI tools ──

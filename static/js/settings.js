@@ -1608,10 +1608,12 @@ async function initZoteroSettings() {
   });
 }
 
-/* ── Obsidian Vault (Search tab, per-user) ── */
+/* ── Vault folder (Search tab, per-user) ── */
 async function initObsidianVaultSettings() {
   var pathInput = el('set-obsidianVaultPath');
   var dailyInput = el('set-obsidianDailyFolder');
+  var modeInput = el('set-obsidianVaultMode');
+  var twoWayInput = el('set-obsidianTodosTwoWay');
   var msg = el('set-obsidianVaultMsg');
   var saveBtn = el('set-obsidianVaultSave');
   var testBtn = el('set-obsidianVaultTest');
@@ -1627,6 +1629,8 @@ async function initObsidianVaultSettings() {
       if (cfg.vault_path) pathInput.value = cfg.vault_path;
       else pathInput.placeholder = '~/Documents/Vault_1/Vault_1';
       if (dailyInput) dailyInput.value = cfg.daily_notes_folder || 'Daily Notes';
+      if (modeInput) modeInput.value = cfg.vault_mode === 'hybrid' ? 'hybrid' : 'filesystem';
+      if (twoWayInput) twoWayInput.checked = cfg.todos_two_way !== false;
       if (cfg.configured) {
         msg.textContent = 'Vault: ' + (cfg.vault_path_expanded || cfg.vault_path);
         msg.style.color = 'var(--fg)';
@@ -1647,6 +1651,8 @@ async function initObsidianVaultSettings() {
       var body = {
         vault_path: pathInput.value.trim(),
         daily_notes_folder: dailyInput ? dailyInput.value.trim() : 'Daily Notes',
+        vault_mode: modeInput ? modeInput.value : 'filesystem',
+        todos_two_way: twoWayInput ? !!twoWayInput.checked : true,
       };
       var res = await fetch('/api/obsidian-vault/config', {
         method: 'POST', credentials: 'same-origin',
@@ -1669,6 +1675,8 @@ async function initObsidianVaultSettings() {
       var body = {
         vault_path: pathInput.value.trim(),
         daily_notes_folder: dailyInput ? dailyInput.value.trim() : 'Daily Notes',
+        vault_mode: modeInput ? modeInput.value : 'filesystem',
+        todos_two_way: twoWayInput ? !!twoWayInput.checked : true,
       };
       var res = await fetch('/api/obsidian-vault/test', {
         method: 'POST', credentials: 'same-origin',
@@ -1677,7 +1685,7 @@ async function initObsidianVaultSettings() {
       });
       var data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Test failed');
-      msg.textContent = '✓ ' + (data.message || 'Connected');
+      msg.textContent = '✓ ' + (data.message || 'Connected') + (data.vault_mode ? ' (' + data.vault_mode + ')' : '');
       msg.style.color = 'var(--fg)';
     } catch (e) {
       msg.textContent = '✗ ' + (e.message || e);
@@ -2380,8 +2388,6 @@ function initAll() {
   initShortcuts();
   initAccount();
   initIntegrations();
-  initEmailSettings();
-  initEmailAccountsSettings();
   initReminderSettings();
   initUnifiedIntegrations();
 }
@@ -2429,13 +2435,11 @@ async function initReminderSettings() {
   }
 
   const channelSel = el('set-reminder-channel');
-  const emailOpt = el('set-reminder-channel-email-opt');
   const ntfyOpt = el('set-reminder-channel-ntfy-opt');
   const hint = el('set-reminder-channel-hint');
   const llmToggle = el('set-reminder-llm-toggle');
   // "Integrations" link in the channel-hint copy. Jumps to the
-  // Integrations tab so the user can configure the underlying accounts
-  // (email, ntfy server) the channel dropdown depends on. Idempotent.
+  // Integrations tab so the user can configure ntfy server settings.
   const openIntgBtn = el('set-reminders-open-integrations');
   if (openIntgBtn && !openIntgBtn.dataset.wired) {
     openIntgBtn.dataset.wired = '1';
@@ -2446,26 +2450,6 @@ async function initReminderSettings() {
     });
   }
   if (!channelSel || !llmToggle) return;
-
-  // Detect configured email accounts. The legacy single-account
-  // `/api/email/config` endpoint was a no-op stub for most installs;
-  // the real per-account list lives at `/api/email/accounts` and is
-  // what the Integrations panel manages. Treat the email channel as
-  // configured if there's at least one account with SMTP set.
-  let emailAccounts = [];
-  try {
-    const res = await fetch('/api/email/accounts', { credentials: 'same-origin' });
-    if (res.ok) {
-      const d = await res.json();
-      emailAccounts = (d.accounts || []).filter(a => a.smtp_host && a.smtp_user && a.has_smtp_password);
-    }
-  } catch (_) {}
-  let smtpConfigured = emailAccounts.length > 0;
-
-  if (!smtpConfigured && emailOpt) {
-    emailOpt.disabled = true;
-    emailOpt.textContent = 'Email (add an account in Integrations)';
-  }
 
   // Detect whether ntfy integration exists — try admin endpoint, fall back to
   // checking if an ntfy integration was saved in settings (non-admin users).
@@ -2493,27 +2477,10 @@ async function initReminderSettings() {
     ntfyOpt.textContent = 'ntfy (add in Integrations first)';
   }
 
-  const emailFromRow = el('set-reminder-email-from-row');
-  const emailAcctSel = el('set-reminder-email-account');
-  const emailToRow = el('set-reminder-email-to-row');
-  const emailToIn = el('set-reminder-email-to');
   const ntfyTopicRow = el('set-reminder-ntfy-topic-row');
   const ntfyTopicIn = el('set-reminder-ntfy-topic');
 
-  function populateReminderEmailAccounts(selectedId = '') {
-    if (!emailAcctSel) return;
-    emailAcctSel.innerHTML = emailAccounts.map(a =>
-      `<option value="${a.id}">${esc(a.name || a.from_address || a.imap_user || 'Unnamed')}${a.is_default ? ' (default)' : ''}</option>`
-    ).join('');
-    const fallback = (emailAccounts.find(a => a.is_default) || emailAccounts[0] || {}).id || '';
-    emailAcctSel.value = (selectedId && emailAccounts.some(a => a.id === selectedId)) ? selectedId : fallback;
-  }
-
   function applyReminderChannelAvailability() {
-    if (emailOpt) {
-      emailOpt.disabled = !smtpConfigured;
-      emailOpt.textContent = smtpConfigured ? 'Email' : 'Email (add an account in Integrations)';
-    }
     if (ntfyOpt) {
       ntfyOpt.disabled = !ntfyConfigured;
       ntfyOpt.textContent = ntfyConfigured ? 'ntfy' : 'ntfy (add in Integrations first)';
@@ -2521,17 +2488,7 @@ async function initReminderSettings() {
   }
 
   async function refreshReminderChannelAvailability() {
-    const currentChannel = channelSel.value || 'browser';
-    const currentEmailAccount = emailAcctSel?.value || '';
-    try {
-      const res = await fetch('/api/email/accounts', { credentials: 'same-origin' });
-      if (res.ok) {
-        const d = await res.json();
-        emailAccounts = (d.accounts || []).filter(a => a.smtp_host && a.smtp_user && a.has_smtp_password);
-      }
-    } catch (_) {}
-    smtpConfigured = emailAccounts.length > 0;
-
+    let currentChannel = channelSel.value || 'browser';
     ntfyConfigured = false;
     try {
       const res = await fetch('/api/auth/integrations', { credentials: 'same-origin' });
@@ -2551,31 +2508,19 @@ async function initReminderSettings() {
     }
 
     applyReminderChannelAvailability();
-    populateReminderEmailAccounts(currentEmailAccount);
-    if (currentChannel === 'email' && !smtpConfigured) channelSel.value = 'browser';
-    else if (currentChannel === 'ntfy' && !ntfyConfigured) channelSel.value = 'browser';
-    else channelSel.value = currentChannel;
+    if (currentChannel === 'email') currentChannel = 'browser';
+    if (currentChannel === 'ntfy' && !ntfyConfigured) currentChannel = 'browser';
+    channelSel.value = currentChannel;
     if (hint) hint.textContent = CHANNEL_HINTS[channelSel.value] || '';
     syncChannelRows();
   }
 
-  // Populate the "Send from" picker with all configured email accounts.
-  populateReminderEmailAccounts();
-
   function syncChannelRows() {
-    const isEmail = channelSel.value === 'email';
-    if (emailFromRow) emailFromRow.style.display = (isEmail && emailAccounts.length > 1) ? 'flex' : 'none';
-    if (emailToRow) emailToRow.style.display = isEmail ? 'flex' : 'none';
     if (ntfyTopicRow) ntfyTopicRow.style.display = channelSel.value === 'ntfy' ? 'flex' : 'none';
   }
 
-  // Browser notifications fire on EVERY reminder (see
-  // routes/note_routes.py — the in-app notif is always queued
-  // regardless of channel). The hint should make that clear so
-  // users don't think they have to choose between channels.
   const CHANNEL_HINTS = {
     browser: 'Reminders appear as browser notifications inside Nobody.',
-    email: 'Reminders are emailed AND shown as a browser notification.',
     ntfy: 'Reminders are pushed via ntfy AND shown as a browser notification.',
   };
 
@@ -2591,22 +2536,11 @@ async function initReminderSettings() {
     const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     const s = await res.json();
     let savedChannel = s.reminder_channel || 'browser';
-    if (savedChannel === 'email' && !smtpConfigured) savedChannel = 'browser';
+    if (savedChannel === 'email') savedChannel = 'browser';
     if (savedChannel === 'ntfy' && !ntfyConfigured) savedChannel = 'browser';
     channelSel.value = savedChannel;
     llmToggle.checked = !!s.reminder_llm_synthesis;
-    if (emailToIn) emailToIn.value = s.reminder_email_to || '';
     if (ntfyTopicIn) ntfyTopicIn.value = s.reminder_ntfy_topic || 'Reminders';
-    // Restore the previously-picked email account (if any), otherwise
-    // default to the account flagged is_default in the integrations
-    // list. Falls through to the first option if neither exists.
-    if (emailAcctSel) {
-      const savedId = s.reminder_email_account_id;
-      populateReminderEmailAccounts(savedId || '');
-      if (emailAcctSel.value && emailAcctSel.value !== (savedId || '')) {
-        save({ reminder_email_account_id: emailAcctSel.value || null });
-      }
-    }
     if (hint) hint.textContent = CHANNEL_HINTS[channelSel.value] || '';
     syncChannelRows();
   } catch (e) { console.warn('Failed to load reminder settings', e); }
@@ -2627,18 +2561,6 @@ async function initReminderSettings() {
     syncChannelRows();
     save({ reminder_channel: channelSel.value });
   });
-  if (emailToIn) {
-    let emailDebounce;
-    emailToIn.addEventListener('input', () => {
-      clearTimeout(emailDebounce);
-      emailDebounce = setTimeout(() => save({ reminder_email_to: emailToIn.value.trim() }), 600);
-    });
-  }
-  if (emailAcctSel) {
-    emailAcctSel.addEventListener('change', () => {
-      save({ reminder_email_account_id: emailAcctSel.value || null });
-    });
-  }
   if (ntfyTopicIn) {
     let topicDebounce;
     ntfyTopicIn.addEventListener('input', () => {
@@ -2686,15 +2608,11 @@ async function initReminderSettings() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Server error');
-        if (channelSel.value === 'email' && !data.email_sent) {
-          throw new Error(data.email_error || 'Email reminder was not sent');
-        }
         if (channelSel.value === 'ntfy' && !data.ntfy_sent) {
           throw new Error(data.ntfy_error || 'ntfy reminder was not sent');
         }
         let status = 'Delivered via ' + channelSel.value;
         if (data.synthesis) status += ' (AI: "' + data.synthesis.slice(0, 60) + '...")';
-        if (data.email_sent) status += ' — email sent';
         if (data.ntfy_sent) status += ' — ntfy sent';
         if (testMsg) { testMsg.textContent = status; testMsg.style.color = 'var(--green, #50fa7b)'; }
         // Also fire a browser notification so user can see it
@@ -2717,384 +2635,9 @@ async function initReminderSettings() {
   }
 }
 
-async function initEmailAccountsSettings() {
-  const root = el('settings-modal');
-  if (!root || !root.querySelector('[data-settings-panel="email"]')) return;
-  const manageBtn = el('set-email-open-integrations');
-  if (manageBtn && manageBtn.dataset.bound !== '1') {
-    manageBtn.dataset.bound = '1';
-    manageBtn.addEventListener('click', () => open('integrations'));
-  }
-  const tasksBtn = el('set-email-open-tasks');
-  if (tasksBtn && tasksBtn.dataset.bound !== '1') {
-    tasksBtn.dataset.bound = '1';
-    tasksBtn.addEventListener('click', async () => {
-      try {
-        const mod = await import('./tasks.js');
-        const openTasks = mod.openTasks || (mod.default && mod.default.openTasks);
-        if (typeof openTasks === 'function') openTasks();
-        else document.getElementById('tool-tasks-btn')?.click();
-      } catch (_) {
-        document.getElementById('tool-tasks-btn')?.click();
-      }
-    });
-  }
-  const listEl = el('set-email-accounts-list');
-  const msgEl = el('set-email-accounts-msg');
-  const formEl = el('set-email-accounts-form');
-  const addBtn = el('set-email-accounts-add-btn');
-  if (!listEl || !addBtn || !formEl) return;
+async function initEmailAccountsSettings() { /* email removed */ }
 
-  const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-  async function fetchAccounts() {
-    const r = await fetch('/api/email/accounts', { credentials: 'same-origin' });
-    const d = await r.json();
-    return d.accounts || [];
-  }
-
-  function renderRow(a) {
-    const imap = a.imap_host ? `${a.imap_host}:${a.imap_port}` : '<no IMAP>';
-    const badge = a.is_default
-      ? '<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.5px;padding:1px 6px;border-radius:3px;background:color-mix(in srgb, var(--accent,#50fa7b) 15%, transparent);color:var(--accent,#50fa7b)">Default</span>'
-      : (a.enabled ? '' : '<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.5px;padding:1px 6px;border-radius:3px;opacity:0.4">Disabled</span>');
-    return `<div class="email-account-row" data-acc-id="${esc(a.id)}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px">${esc(a.name)} ${badge}</div>
-        <div style="font-size:11px;opacity:0.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.imap_user || a.from_address || '')} — ${esc(imap)}</div>
-      </div>
-      ${a.is_default ? '' : `<button class="admin-btn-sm email-acc-default-btn" style="font-size:10px">Make Default</button>`}
-      <button class="admin-btn-sm email-acc-edit-btn" style="font-size:10px">Edit</button>
-      <button class="admin-btn-sm email-acc-del-btn" style="font-size:10px;opacity:0.6">Delete</button>
-    </div>`;
-  }
-
-  async function renderList() {
-    const accs = await fetchAccounts();
-    if (!accs.length) {
-      listEl.innerHTML = '<div style="padding:12px;opacity:0.5;font-size:12px;text-align:center">No email accounts configured</div>';
-      return;
-    }
-    listEl.innerHTML = accs.map(renderRow).join('');
-    listEl.querySelectorAll('.email-account-row').forEach(row => {
-      const id = row.dataset.accId;
-      row.querySelector('.email-acc-default-btn')?.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await fetch(`/api/email/accounts/${id}/set-default`, { method: 'POST', credentials: 'same-origin' });
-        renderList();
-      });
-      row.querySelector('.email-acc-edit-btn')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showForm(accs.find(a => a.id === id));
-      });
-      row.querySelector('.email-acc-del-btn')?.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (!await window.styledConfirm(`Delete account "${accs.find(a => a.id === id)?.name}"?`, { confirmText: 'Delete', danger: true })) return;
-        await fetch(`/api/email/accounts/${id}`, { method: 'DELETE', credentials: 'same-origin' });
-        renderList();
-      });
-    });
-  }
-
-  function showForm(existing) {
-    const a = existing || {};
-    const isEdit = !!existing;
-    formEl.style.display = '';
-    // Small `?` indicator next to each label. Hover/focus to read the
-    // hint via the native `title` tooltip. tabindex makes it
-    // keyboard-focusable too.
-    const _hint = (tip) =>
-      `<span class="eaf-hint" title="${esc(tip)}" aria-label="${esc(tip)}" tabindex="0" `
-      + `style="display:inline-block;width:13px;height:13px;border-radius:50%;`
-      + `border:1px solid currentColor;font-size:9px;line-height:11px;text-align:center;`
-      + `opacity:0.45;margin-left:5px;cursor:help;vertical-align:1px;font-weight:600;">?</span>`;
-    // Provider presets — picking one fills host/port/STARTTLS for both
-    // IMAP and SMTP. Dovecot is IMAP-only here; the host is intentionally
-    // blank because it may live on another machine (DNS, LAN, Tailscale).
-    const PROVIDERS = {
-      gmail:    { label: 'Gmail',                  imap: { host: 'imap.gmail.com',           port: 993, starttls: false }, smtp: { host: 'smtp.gmail.com',            port: 465 } },
-      migadu:   { label: 'Migadu',                 imap: { host: 'imap.migadu.com',          port: 993, starttls: false }, smtp: { host: 'smtp.migadu.com',           port: 465 } },
-      icloud:   { label: 'iCloud',                 imap: { host: 'imap.mail.me.com',         port: 993, starttls: false }, smtp: { host: 'smtp.mail.me.com',          port: 587 } },
-      outlook:  { label: 'Outlook / Office 365',   imap: { host: 'outlook.office365.com',    port: 993, starttls: false }, smtp: { host: 'smtp.office365.com',        port: 587 } },
-      fastmail: { label: 'Fastmail',               imap: { host: 'imap.fastmail.com',        port: 993, starttls: false }, smtp: { host: 'smtp.fastmail.com',         port: 465 } },
-      yahoo:    { label: 'Yahoo',                  imap: { host: 'imap.mail.yahoo.com',      port: 993, starttls: false }, smtp: { host: 'smtp.mail.yahoo.com',       port: 465 } },
-      dovecot:  { label: 'Dovecot IMAP (no SMTP)',  imap: { host: '',                        port: 31143, starttls: false }, smtp: { host: '',                          port: 465 } },
-    };
-    const _providerOptions = Object.entries(PROVIDERS)
-      .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`)
-      .join('');
-    const _smtpSecurity = (acct) => acct?.smtp_security || ((parseInt(acct?.smtp_port || 465) === 587) ? 'starttls' : 'ssl');
-    formEl.innerHTML = `
-      <h3 style="font-size:12px;margin:0 0 8px">${isEdit ? 'Edit Account' : 'New Account'}</h3>
-      <div class="settings-col">
-        <div class="settings-row"><label class="settings-label">Provider${_hint('Pick a known provider to auto-fill the IMAP and SMTP host/port. Choose Custom to type your own.')}</label><select id="eaf-provider" class="settings-select"><option value="">Custom…</option>${_providerOptions}</select></div>
-        <div class="settings-row"><label class="settings-label">Name${_hint('Optional label for this account (e.g. “Work” or “Personal”). Leave blank to use the email address.')}</label><input id="eaf-name" class="settings-input" placeholder="(optional — leave blank to use email)" value="${esc(a.name || '')}"></div>
-        <div class="settings-row"><label class="settings-label">Email${_hint('Your email address. Used as the From: header on outgoing mail and as the display label when Name is blank.')}</label><input id="eaf-from" class="settings-input" placeholder="you@example.com" value="${esc(a.from_address || '')}"></div>
-        <div style="font-size:11px;font-weight:600;opacity:0.6;margin:6px 0 2px">IMAP (Receiving)</div>
-        <div class="settings-row"><label class="settings-label">Host${_hint('Your IMAP server, e.g. imap.gmail.com, imap.migadu.com, a LAN host, or a Tailscale IP for Dovecot.')}</label><input id="eaf-imap-host" class="settings-input" value="${esc(a.imap_host || '')}"></div>
-        <div class="settings-row"><label class="settings-label">Port${_hint('993 for IMAPS (most providers), 143 for plain or STARTTLS. Local servers often use a custom port like 31143.')}</label><input id="eaf-imap-port" class="settings-input" type="number" value="${esc(a.imap_port || 993)}" style="max-width:100px"></div>
-        <div class="settings-row"><label class="settings-label">Username${_hint('Usually your full email address.')}</label><input id="eaf-imap-user" class="settings-input" value="${esc(a.imap_user || '')}"></div>
-        <div class="settings-row"><label class="settings-label">Password${_hint('Your IMAP login password. Use an app-specific password if your provider requires 2FA (Gmail, iCloud, etc.).')}</label><input id="eaf-imap-pass" class="settings-input" type="password" placeholder="${isEdit && a.has_imap_password ? '(unchanged)' : ''}"></div>
-        <div class="settings-row"><label class="settings-label">STARTTLS${_hint('Turn ON for port 143/587 to upgrade plain to TLS. Turn OFF for port 993 (IMAPS — already encrypted) or a local server with no TLS configured.')}</label><label class="admin-switch"><input type="checkbox" id="eaf-imap-starttls" ${a.imap_starttls !== false ? 'checked' : ''}><span class="admin-slider"></span></label></div>
-        <div style="font-size:11px;font-weight:600;opacity:0.6;margin:8px 0 2px">SMTP (Sending) <span style="font-weight:normal;opacity:0.7">— optional, leave blank for read-only</span></div>
-        <div class="settings-row"><label class="settings-label">Host${_hint('Your outgoing-mail server, e.g. smtp.gmail.com, smtp.migadu.com. Leave blank to make this account read-only.')}</label><input id="eaf-smtp-host" class="settings-input" value="${esc(a.smtp_host || '')}"></div>
-        <div class="settings-row"><label class="settings-label">Port${_hint('465 for SSL/SMTPS, 587 for STARTTLS. 25 is usually blocked by ISPs.')}</label><input id="eaf-smtp-port" class="settings-input" type="number" value="${esc(a.smtp_port || 465)}" style="max-width:100px"></div>
-        <div class="settings-row"><label class="settings-label">Security${_hint('SSL for port 465, STARTTLS for port 587, or None for local SMTP bridges such as Proton Mail Bridge.')}</label><select id="eaf-smtp-security" class="settings-select"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option><option value="none">None</option></select></div>
-        <div class="settings-row"><label class="settings-label">Same as IMAP${_hint('Use the IMAP username and password for SMTP too (this is right for almost every provider). Turn off to enter separate SMTP credentials.')}</label><label class="admin-switch"><input type="checkbox" id="eaf-smtp-same" ${(!isEdit || (a.smtp_user && a.imap_user && a.smtp_user === a.imap_user)) ? 'checked' : ''}><span class="admin-slider"></span></label></div>
-        <div class="settings-row eaf-smtp-creds"><label class="settings-label">Username${_hint('Usually the same as your IMAP username (your email address).')}</label><input id="eaf-smtp-user" class="settings-input" value="${esc(a.smtp_user || '')}"></div>
-        <div class="settings-row eaf-smtp-creds"><label class="settings-label">Password${_hint('Your SMTP password — often the same as your IMAP password.')}</label><input id="eaf-smtp-pass" class="settings-input" type="password" placeholder="${isEdit && a.has_smtp_password ? '(unchanged)' : ''}"></div>
-        <div class="settings-row" style="margin-top:10px;align-items:center;">
-          <button class="admin-btn-add" id="eaf-save" style="background:var(--red);border-color:var(--red);color:#fff;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-            ${isEdit ? 'Save' : 'Create'}
-          </button>
-          <span id="eaf-msg" style="font-size:11px;flex:1;margin-left:8px;"></span>
-          <button class="admin-btn-add" id="eaf-cancel" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;position:relative;top:1px;margin-left:auto;">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            Cancel
-          </button>
-        </div>
-      </div>
-    `;
-
-    // Provider preset → autofill host/port/STARTTLS for both halves.
-    el('eaf-provider').addEventListener('change', (e) => {
-      const p = PROVIDERS[e.target.value];
-      if (!p) return;
-      el('eaf-imap-host').value = p.imap.host;
-      el('eaf-imap-port').value = p.imap.port;
-      el('eaf-imap-starttls').checked = !!p.imap.starttls;
-      el('eaf-smtp-host').value = p.smtp.host;
-      el('eaf-smtp-port').value = p.smtp.port;
-      el('eaf-smtp-security').value = p.smtp.security || ((parseInt(p.smtp.port || 465) === 587) ? 'starttls' : 'ssl');
-    });
-    el('eaf-smtp-security').value = _smtpSecurity(a);
-
-    // "Same as IMAP" toggle — hide the SMTP creds rows when on. The save
-    // handler copies the IMAP user/password into SMTP at submit time.
-    const _syncSmtpSame = () => {
-      const same = el('eaf-smtp-same').checked;
-      formEl.querySelectorAll('.eaf-smtp-creds').forEach(r => {
-        r.style.display = same ? 'none' : '';
-      });
-    };
-    el('eaf-smtp-same').addEventListener('change', _syncSmtpSame);
-    _syncSmtpSame();
-
-    el('eaf-cancel').addEventListener('click', () => { formEl.style.display = 'none'; });
-    el('eaf-save').addEventListener('click', async () => {
-      const body = {
-        name: el('eaf-name').value.trim(),
-        from_address: el('eaf-from').value.trim(),
-        imap_host: el('eaf-imap-host').value.trim(),
-        imap_port: parseInt(el('eaf-imap-port').value) || 993,
-        imap_user: el('eaf-imap-user').value.trim(),
-        imap_starttls: el('eaf-imap-starttls').checked,
-        smtp_host: el('eaf-smtp-host').value.trim(),
-        smtp_port: parseInt(el('eaf-smtp-port').value) || 465,
-        smtp_security: el('eaf-smtp-security').value,
-        smtp_user: el('eaf-smtp-user').value.trim(),
-      };
-      if (el('eaf-imap-pass').value) body.imap_password = el('eaf-imap-pass').value;
-      if (el('eaf-smtp-pass').value) body.smtp_password = el('eaf-smtp-pass').value;
-      // "Same as IMAP" toggle — copy IMAP username/password into SMTP at
-      // save time, so the hidden SMTP-creds rows don't matter. We only
-      // mirror the password if the user actually typed an IMAP one
-      // (otherwise SMTP keeps whatever it already had on the server).
-      if (el('eaf-smtp-same').checked) {
-        body.smtp_user = body.imap_user;
-        if (body.imap_password) body.smtp_password = body.imap_password;
-      }
-      // Name is optional — fall back to the From address so the list view
-      // still has a label to render. Only refuse if both are blank.
-      if (!body.name) body.name = body.from_address;
-      if (!body.name) { el('eaf-msg').textContent = 'Need at least a Name or Email'; el('eaf-msg').style.color = 'var(--red)'; return; }
-
-      try {
-        const url = isEdit ? `/api/email/accounts/${a.id}` : '/api/email/accounts';
-        const method = isEdit ? 'PUT' : 'POST';
-        const r = await fetch(url, {
-          method, credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const d = await r.json();
-        if (d.ok || d.id) {
-          el('eaf-msg').textContent = 'Saved';
-          el('eaf-msg').style.color = 'var(--green,#50fa7b)';
-          setTimeout(() => { formEl.style.display = 'none'; renderList(); }, 400);
-        } else {
-          el('eaf-msg').textContent = d.error || 'Save failed';
-          el('eaf-msg').style.color = 'var(--red)';
-        }
-      } catch (e) {
-        el('eaf-msg').textContent = 'Error: ' + e.message;
-        el('eaf-msg').style.color = 'var(--red)';
-      }
-    });
-  }
-
-  addBtn.addEventListener('click', () => showForm(null));
-  await renderList();
-}
-
-async function initEmailSettings() {
-  const root = el('settings-modal');
-  if (!root || !root.querySelector('[data-settings-panel="email"]')) return;
-
-  // Load current email config
-  try {
-    const res = await fetch('/api/email/config');
-    const cfg = await res.json();
-    if (el('set-email-imap-host')) el('set-email-imap-host').value = cfg.imap_host || '';
-    if (el('set-email-imap-port')) el('set-email-imap-port').value = cfg.imap_port || '';
-    if (el('set-email-imap-user')) el('set-email-imap-user').value = cfg.imap_user || '';
-    if (el('set-email-imap-pass')) el('set-email-imap-pass').value = ''; // never prefill
-    if (el('set-email-smtp-host')) el('set-email-smtp-host').value = cfg.smtp_host || '';
-    if (el('set-email-smtp-port')) el('set-email-smtp-port').value = cfg.smtp_port || '';
-    if (el('set-email-smtp-user')) el('set-email-smtp-user').value = cfg.smtp_user || '';
-    if (el('set-email-smtp-pass')) el('set-email-smtp-pass').value = '';
-    if (el('set-email-from')) el('set-email-from').value = cfg.from_address || '';
-  } catch (_) {}
-
-  // Load contacts config
-  try {
-    const res = await fetch('/api/contacts/config');
-    const cfg = await res.json();
-    if (el('set-carddav-url')) el('set-carddav-url').value = cfg.url || '';
-    if (el('set-carddav-user')) el('set-carddav-user').value = cfg.username || '';
-    if (el('set-carddav-pass')) el('set-carddav-pass').value = '';
-  } catch (_) {}
-
-  // Load writing style
-  try {
-    const res = await fetch('/api/email/style');
-    const data = await res.json();
-    if (el('set-email-style')) el('set-email-style').value = data.style || '';
-  } catch (_) {}
-
-  // Save email config
-  el('set-email-save')?.addEventListener('click', async () => {
-    const msg = el('set-email-msg');
-    if (msg) msg.textContent = 'Saving...';
-    const data = {
-      imap_host: el('set-email-imap-host').value,
-      imap_port: parseInt(el('set-email-imap-port').value) || 0,
-      imap_user: el('set-email-imap-user').value,
-      smtp_host: el('set-email-smtp-host').value,
-      smtp_port: parseInt(el('set-email-smtp-port').value) || 0,
-      smtp_user: el('set-email-smtp-user').value,
-      email_from: el('set-email-from').value,
-    };
-    const imapPass = el('set-email-imap-pass').value;
-    const smtpPass = el('set-email-smtp-pass').value;
-    if (imapPass) data.imap_password = imapPass;
-    if (smtpPass) data.smtp_password = smtpPass;
-    try {
-      const res = await fetch('/api/email/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const result = await res.json();
-      if (msg) msg.textContent = result.success ? '✓ Saved' : (result.error || 'Failed');
-      setTimeout(() => { if (msg) msg.textContent = ''; }, 3000);
-    } catch (e) {
-      if (msg) msg.textContent = 'Failed';
-    }
-  });
-
-  // Save CardDAV config
-  el('set-carddav-save')?.addEventListener('click', async () => {
-    const msg = el('set-carddav-msg');
-    if (msg) msg.textContent = 'Saving...';
-    const data = {
-      carddav_url: el('set-carddav-url').value,
-      carddav_username: el('set-carddav-user').value,
-    };
-    const pass = el('set-carddav-pass').value;
-    if (pass) data.carddav_password = pass;
-    try {
-      const res = await fetch('/api/contacts/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const result = await res.json();
-      if (msg) msg.textContent = result.success ? '✓ Saved' : (result.error || 'Failed');
-      setTimeout(() => { if (msg) msg.textContent = ''; }, 3000);
-    } catch (e) {
-      if (msg) msg.textContent = 'Failed';
-    }
-  });
-
-  // Extract writing style
-  el('set-email-style-extract')?.addEventListener('click', async () => {
-    const btn = el('set-email-style-extract');
-    const msg = el('set-email-style-msg');
-    btn.disabled = true;
-    // Render whirlpool + label inside the status area (same pattern as
-    // the "Find" / network-discover button in Add Models).
-    let wp = null;
-    if (msg) {
-      msg.className = '';
-      msg.innerHTML = '';
-      try {
-        const sp = window.spinnerModule || (await import('./spinner.js')).default;
-        wp = sp.createWhirlpool(16);
-        wp.element.style.cssText = 'display:inline-block;vertical-align:middle;margin:0 8px 0 0;';
-        const wrap = document.createElement('span');
-        wrap.style.cssText = 'display:inline-flex;align-items:center;';
-        wrap.appendChild(wp.element);
-        const txt = document.createElement('span');
-        txt.textContent = 'Analyzing your sent emails…';
-        txt.style.cssText = 'font-size:12px;opacity:0.7;';
-        wrap.appendChild(txt);
-        msg.appendChild(wrap);
-      } catch (_) {
-        msg.textContent = 'Analyzing your sent emails…';
-      }
-    }
-    try {
-      const res = await fetch('/api/email/extract-style', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sample_count: 15 }),
-      });
-      const data = await res.json();
-      if (data.success && data.style) {
-        if (el('set-email-style')) el('set-email-style').value = data.style;
-        if (msg) msg.textContent = '✓ Style extracted';
-      } else {
-        if (msg) msg.textContent = data.error || 'Failed';
-      }
-    } catch (e) {
-      if (msg) msg.textContent = 'Failed to extract';
-    } finally {
-      if (wp && wp.destroy) { try { wp.destroy(); } catch (_) {} }
-      btn.disabled = false;
-      setTimeout(() => { if (msg) msg.textContent = ''; }, 5000);
-    }
-  });
-
-  // Save writing style manually
-  el('set-email-style-save')?.addEventListener('click', async () => {
-    const msg = el('set-email-style-msg');
-    if (msg) msg.textContent = 'Saving...';
-    try {
-      const res = await fetch('/api/email/style', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ style: el('set-email-style').value }),
-      });
-      const result = await res.json();
-      if (msg) msg.textContent = result.success ? '✓ Saved' : 'Failed';
-      setTimeout(() => { if (msg) msg.textContent = ''; }, 3000);
-    } catch (e) {
-      if (msg) msg.textContent = 'Failed';
-    }
-  });
-}
+async function initEmailSettings() { /* email removed */ }
 
 async function initIntegrations() {
   const listEl = el('integrations-list');
@@ -3300,9 +2843,6 @@ async function initIntegrations() {
 const INTG_TYPES = {
   api:     { label: 'API',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' },
   caldav:  { label: 'CalDAV',  icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' },
-  contacts: { label: 'Contacts', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' },
-  carddav: { label: 'CardDAV', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' },
-  email:   { label: 'Email',   icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>' },
   mcp:     { label: 'MCP',     icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' },
   vault:   { label: 'Vault',   icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
 };
@@ -3319,17 +2859,11 @@ async function initUnifiedIntegrations() {
   if (!listEl) return;
   let integrationNotice = '';
 
-  function _openEmailSettings() {
-    open('email');
-  }
 
   async function fetchAll() {
-    const [apiRes, calRes, cardRes, contactsRes, emailAccountsRes, mcpRes, vaultRes] = await Promise.all([
+    const [apiRes, calRes, mcpRes, vaultRes] = await Promise.all([
       fetch('/api/auth/integrations', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { integrations: [] }).catch(() => ({ integrations: [] })),
       fetch('/api/calendar/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
-      fetch('/api/contacts/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
-      fetch('/api/contacts/list', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { contacts: [], count: 0 }).catch(() => ({ contacts: [], count: 0 })),
-      fetch('/api/email/accounts', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : { accounts: [] }).catch(() => ({ accounts: [] })),
       fetch('/api/mcp/servers', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch('/api/vault/config', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : {}).catch(() => ({})),
     ]);
@@ -3341,34 +2875,6 @@ async function initUnifiedIntegrations() {
     // CalDAV
     if (calRes.url) {
       items.push({ type: 'caldav', id: '__caldav__', name: 'Calendar (CalDAV)', detail: calRes.url, enabled: true, data: calRes });
-    }
-    // Contacts import first, then the optional CardDAV sync account.
-    const contactCount = Number(contactsRes.count || (contactsRes.contacts || []).length || 0);
-    if (contactCount > 0) {
-      items.push({
-        type: 'contacts',
-        id: '__contacts__',
-        name: 'Contacts Import',
-        detail: `${contactCount} contact${contactCount === 1 ? '' : 's'}`,
-        enabled: true,
-        data: contactsRes,
-      });
-    }
-    if (cardRes.url) {
-      items.push({
-        type: 'carddav',
-        id: '__carddav__',
-        name: 'Contacts (CardDAV)',
-        detail: cardRes.url,
-        enabled: true,
-        data: cardRes,
-      });
-    }
-    // Email — one entry per EmailAccount row
-    for (const acc of (emailAccountsRes.accounts || [])) {
-      const label = acc.name + (acc.is_default ? ' (default)' : '');
-      const detail = [acc.from_address || acc.imap_user, acc.imap_host].filter(Boolean).join(' — ');
-      items.push({ type: 'email', id: acc.id, name: label, detail, enabled: acc.enabled !== false, data: acc });
     }
     // MCP servers
     const mcpList = Array.isArray(mcpRes) ? mcpRes : (mcpRes.servers || []);
@@ -3403,20 +2909,12 @@ async function initUnifiedIntegrations() {
 
   async function renderList() {
     const items = await fetchAll();
-    const noticeHtml = integrationNotice ? `
-      <div class="intg-followup-note" style="display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:8px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 35%, transparent);border-left:3px solid var(--accent, var(--red));border-radius:5px;background:color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);font-size:11px;">
-        <span style="flex:1;line-height:1.35">${integrationNotice}</span>
-        <button type="button" class="admin-btn-sm intg-open-email-settings" style="white-space:nowrap;">Email settings</button>
-      </div>` : '';
+    const noticeHtml = '';
     if (items.length === 0) {
       listEl.innerHTML = noticeHtml + '<div style="padding:12px;opacity:0.5;font-size:12px;text-align:center">No integrations configured</div>';
     } else {
       listEl.innerHTML = noticeHtml + items.map(renderCard).join('');
     }
-    listEl.querySelector('.intg-open-email-settings')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      _openEmailSettings();
-    });
     // Wire edit clicks
     listEl.querySelectorAll('.intg-card').forEach(card => {
       card.addEventListener('click', (e) => {
@@ -3439,13 +2937,6 @@ async function initUnifiedIntegrations() {
         try {
           if (type === 'api') await fetch(`/api/auth/integrations/${id}`, { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'caldav') await fetch('/api/calendar/config', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: '', username: '', password: '' }) });
-          else if (type === 'contacts') {
-            await fetch('/api/contacts/clear', { method: 'DELETE', credentials: 'same-origin' });
-          }
-          else if (type === 'carddav') {
-            await fetch('/api/contacts/config', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ carddav_url: '', carddav_username: '', carddav_password: '' }) });
-          }
-          else if (type === 'email') await fetch(`/api/email/accounts/${id}`, { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'mcp') await fetch(`/api/mcp/servers/${id}`, { method: 'DELETE', credentials: 'same-origin' });
           else if (type === 'vault') await fetch('/api/vault/logout', { method: 'POST', credentials: 'same-origin' });
         } catch (_) {}
@@ -3460,8 +2951,6 @@ async function initUnifiedIntegrations() {
     formEl.style.display = '';
     if (type === 'api') showApiForm(editId);
     else if (type === 'caldav') showCalDavForm();
-    else if (type === 'contacts' || type === 'carddav') showCardDavForm();
-    else if (type === 'email') showEmailForm(editId);
     else if (type === 'mcp') showMcpForm(editId);
     else if (type === 'vault') showVaultForm();
   }
@@ -3658,737 +3147,6 @@ async function initUnifiedIntegrations() {
     });
   }
 
-  // ── CardDAV form + contacts manager ──
-  async function showCardDavForm() {
-    formEl.innerHTML = `
-      <div class="admin-card" style="margin-top:8px">
-        <h2 style="font-size:13px">Contacts (CardDAV)</h2>
-        <div class="settings-col">
-          <div class="settings-row"><label class="settings-label">URL</label><input id="uf-carddav-url" class="settings-input" placeholder="http://localhost:5232/user/contacts/"></div>
-          <div class="settings-row"><label class="settings-label">Username</label><input id="uf-carddav-user" class="settings-input"></div>
-          <div class="settings-row"><label class="settings-label">Password</label><input id="uf-carddav-pass" class="settings-input" type="password"></div>
-          <div class="settings-row" style="margin-top:4px"><button class="admin-btn-sm" id="uf-carddav-save">Save</button><button class="admin-btn-sm" id="uf-carddav-cancel" style="opacity:0.7">Cancel</button><span id="uf-carddav-msg" style="font-size:11px"></span></div>
-        </div>
-      </div>
-      <div class="admin-card contacts-manager" style="margin-top:8px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-          <h2 style="font-size:13px;margin:0;">Contacts Import <span id="cm-count" style="opacity:0.5;font-weight:normal;font-size:11px;"></span></h2>
-          <button class="admin-btn-sm" id="cm-import-btn" style="margin-left:auto;">Import</button>
-          <button class="admin-btn-sm" id="cm-export-vcf-btn">Export .vcf</button>
-          <button class="admin-btn-sm" id="cm-export-csv-btn">Export .csv</button>
-          <button class="admin-btn-sm" id="cm-add-toggle">+ Add</button>
-          <input type="file" id="cm-import-file" accept=".vcf,.csv,text/vcard,text/csv" multiple style="display:none">
-        </div>
-        <div id="cm-add-row" class="contacts-add-row" style="display:none;">
-          <input id="cm-add-name" class="settings-input" placeholder="Name" style="flex:1;min-width:0;">
-          <input id="cm-add-email" class="settings-input" placeholder="email@example.com" style="flex:1;min-width:0;">
-          <button class="admin-btn-sm" id="cm-add-save">Save</button>
-        </div>
-        <div id="cm-list" class="contacts-list"><div style="opacity:0.4;font-size:11px;padding:8px 2px;">Loading…</div></div>
-      </div>`;
-    try {
-      const r = await fetch('/api/contacts/config', { credentials: 'same-origin' }); const d = await r.json();
-      el('uf-carddav-url').value = d.url || ''; el('uf-carddav-user').value = d.username || '';
-    } catch (_) {}
-    el('uf-carddav-cancel').addEventListener('click', () => { formEl.style.display = 'none'; });
-    el('uf-carddav-save').addEventListener('click', async () => {
-      const body = { carddav_url: el('uf-carddav-url').value, carddav_username: el('uf-carddav-user').value };
-      if (el('uf-carddav-pass').value) body.carddav_password = el('uf-carddav-pass').value;
-      try {
-        await fetch('/api/contacts/config', { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        el('uf-carddav-msg').textContent = 'Saved';
-        el('uf-carddav-msg').style.color = 'var(--green, #50fa7b)';
-        // Refresh both the sub-panel (contacts manager) AND the
-        // outer integrations list so the CardDAV row appears
-        // immediately instead of waiting for a page reload.
-        await _renderContactsManager();
-        await renderList();
-        notifyIntegrationsChanged();
-      } catch (_) {
-        el('uf-carddav-msg').textContent = 'Failed';
-        el('uf-carddav-msg').style.color = 'var(--red)';
-      }
-    });
-    // Add-row toggle + save
-    el('cm-add-toggle')?.addEventListener('click', () => {
-      const row = el('cm-add-row');
-      const open = row.style.display !== 'none';
-      row.style.display = open ? 'none' : 'flex';
-      if (!open) el('cm-add-name')?.focus();
-    });
-    el('cm-add-save')?.addEventListener('click', async () => {
-      const name = el('cm-add-name').value.trim();
-      const email = el('cm-add-email').value.trim();
-      if (!email) { el('cm-add-email').focus(); return; }
-      try {
-        await fetch('/api/contacts/add', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email }) });
-      } catch (_) {}
-      el('cm-add-name').value = ''; el('cm-add-email').value = '';
-      el('cm-add-row').style.display = 'none';
-      await _renderContactsManager();
-    });
-    const _downloadContacts = async (format) => {
-      const btn = el(format === 'csv' ? 'cm-export-csv-btn' : 'cm-export-vcf-btn');
-      const orig = btn ? btn.textContent : '';
-      if (btn) { btn.textContent = 'Exporting...'; btn.disabled = true; }
-      try {
-        const res = await fetch(`/api/contacts/export?format=${encodeURIComponent(format)}`, { credentials: 'same-origin' });
-        if (!res.ok) throw new Error('Export failed');
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = format === 'csv' ? 'nobody-contacts.csv' : 'nobody-contacts.vcf';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } catch (_) {
-        uiModule.showError ? uiModule.showError('Export failed') : alert('Export failed');
-      } finally {
-        if (btn) { btn.textContent = orig; btn.disabled = false; }
-      }
-    };
-    el('cm-export-vcf-btn')?.addEventListener('click', () => _downloadContacts('vcf'));
-    el('cm-export-csv-btn')?.addEventListener('click', () => _downloadContacts('csv'));
-
-    // Import .vcf/.csv — read each selected file as text, concatenate by type,
-    // then POST. Imported CardDAV contacts immediately feed email autocomplete
-    // because compose searches /api/contacts/search.
-    el('cm-import-btn')?.addEventListener('click', () => el('cm-import-file')?.click());
-    el('cm-import-file')?.addEventListener('change', async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (!files.length) return;
-      const btn = el('cm-import-btn');
-      const orig = btn ? btn.textContent : '';
-      if (btn) { btn.textContent = 'Importing…'; btn.disabled = true; }
-      try {
-        const texts = await Promise.all(files.map(f => f.text()));
-        const vcfParts = [];
-        const csvParts = [];
-        texts.forEach((text, idx) => {
-          const name = (files[idx]?.name || '').toLowerCase();
-          if (name.endsWith('.csv') || !String(text || '').toUpperCase().includes('BEGIN:VCARD')) csvParts.push(text);
-          else vcfParts.push(text);
-        });
-        let imported = 0, total = 0, failed = 0;
-        const _postImport = async (body) => {
-          const r = await fetch('/api/contacts/import', {
-            method: 'POST', credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          const d = await r.json();
-          if (d.error) throw new Error(d.error);
-          imported += Number(d.imported || 0);
-          total += Number(d.total || 0);
-          failed += Number(d.failed || 0);
-        };
-        if (vcfParts.length) await _postImport({ vcf: vcfParts.join('\n') });
-        if (csvParts.length) await _postImport({ csv: csvParts.join('\n') });
-        if (!vcfParts.length && !csvParts.length) throw new Error('No contact data found');
-        const msg = `Imported ${imported}/${total}` + (failed ? ` (${failed} failed)` : '');
-        uiModule.showToast ? uiModule.showToast(msg) : null;
-      } catch (err) {
-        uiModule.showError ? uiModule.showError(err?.message || 'Import failed') : alert(err?.message || 'Import failed');
-      } finally {
-        if (btn) { btn.textContent = orig; btn.disabled = false; }
-        e.target.value = '';
-        await _renderContactsManager();
-      }
-    });
-    await _renderContactsManager();
-  }
-
-  // Render the contacts list inside the manager card with inline edit +
-  // delete. Each row: name + emails; pencil flips to editable inputs.
-  async function _renderContactsManager() {
-    const list = el('cm-list');
-    if (!list) return;
-    let contacts = [];
-    try {
-      const r = await fetch('/api/contacts/list', { credentials: 'same-origin' });
-      const d = await r.json();
-      contacts = d.contacts || [];
-    } catch (_) {
-      list.innerHTML = '<div style="opacity:0.5;font-size:11px;padding:8px 2px;">Failed to load contacts (check CardDAV config above).</div>';
-      return;
-    }
-    const cnt = el('cm-count');
-    if (cnt) cnt.textContent = contacts.length ? `(${contacts.length})` : '';
-    if (!contacts.length) {
-      list.innerHTML = '<div style="opacity:0.4;font-size:11px;padding:8px 2px;">No contacts yet.</div>';
-      return;
-    }
-    // Sort by name for a stable list.
-    contacts.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    list.innerHTML = contacts.map(c => {
-      const emails = (c.emails || []).join(', ');
-      const phones = (c.phones || []).join(', ');
-      const sub = [emails, phones].filter(Boolean).join(' · ');
-      return `<div class="contact-row" data-uid="${esc(c.uid)}">
-        <div class="contact-row-view" style="display:flex;align-items:center;gap:8px;">
-          <div style="flex:1;min-width:0;">
-            <div class="contact-name" style="font-size:12px;font-weight:600;">${esc(c.name || '(no name)')}</div>
-            <div class="contact-sub" style="font-size:10px;opacity:0.55;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(sub)}</div>
-          </div>
-          <button class="admin-btn-sm contact-edit" title="Edit">Edit</button>
-          <button class="admin-btn-sm contact-del" title="Delete" style="opacity:0.75;">Delete</button>
-        </div>
-        <div class="contact-row-edit" style="display:none;flex-direction:column;gap:4px;">
-          <input class="settings-input contact-edit-name" value="${esc(c.name || '')}" placeholder="Name">
-          <input class="settings-input contact-edit-emails" value="${esc(emails)}" placeholder="email1, email2">
-          <input class="settings-input contact-edit-phones" value="${esc(phones)}" placeholder="phone1, phone2">
-          <div style="display:flex;gap:6px;"><button class="admin-btn-sm contact-save">Save</button><button class="admin-btn-sm contact-cancel" style="opacity:0.7;">Cancel</button></div>
-        </div>
-      </div>`;
-    }).join('');
-    // Wire each row's edit / delete / save / cancel.
-    list.querySelectorAll('.contact-row').forEach(row => {
-      const uid = row.dataset.uid;
-      const view = row.querySelector('.contact-row-view');
-      const editForm = row.querySelector('.contact-row-edit');
-      row.querySelector('.contact-edit')?.addEventListener('click', () => {
-        view.style.display = 'none';
-        editForm.style.display = 'flex';
-      });
-      row.querySelector('.contact-cancel')?.addEventListener('click', () => {
-        editForm.style.display = 'none';
-        view.style.display = 'flex';
-      });
-      row.querySelector('.contact-save')?.addEventListener('click', async () => {
-        const body = {
-          name: row.querySelector('.contact-edit-name').value.trim(),
-          emails: row.querySelector('.contact-edit-emails').value.split(',').map(s => s.trim()).filter(Boolean),
-          phones: row.querySelector('.contact-edit-phones').value.split(',').map(s => s.trim()).filter(Boolean),
-        };
-        try {
-          await fetch('/api/contacts/' + encodeURIComponent(uid), { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        } catch (_) {}
-        await _renderContactsManager();
-      });
-      row.querySelector('.contact-del')?.addEventListener('click', async () => {
-        const ok = uiModule.styledConfirm
-          ? await uiModule.styledConfirm('Delete this contact?', { confirmText: 'Delete', danger: true })
-          : window.confirm('Delete this contact?');
-        if (!ok) return;
-        try {
-          await fetch('/api/contacts/' + encodeURIComponent(uid), { method: 'DELETE', credentials: 'same-origin' });
-        } catch (_) {}
-        await _renderContactsManager();
-      });
-    });
-  }
-
-  // ── Email form (multi-account) ──
-  // When editId is a real account id, edit that row. When editId is falsy or 'new',
-  // create a fresh account. Posts to /api/email/accounts, never to the legacy
-  // /api/email/config which would overwrite the default.
-  async function showEmailForm(editId) {
-    const isEdit = editId && editId !== 'new' && editId !== '__email__';
-    let existing = null;
-    if (isEdit) {
-      try {
-        const r = await fetch('/api/email/accounts', { credentials: 'same-origin' });
-        const d = await r.json();
-        existing = (d.accounts || []).find(a => a.id === editId) || null;
-      } catch (_) {}
-    }
-    const placeholderPass = (isEdit && existing) ? '(leave blank to keep current)' : '';
-    // Small `?` indicator next to each label (native title tooltip).
-    const _hint = (tip) =>
-      `<span class="uf-hint" title="${esc(tip)}" aria-label="${esc(tip)}" tabindex="0" `
-      + `style="display:inline-block;width:13px;height:13px;border-radius:50%;`
-      + `border:1px solid currentColor;font-size:9px;line-height:11px;text-align:center;`
-      + `opacity:0.45;margin-left:5px;cursor:help;vertical-align:1px;font-weight:600;">?</span>`;
-    // Provider presets — picking one auto-fills IMAP + SMTP host/port.
-    // Dovecot is IMAP-only here; the host is intentionally blank because
-    // it may be remote (DNS, LAN, Tailscale), not localhost.
-    const PROVIDERS = {
-      gmail:    { label: 'Gmail',                   emailEx: 'you@gmail.com',     imap: { host: 'imap.gmail.com',           port: 993, starttls: false }, smtp: { host: 'smtp.gmail.com',     port: 465 } },
-      migadu:   { label: 'Migadu',                  emailEx: 'you@yourdomain.com', imap: { host: 'imap.migadu.com',          port: 993, starttls: false }, smtp: { host: 'smtp.migadu.com',    port: 465 } },
-      icloud:   { label: 'iCloud',                  emailEx: 'you@icloud.com',    imap: { host: 'imap.mail.me.com',         port: 993, starttls: false }, smtp: { host: 'smtp.mail.me.com',   port: 587 } },
-      outlook:  { label: 'Outlook / Office 365',    emailEx: 'you@outlook.com',   imap: { host: 'outlook.office365.com',    port: 993, starttls: false }, smtp: { host: 'smtp.office365.com', port: 587 } },
-      fastmail: { label: 'Fastmail',                emailEx: 'you@fastmail.com',  imap: { host: 'imap.fastmail.com',        port: 993, starttls: false }, smtp: { host: 'smtp.fastmail.com',  port: 465 } },
-      yahoo:    { label: 'Yahoo',                   emailEx: 'you@yahoo.com',     imap: { host: 'imap.mail.yahoo.com',      port: 993, starttls: false }, smtp: { host: 'smtp.mail.yahoo.com', port: 465 } },
-      dovecot:  { label: 'Dovecot IMAP (no SMTP)',  emailEx: 'you@example.com',   imap: { host: '',                         port: 31143, starttls: false }, smtp: { host: '',                   port: 465 } },
-    };
-    const _providerOptions = Object.entries(PROVIDERS)
-      .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
-    const _smtpSecurity = (acct) => acct?.smtp_security || ((parseInt(acct?.smtp_port || 465) === 587) ? 'starttls' : 'ssl');
-    formEl.innerHTML = `
-      <div class="admin-card" style="margin-top:8px">
-        <h2 style="font-size:13px">${isEdit ? 'Edit' : 'Add'} Email Account</h2>
-        <div class="settings-col">
-          <div class="settings-row"><label class="settings-label">Provider${_hint('Pick a known provider to auto-fill the IMAP and SMTP host/port. Choose Custom to type your own.')}</label><select id="uf-email-provider" class="settings-select"><option value="">Custom…</option>${_providerOptions}</select></div>
-          <div id="uf-email-provider-note" style="display:none;font-size:11px;line-height:1.5;padding:8px 10px;margin:2px 0 4px;border:1px solid color-mix(in srgb, var(--fg) 15%, transparent);border-left:3px solid var(--accent, var(--red));border-radius:4px;background:color-mix(in srgb, var(--fg) 4%, transparent);"></div>
-          <div class="settings-row"><label class="settings-label">Name${_hint('Optional label for this account (e.g. “Work” or “Personal”). Leave blank to use the email address.')}</label><input id="uf-email-name" class="settings-input" placeholder="(optional — leave blank to use email)"></div>
-          <div class="settings-row"><label class="settings-label">Email${_hint('Your email address. Used as the From: header on outgoing mail and as the display label when Name is blank.')}</label><input id="uf-email-from" class="settings-input" placeholder="you@example.com"></div>
-          <div style="font-size:11px;font-weight:600;opacity:0.6;margin:4px 0 2px">IMAP (Receiving)</div>
-          <div class="settings-row"><label class="settings-label">Host${_hint('Your IMAP server, e.g. imap.gmail.com, imap.migadu.com, a LAN host, or a Tailscale IP for Dovecot.')}</label><input id="uf-imap-host" class="settings-input" placeholder="imap.example.com"></div>
-          <div class="settings-row"><label class="settings-label">Port${_hint('993 for IMAPS (most providers), 143 for plain or STARTTLS. Local servers often use a custom port like 31143.')}</label><input id="uf-imap-port" class="settings-input" type="number" placeholder="993" style="max-width:100px"></div>
-          <div class="settings-row"><label class="settings-label">Username${_hint('Yes — your full email address goes here too (e.g. you@gmail.com). Same as the Email field above for almost every provider.')}</label><input id="uf-imap-user" class="settings-input" placeholder="you@example.com"></div>
-          <div class="settings-row"><label class="settings-label">Password${_hint('For Gmail, iCloud, and Yahoo: paste your App Password (NOT your normal account password — those are blocked for IMAP). For Migadu, Fastmail, Outlook, etc.: your regular mailbox password works.')}</label><input id="uf-imap-pass" class="settings-input" type="password" placeholder="${placeholderPass}"></div>
-          <div class="settings-row"><label class="settings-label">STARTTLS${_hint('Turn ON for port 143/587 to upgrade plain to TLS. Turn OFF for port 993 (IMAPS — already encrypted) or a local server with no TLS configured.')}</label><label class="admin-switch" style="margin-left:0"><input type="checkbox" id="uf-imap-starttls" checked><span class="admin-slider"></span></label></div>
-          <div style="font-size:11px;font-weight:600;opacity:0.6;margin:8px 0 2px">SMTP (Sending) <span style="font-weight:normal;opacity:0.7">— optional, leave blank for read-only</span></div>
-          <div class="settings-row"><label class="settings-label">Host${_hint('Your outgoing-mail server, e.g. smtp.gmail.com. Leave blank to make this account read-only.')}</label><input id="uf-smtp-host" class="settings-input" placeholder="smtp.example.com"></div>
-          <div class="settings-row"><label class="settings-label">Port${_hint('465 for SSL/SMTPS, 587 for STARTTLS. 25 is usually blocked by ISPs.')}</label><input id="uf-smtp-port" class="settings-input" type="number" placeholder="465" style="max-width:100px"></div>
-          <div class="settings-row"><label class="settings-label">Security${_hint('SSL for port 465, STARTTLS for port 587, or None for local SMTP bridges such as Proton Mail Bridge.')}</label><select id="uf-smtp-security" class="settings-select"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option><option value="none">None</option></select></div>
-          <div class="settings-row"><label class="settings-label">Same as IMAP${_hint('Use the IMAP username and password for SMTP too (right for almost every provider). Turn off to enter separate SMTP credentials.')}</label><label class="admin-switch" style="margin-left:0"><input type="checkbox" id="uf-smtp-same" checked><span class="admin-slider"></span></label></div>
-          <div class="settings-row uf-smtp-creds"><label class="settings-label">Username${_hint('Usually the same as your IMAP username (your email address).')}</label><input id="uf-smtp-user" class="settings-input"></div>
-          <div class="settings-row uf-smtp-creds"><label class="settings-label">Password${_hint('Your SMTP password — often the same as your IMAP password.')}</label><input id="uf-smtp-pass" class="settings-input" type="password" placeholder="${placeholderPass}"></div>
-          <div class="settings-row" style="margin-top:4px"><label class="settings-label">Default${_hint('Use this account whenever no specific account is chosen.')}</label><label class="admin-switch" style="margin-left:0"><input type="checkbox" id="uf-email-default"><span class="admin-slider"></span></label><span style="font-size:10px;opacity:0.5;margin-left:6px">Used when nothing else is selected</span></div>
-          <div class="settings-row" style="margin-top:10px;align-items:center;">
-            <button class="admin-btn-add" id="uf-email-save" style="background:var(--red);border-color:var(--red);color:#fff;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
-              <span class="uf-email-save-ico" style="display:inline-flex;width:11px;height:11px;align-items:center;justify-content:center;">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-              </span>
-              <span class="uf-email-save-label">${isEdit ? 'Save' : 'Create'}</span>
-            </button>
-            <button class="admin-btn-add" id="uf-email-test" style="display:inline-flex;align-items:center;gap:5px;opacity:0.85;">
-              <span class="uf-email-test-ico" style="display:inline-flex;width:11px;height:11px;align-items:center;justify-content:center;">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 4 12 14.01 9 11.01"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-              </span>
-              Test
-            </button>
-            <span id="uf-email-msg" style="font-size:11px;flex:1;margin-left:8px"></span>
-            <button class="admin-btn-add" id="uf-email-cancel" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;position:relative;top:1px;margin-left:auto;">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>`;
-
-    // Provider-specific helper notes — surfaces for providers that
-    // require an app-specific password (Gmail killed basic IMAP auth
-    // in 2022; iCloud + Yahoo follow the same model). The Generate
-    // button opens the right page in a new tab and copies the URL for
-    // mobile / cross-device flows.
-    const PROVIDER_NOTES = {
-      gmail: {
-        title: 'Gmail needs an App Password',
-        body: 'Your regular Google password won\'t work for IMAP. Generate a 16-character App Password (requires 2-Step Verification enabled) and paste it as the Password.',
-        url: 'https://myaccount.google.com/apppasswords',
-      },
-      icloud: {
-        title: 'iCloud needs an App-Specific Password',
-        body: 'Sign in to your Apple ID, go to Sign-In and Security → App-Specific Passwords, and generate one (requires 2FA on your Apple ID).',
-        url: 'https://account.apple.com/account/manage',
-      },
-      yahoo: {
-        title: 'Yahoo needs an App Password',
-        body: 'Generate an App Password from Yahoo Account Security (requires 2-Step Verification enabled) and paste it as the Password.',
-        url: 'https://login.yahoo.com/account/security/app-passwords',
-      },
-    };
-    const noteEl = el('uf-email-provider-note');
-    const _copyProviderUrl = async (text) => {
-      const value = String(text || '');
-      if (!value) return false;
-      if (navigator.clipboard && window.isSecureContext) {
-        try {
-          await navigator.clipboard.writeText(value);
-          return true;
-        } catch (_) {
-          // Fall through to the textarea path below.
-        }
-      }
-      const ta = document.createElement('textarea');
-      ta.value = value;
-      ta.setAttribute('readonly', 'readonly');
-      ta.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;z-index:-1;';
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      ta.setSelectionRange(0, value.length);
-      let ok = false;
-      try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
-      ta.remove();
-      return ok;
-    };
-    if (noteEl && !noteEl._ufProviderCopyWired) {
-      noteEl._ufProviderCopyWired = true;
-      noteEl.addEventListener('click', async (e) => {
-        const copyBtn = e.target.closest?.('.uf-prov-copy');
-        if (!copyBtn || !noteEl.contains(copyBtn)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const url = copyBtn.dataset.url || '';
-        const orig = copyBtn.innerHTML;
-        const ok = await _copyProviderUrl(url);
-        if (!ok) {
-          uiModule.showError?.('Copy failed');
-          return;
-        }
-        uiModule.showToast?.('Copied');
-        copyBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied';
-        setTimeout(() => {
-          if (copyBtn.isConnected) copyBtn.innerHTML = orig;
-        }, 1500);
-      });
-    }
-    const _renderProviderNote = (key) => {
-      const n = PROVIDER_NOTES[key];
-      if (!n) { noteEl.style.display = 'none'; noteEl.innerHTML = ''; return; }
-      noteEl.style.display = '';
-      noteEl.innerHTML = `
-        <div style="font-weight:600;margin-bottom:3px;">${esc(n.title)}</div>
-        <div style="opacity:0.8;margin-bottom:6px;">${esc(n.body)}</div>
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          <a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer" class="admin-btn-sm" style="background:var(--red);border-color:var(--red);color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            Generate App Password
-          </a>
-          <button type="button" class="admin-btn-sm uf-prov-copy" data-url="${esc(n.url)}" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            Copy link
-          </button>
-        </div>`;
-    };
-
-    // Provider preset → autofill IMAP + SMTP host/port + STARTTLS, set the
-    // helper note, and update the Email/Username placeholders to a
-    // provider-specific example so users see the right format at a glance.
-    el('uf-email-provider').addEventListener('change', (e) => {
-      const key = e.target.value;
-      _renderProviderNote(key);
-      const p = PROVIDERS[key];
-      if (!p) return;
-      el('uf-imap-host').value = p.imap.host;
-      el('uf-imap-port').value = p.imap.port;
-      el('uf-imap-starttls').checked = !!p.imap.starttls;
-      el('uf-smtp-host').value = p.smtp.host;
-      el('uf-smtp-port').value = p.smtp.port;
-      el('uf-smtp-security').value = p.smtp.security || ((parseInt(p.smtp.port || 465) === 587) ? 'starttls' : 'ssl');
-      if (p.emailEx) {
-        el('uf-email-from').placeholder = p.emailEx;
-        el('uf-imap-user').placeholder = p.emailEx;
-        el('uf-smtp-user').placeholder = p.emailEx;
-      }
-    });
-
-    // "Same as IMAP" toggle — hide the SMTP creds rows when on.
-    const _syncSmtpSame = () => {
-      const same = el('uf-smtp-same').checked;
-      formEl.querySelectorAll('.uf-smtp-creds').forEach(r => {
-        r.style.display = same ? 'none' : '';
-      });
-    };
-    el('uf-smtp-same').addEventListener('change', _syncSmtpSame);
-    _syncSmtpSame();
-    if (existing) {
-      el('uf-email-name').value = existing.name || '';
-      el('uf-email-from').value = existing.from_address || '';
-      el('uf-imap-host').value = existing.imap_host || '';
-      el('uf-imap-port').value = existing.imap_port || 993;
-      el('uf-imap-user').value = existing.imap_user || '';
-      el('uf-imap-starttls').checked = existing.imap_starttls !== false;
-      el('uf-smtp-host').value = existing.smtp_host || '';
-      el('uf-smtp-port').value = existing.smtp_port || 465;
-      el('uf-smtp-security').value = _smtpSecurity(existing);
-      el('uf-smtp-user').value = existing.smtp_user || '';
-      el('uf-email-default').checked = !!existing.is_default;
-      // If the saved SMTP user matches the IMAP user, keep the "Same as
-      // IMAP" toggle ON (and stay hidden). Otherwise turn it off so the
-      // separate SMTP credentials are visible for editing.
-      const sameCreds = !!(existing.imap_user && existing.smtp_user && existing.imap_user === existing.smtp_user);
-      el('uf-smtp-same').checked = sameCreds || !existing.smtp_user;
-      _syncSmtpSame();
-    } else {
-      el('uf-imap-port').value = 993;
-      el('uf-smtp-port').value = 465;
-      el('uf-smtp-security').value = 'ssl';
-    }
-    el('uf-email-cancel').addEventListener('click', () => { formEl.style.display = 'none'; });
-
-    // Reset the Test button to neutral when the user edits any field
-    // after a test — stale green/red would imply the new values were
-    // tested too.
-    const _resetTestBtn = () => {
-      const btn = el('uf-email-test');
-      if (!btn) return;
-      btn.style.background = '';
-      btn.style.borderColor = '';
-      btn.style.color = '';
-      btn.style.boxShadow = '';
-      btn.style.animation = '';
-      const ico = btn.querySelector('.uf-email-test-ico');
-      if (ico && btn.dataset.origIco) ico.innerHTML = btn.dataset.origIco;
-    };
-    formEl.querySelectorAll('input, select').forEach(inp => {
-      if (inp.id === 'uf-email-msg') return;
-      inp.addEventListener('input', _resetTestBtn);
-      inp.addEventListener('change', _resetTestBtn);
-    });
-
-    // Collect the current form values + apply the "Same as IMAP" mirror —
-    // shared by both Save and Test so they agree on what's being sent.
-    const _collectBody = () => {
-      const body = {
-        name: el('uf-email-name').value.trim(),
-        from_address: el('uf-email-from').value.trim(),
-        imap_host: el('uf-imap-host').value.trim(),
-        imap_port: parseInt(el('uf-imap-port').value) || 993,
-        imap_user: el('uf-imap-user').value.trim(),
-        imap_starttls: el('uf-imap-starttls').checked,
-        smtp_host: el('uf-smtp-host').value.trim(),
-        smtp_port: parseInt(el('uf-smtp-port').value) || 465,
-        smtp_security: el('uf-smtp-security').value,
-        smtp_user: el('uf-smtp-user').value.trim(),
-        is_default: el('uf-email-default').checked,
-      };
-      if (el('uf-imap-pass').value) body.imap_password = el('uf-imap-pass').value;
-      if (el('uf-smtp-pass').value) body.smtp_password = el('uf-smtp-pass').value;
-      if (el('uf-smtp-same').checked) {
-        body.smtp_user = body.imap_user;
-        if (body.imap_password) body.smtp_password = body.imap_password;
-      }
-      return body;
-    };
-
-    // Spinner SVG kept inline so we can swap it back to the original
-    // checkmark on completion. ~13px to match the button icon size.
-    const _spinner = '<span style="display:inline-block;width:11px;height:11px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;animation:whirlpool-spin 0.7s linear infinite"></span>';
-    const _checkIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
-
-    el('uf-email-test').addEventListener('click', async () => {
-      const body = _collectBody();
-      // Edit-mode + blank password = use the saved row's stored creds
-      // via the account_id shortcut. Other overrides in the body still
-      // win (server merges).
-      if (isEdit && !body.imap_password) body.account_id = editId;
-      const msg = el('uf-email-msg');
-      const btn = el('uf-email-test');
-      const ico = btn.querySelector('.uf-email-test-ico');
-      btn.dataset.origIco = btn.dataset.origIco || ico.innerHTML;
-      btn.disabled = true;
-      // Clear any prior green/red while testing.
-      btn.style.background = '';
-      btn.style.borderColor = '';
-      btn.style.color = '';
-      btn.style.boxShadow = '';
-      btn.style.animation = '';
-      ico.innerHTML = _spinner;
-      msg.textContent = '';
-      msg.style.color = '';
-      try {
-        const r = await fetch('/api/email/accounts/test', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const d = await r.json();
-        if (d.ok) {
-          // Button becomes the indicator — green checkmark with the
-          // cookbook-style halo + breathing animation. No status text;
-          // the glow is the signal.
-          btn.style.background = 'var(--green, #50fa7b)';
-          btn.style.borderColor = 'var(--green, #50fa7b)';
-          btn.style.color = '#0b0';
-          btn.style.boxShadow =
-            '0 0 0 2px color-mix(in srgb, var(--green, #50fa7b) 25%, transparent),'
-          + ' 0 0 10px 2px color-mix(in srgb, var(--green, #50fa7b) 55%, transparent)';
-          btn.style.animation = 'cookbook-srv-glow-ok 2.4s ease-in-out infinite';
-          ico.innerHTML = _checkIcon;
-        } else {
-          // Failure — red glow, original icon, error detail in status
-          // text so we can say WHICH half failed (IMAP vs SMTP).
-          btn.style.background = 'var(--red)';
-          btn.style.borderColor = 'var(--red)';
-          btn.style.color = '#fff';
-          btn.style.boxShadow =
-            '0 0 0 2px color-mix(in srgb, var(--red) 25%, transparent),'
-          + ' 0 0 10px 2px color-mix(in srgb, var(--red) 55%, transparent)';
-          ico.innerHTML = btn.dataset.origIco;
-          const imap = d.imap?.ok ? 'IMAP ok' : `IMAP: ${d.imap?.error || 'fail'}`;
-          const smtp = d.smtp ? (d.smtp.ok ? ' · SMTP ok' : ` · SMTP: ${d.smtp.error || 'fail'}`) : '';
-          msg.textContent = imap + smtp;
-          msg.style.color = 'var(--red)';
-        }
-      } catch (e) {
-        btn.style.background = 'var(--red)';
-        btn.style.borderColor = 'var(--red)';
-        btn.style.color = '#fff';
-        ico.innerHTML = btn.dataset.origIco;
-        msg.textContent = 'Test error: ' + e.message;
-        msg.style.color = 'var(--red)';
-      } finally {
-        btn.disabled = false;
-      }
-    });
-
-    el('uf-email-save').addEventListener('click', async () => {
-      const body = _collectBody();
-      // Name is optional — fall back to Email so the list still has a label.
-      if (!body.name) body.name = body.from_address;
-      if (!body.name) { el('uf-email-msg').textContent = 'Need at least a Name or Email'; el('uf-email-msg').style.color = 'var(--red)'; return; }
-      const saveBtn = el('uf-email-save');
-      saveBtn.disabled = true;
-      const saveIcoEl = saveBtn.querySelector('.uf-email-save-ico');
-      const saveLblEl = saveBtn.querySelector('.uf-email-save-label');
-      const prevIco = saveIcoEl.innerHTML;
-      const prevLbl = saveLblEl.textContent;
-      saveIcoEl.innerHTML = _spinner;
-      saveLblEl.textContent = 'Saving…';
-      try {
-        const url = isEdit ? `/api/email/accounts/${editId}` : '/api/email/accounts';
-        const method = isEdit ? 'PUT' : 'POST';
-        const r = await fetch(url, {
-          method, credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const d = await r.json();
-        if (!(d.ok || d.id)) {
-          el('uf-email-msg').textContent = d.error || 'Failed';
-          el('uf-email-msg').style.color = 'var(--red)';
-          return;
-        }
-        el('uf-email-msg').textContent = 'Saved';
-        el('uf-email-msg').style.color = 'var(--green,#50fa7b)';
-        integrationNotice = 'Email account saved. For more settings, go to Settings > Email.';
-        formEl.style.display = 'none';
-        await renderList();
-        notifyIntegrationsChanged();
-      } catch (e) {
-        el('uf-email-msg').textContent = 'Error: ' + e.message;
-        el('uf-email-msg').style.color = 'var(--red)';
-      } finally {
-        saveBtn.disabled = false;
-        saveIcoEl.innerHTML = prevIco;
-        saveLblEl.textContent = prevLbl;
-      }
-    });
-  }
-
-  // ── Vaultwarden form ──
-  async function showVaultForm() {
-    formEl.innerHTML = `
-      <div class="admin-card" style="margin-top:8px">
-        <h2 style="font-size:13px">Vaultwarden (Password Vault)</h2>
-        <div id="uf-vault-status" style="font-size:11px;opacity:0.7;margin-bottom:8px">Loading...</div>
-        <div class="settings-col">
-          <div class="settings-row"><label class="settings-label">Server URL</label><input id="uf-vault-url" class="settings-input" placeholder="https://vault.example.com"></div>
-          <div class="settings-row"><label class="settings-label">Email</label><input id="uf-vault-email" class="settings-input" placeholder="you@example.com"></div>
-          <div class="settings-row"><label class="settings-label">Master Password</label><input id="uf-vault-pass" class="settings-input" type="password" placeholder="Only required for Login / Unlock"></div>
-          <div class="settings-row" style="margin-top:4px;flex-wrap:wrap;gap:4px">
-            <button class="admin-btn-sm" id="uf-vault-save">Save Config</button>
-            <button class="admin-btn-sm" id="uf-vault-login">Login</button>
-            <button class="admin-btn-sm" id="uf-vault-unlock">Unlock</button>
-            <button class="admin-btn-sm" id="uf-vault-lock" style="opacity:0.7">Lock</button>
-            <button class="admin-btn-sm" id="uf-vault-logout" style="opacity:0.7">Logout</button>
-            <button class="admin-btn-sm" id="uf-vault-cancel" style="opacity:0.7">Cancel</button>
-            <span id="uf-vault-msg" style="font-size:11px;margin-left:4px"></span>
-          </div>
-          <div style="font-size:10px;opacity:0.5;margin-top:6px;line-height:1.4">
-            <strong>Login</strong> registers this device with your Vaultwarden account (once per account).<br>
-            <strong>Unlock</strong> decrypts the vault — required after restart or Lock. Session is saved so the assistant can read passwords.
-          </div>
-        </div>
-      </div>`;
-
-    const msg = (text, color) => {
-      const m = el('uf-vault-msg');
-      m.textContent = text || '';
-      m.style.color = color || '';
-    };
-
-    async function refreshStatus() {
-      try {
-        const r = await fetch('/api/vault/config', { credentials: 'same-origin' });
-        const d = await r.json();
-        el('uf-vault-url').value = d.server_url || '';
-        el('uf-vault-email').value = d.email || '';
-        const installed = d.bw_installed;
-        const parts = [];
-        parts.push(installed ? 'bw CLI: installed' : 'bw CLI: NOT installed (install nodejs-bitwarden-cli)');
-        parts.push(d.unlocked ? 'Status: UNLOCKED' : 'Status: locked');
-        if (d.unlocked_at) parts.push(`Last unlock: ${d.unlocked_at.replace('T',' ').slice(0,19)}`);
-        const statusEl = el('uf-vault-status');
-        statusEl.textContent = parts.join(' — ');
-        statusEl.style.color = !installed ? 'var(--red)' : d.unlocked ? 'var(--green,#50fa7b)' : '';
-      } catch (_) {
-        el('uf-vault-status').textContent = 'Failed to load vault status';
-      }
-    }
-    await refreshStatus();
-
-    el('uf-vault-cancel').addEventListener('click', () => { formEl.style.display = 'none'; });
-
-    el('uf-vault-save').addEventListener('click', async () => {
-      msg('Saving...');
-      try {
-        const r = await fetch('/api/vault/config', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ server_url: el('uf-vault-url').value, email: el('uf-vault-email').value }),
-        });
-        const d = await r.json();
-        if (d.ok) { msg('Saved', 'var(--green,#50fa7b)'); await refreshStatus(); await renderList(); }
-        else msg(d.error || 'Failed', 'var(--red)');
-      } catch (e) { msg('Error: ' + e.message, 'var(--red)'); }
-    });
-
-    el('uf-vault-login').addEventListener('click', async () => {
-      const email = el('uf-vault-email').value.trim();
-      const pass = el('uf-vault-pass').value;
-      if (!email || !pass) { msg('Email + master password required', 'var(--red)'); return; }
-      msg('Logging in...');
-      try {
-        const r = await fetch('/api/vault/login', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, master_password: pass }),
-        });
-        const d = await r.json();
-        if (d.ok) {
-          msg(d.already ? 'Already logged in — use Unlock' : 'Logged in', 'var(--green,#50fa7b)');
-          el('uf-vault-pass').value = '';
-          await refreshStatus(); await renderList();
-        } else msg(d.error || 'Login failed', 'var(--red)');
-      } catch (e) { msg('Error: ' + e.message, 'var(--red)'); }
-    });
-
-    el('uf-vault-unlock').addEventListener('click', async () => {
-      const pass = el('uf-vault-pass').value;
-      if (!pass) { msg('Master password required', 'var(--red)'); return; }
-      msg('Unlocking...');
-      try {
-        const r = await fetch('/api/vault/unlock', {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ master_password: pass }),
-        });
-        const d = await r.json();
-        if (d.ok) {
-          msg('Vault unlocked', 'var(--green,#50fa7b)');
-          el('uf-vault-pass').value = '';
-          await refreshStatus(); await renderList();
-        } else msg(d.error || 'Unlock failed', 'var(--red)');
-      } catch (e) { msg('Error: ' + e.message, 'var(--red)'); }
-    });
-
-    el('uf-vault-lock').addEventListener('click', async () => {
-      msg('Locking...');
-      try {
-        await fetch('/api/vault/lock', { method: 'POST', credentials: 'same-origin' });
-        msg('Locked', 'var(--green,#50fa7b)');
-        await refreshStatus(); await renderList();
-      } catch (e) { msg('Error: ' + e.message, 'var(--red)'); }
-    });
-
-    el('uf-vault-logout').addEventListener('click', async () => {
-      if (!await window.styledConfirm('Log out of Bitwarden CLI? You\'ll need to re-enter your master password to log back in.', { confirmText: 'Log out' })) return;
-      msg('Logging out...');
-      try {
-        await fetch('/api/vault/logout', { method: 'POST', credentials: 'same-origin' });
-        msg('Logged out', 'var(--green,#50fa7b)');
-        await refreshStatus(); await renderList();
-      } catch (e) { msg('Error: ' + e.message, 'var(--red)'); }
-    });
-  }
-
   // ── MCP form — full management view ──
   async function showMcpForm(editId) {
     if (editId && editId !== 'new') {
@@ -4529,9 +3287,6 @@ async function initUnifiedIntegrations() {
                 <option value="">Select...</option>
                 <option value="api">API Service</option>
                 <option value="caldav">CalDAV Calendar</option>
-                <option value="contacts">Contacts Import</option>
-                <option value="carddav">Contacts (CardDAV)</option>
-                <option value="email">Email (IMAP/SMTP)</option>
                 <option value="mcp">MCP Tool Server</option>
               </select>
             </div>

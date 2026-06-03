@@ -36215,3 +36215,174 @@ body.theme-frosted .modal {
      is already ≥16px and never zoomed — leave it so we don't shrink it. */
   .doc-email-richbody.doc-font-m { font-size: 16px !important; }
 }
+
+/* ── Knowledge graph / Links browser ── */
+.knowledge-modal-content {
+  width: min(920px, 96vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+.knowledge-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+}
+.kg-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.kg-search-input { flex: 1; min-width: 180px; }
+.kg-stats { font-size: 11px; opacity: 0.65; }
+.kg-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.kg-type-filter {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.kg-type-filter.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.kg-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-height: 320px;
+  flex: 1;
+}
+@media (max-width: 720px) {
+  .kg-panels { grid-template-columns: 1fr; }
+}
+.kg-node-list, .kg-detail {
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  overflow: auto;
+  min-height: 0;
+  background: color-mix(in srgb, var(--panel) 40%, transparent);
+}
+.kg-node-row, .kg-link-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.kg-node-row:hover, .kg-link-row:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.kg-node-row.active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.kg-node-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.kg-link-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.kg-type {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+.kg-node-title {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kg-node-meta {
+  font-size: 10px;
+  opacity: 0.55;
+  overflow-wrap: anywhere;
+}
+.kg-node-snippet {
+  font-size: 11px;
+  opacity: 0.7;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.kg-detail { padding: 12px; }
+.kg-detail-head { margin-bottom: 10px; }
+.kg-detail-title { margin: 6px 0; font-size: 15px; overflow-wrap: anywhere; }
+.kg-meta { font-size: 11px; opacity: 0.7; overflow-wrap: anywhere; }
+.kg-detail-actions { display: flex; gap: 6px; margin-top: 8px; }
+.kg-detail-snippet {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-bottom: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.kg-link-section { margin-top: 10px; }
+.kg-link-heading {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.7;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.kg-link-kind { font-size: 10px; opacity: 0.6; flex-shrink: 0; }
+.kg-loading, .kg-empty, .kg-error { padding: 16px; font-size: 12px; opacity: 0.75; }
+.kg-link-empty { font-size: 11px; opacity: 0.55; padding: 4px 0 8px; }
+
+/* Document footer split group (Copy / Export) — matches doc-split-btn-group markup */
+.doc-split-btn-group {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  height: 22px;
+  flex-shrink: 0;
+}
+.doc-split-btn-group .doc-split-btn.doc-split-main,
+.doc-split-btn-group .doc-split-btn.doc-split-caret {
+  border: none !important;
+  border-radius: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  opacity: 1 !important;
+  color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+  background: none !important;
+  transition: color 0.12s, background 0.12s;
+}
+.doc-split-btn-group:hover .doc-split-btn.doc-split-main,
+.doc-split-btn-group:hover .doc-split-btn.doc-split-caret { color: var(--fg) !important; }
+.doc-split-btn-group .doc-split-btn.doc-split-caret {
+  border-left: 1px solid var(--border) !important;
+  padding: 0 5px 0 7px !important;
+}
+.doc-split-btn-group .doc-split-btn.doc-split-main:hover,
+.doc-split-btn-group .doc-split-btn.doc-split-caret:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
+  color: var(--fg) !important;
+}
+#doc-actions-footer .doc-split-btn-group { margin-left: auto; }

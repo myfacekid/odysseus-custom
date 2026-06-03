@@ -17,6 +17,7 @@ import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
+import knowledgeModule from './js/knowledge.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
@@ -224,7 +225,7 @@ function initializeEventListeners() {
       '.export-dropdown-menu.open, .overflow-menu.open, .model-picker-menu.open, .doc-overflow-menu.open'
     ).forEach(m => { if (m !== except) m.classList.remove('open'); });
     document.querySelectorAll(
-      '.skill-kebab-menu, .note-reminder-menu, .task-dropdown, .doclib-card-dropdown, .email-card-dropdown, .msg-overflow-menu'
+      '.skill-kebab-menu, .note-reminder-menu, .task-dropdown, .doclib-card-dropdown, .msg-overflow-menu'
     ).forEach(m => { if (m !== except) m.remove(); });
   };
   // Window-opening / nav controls (rail buttons, sidebar tool rows + session
@@ -552,7 +553,7 @@ function initializeEventListeners() {
       };
 
       // Dynamic modals (removed from DOM on close)
-      const dynamicModals = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal', 'email-lib-modal'];
+      const dynamicModals = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal'];
       for (const id of dynamicModals) {
         const m = document.getElementById(id);
         if (m) { dismissModal(m); return; }
@@ -913,9 +914,8 @@ function initializeEventListeners() {
   };
   // Collapse the wide sidebar so the icon rail (48px mini sidebar) shows
   // in its place. The two are mutually exclusive — sidebar-layout.js:57
-  // only displays the rail when `.sidebar.hidden` is set. Used by /email
-  // and /notes route openers so those fullscreen views keep the rail
-  // visible as the user's navigation strip. Records the prior state on
+  // only displays the rail when `.sidebar.hidden` is set. Used by route
+  // openers so fullscreen views keep the rail visible.
   // body so a paired close-handler can restore it without overriding a
   // manual toggle the user did in between.
   const _collapseSidebarToRail = () => {
@@ -984,50 +984,14 @@ function initializeEventListeners() {
     },
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
-    '/email':    () => {
-      // Collapse the wide sidebar → icon rail (48px) so the user keeps
-      // navigation visible alongside the fullscreen email view.
-      _collapseSidebarToRail();
-      // Spawn a fresh chat first so a reply (or any AI work the user
-      // chains off the email) lives in its own session instead of grafting
-      // onto whatever was last open. The rail button has the full
-      // default-chat / fallback-model resolution logic baked in, so just
-      // delegate to it.
-      try { document.getElementById('rail-new-session')?.click(); } catch (_) {}
-      // The email library is opened by clicking the email section's HEADER
-      // row (.section-header-flex), not the title span. Trigger that, then
-      // snap the modal to fullscreen on the next frame.
-      const hdr = document.querySelector('#email-section .section-header-flex');
-      if (hdr) hdr.click();
-      // The modal is built synchronously inside openEmailLibrary, so a
-      // single frame later it's in the DOM and ready to be flagged.
-      // Fullscreen leaves the icon-rail visible on the left so navigation
-      // stays one click away (per #93). Width = viewport minus rail.
-      // Just add the class — the CSS rule for .email-lib-fullscreen .modal-content
-      // owns all the positioning (with !important so it beats openEmailLibrary's
-      // post-mount centering rAF) and reads the rail width from --icon-rail-w.
-      const _goFullscreen = () => {
-        const modal = document.getElementById('email-lib-modal');
-        if (!modal) return false;
-        modal.classList.add('email-lib-fullscreen');
-        return true;
-      };
-      _goFullscreen();
-      requestAnimationFrame(_goFullscreen);
-      setTimeout(_goFullscreen, 50);
-      setTimeout(_goFullscreen, 200);
-    },
     '/memory':   () => document.getElementById('tool-memory-btn')?.click(),
+    '/links':    () => document.getElementById('tool-knowledge-btn')?.click(),
     '/gallery':  () => document.getElementById('tool-gallery-btn')?.click(),
     '/tasks':    () => document.getElementById('tool-tasks-btn')?.click(),
     '/library':  () => sessionModule && sessionModule.openLibrary && sessionModule.openLibrary(),
   };
   const _opener = _routeOpen[urlPath];
-  // Defer the opener — at this point in init, the modules whose handlers
-  // we trigger (#rail-new-session click handler, the email-section header
-  // click handler in emailInbox, sessionModule's loaded session list) are
-  // still being wired up further down in this same function. Stash the
-  // opener so it runs from sessionModule.loadSessions().finally() below.
+  // Defer the opener — handlers are still being wired later in init.
   if (_opener) window._nobodyRouteOpener = _opener;
 
   // Archive browser tool button
@@ -1039,7 +1003,7 @@ function initializeEventListeners() {
   }
 
   // "+" on the Library row → create a new blank document and open it in the
-  // editor (mirrors the email section's compose "+"). stopPropagation so it
+  // editor compose "+"). stopPropagation so it
   // doesn't also fire the row's open-library click.
   const libraryNewDocBtn = el('library-new-doc-btn');
   if (libraryNewDocBtn) {
@@ -1494,6 +1458,11 @@ function initializeEventListeners() {
     });
   }
 
+  const toolKnowledgeBtn = el('tool-knowledge-btn');
+  if (toolKnowledgeBtn && knowledgeModule?.openKnowledgeModal) {
+    toolKnowledgeBtn.addEventListener('click', () => knowledgeModule.openKnowledgeModal());
+  }
+
   const addMemBtn = el('add-memory-btn');
   if (addMemBtn) {
     addMemBtn.addEventListener('click', memoryModule.addNewMemory);
@@ -1611,7 +1580,7 @@ function initializeEventListeners() {
     builder: { role: 'Tool Builder', text: 'Create custom mini-apps and tools the AI can use. Describe what you need and the AI will build a tool you can reuse across conversations.' },
     research: { role: 'Academic Research', text: 'Multi-round scholarly literature synthesis with numbered citations and source analysis. Takes longer but produces rigorous, evidence-grounded reports. Your next message will trigger an academic research cycle.' },
     zotero: { role: 'Zotero Library', text: 'Searches your synced Zotero library for papers and PDFs related to your message. Configure credentials in Settings → Search. Works alongside web search when both are enabled.' },
-    vault: { role: 'Obsidian Vault', text: 'Searches, reads, and writes your local Obsidian vault. The agent can follow [[wikilinks]], link notes together, append to daily notes, and patch existing markdown. Configure the folder path in Settings → Search.' },
+    vault: { role: 'Vault', text: 'Searches, reads, and writes your local markdown vault. The agent follows [[wikilinks]], links notes, appends to daily notes, and patches markdown — all via the filesystem. Configure the folder in Settings → Search.' },
   };
   function _showToolSplash(key) {
     const splash = _toolSplashes[key];
@@ -2427,7 +2396,6 @@ function initializeEventListeners() {
     'sidebar-new-chat':    '#sidebar-new-chat-btn',
     'sidebar-search':      '#sidebar-search-btn',
     'sessions-section':    '#sessions-section',
-    'email-section':       '#email-section',
     'models-section':      '#models-section',
     'tools-section':       '#tools-section',
     // Per-tool visibility — fine-grained control over which entries show
@@ -2932,7 +2900,6 @@ function initializeEventListeners() {
       // Modals managed by the new modalManager (Modals.register) get their own
       // .modal-minimize-btn and chips via the .minimized-dock-chip system.
       // Skip them entirely so we don't double-up minimize buttons or chips.
-      if (modal.id && /^email-reader-/.test(modal.id)) return;
       if (modal.id && window.Modals && window.Modals.isRegistered && window.Modals.isRegistered(modal.id)) return;
       const header = modal.querySelector('.modal-header');
       if (!header) return;
@@ -3028,7 +2995,7 @@ function initializeEventListeners() {
       ['.admin-tabs', '.admin-tab'],
     ];
     const _IGNORE = 'input, textarea, select, [contenteditable="true"], .preset-range, ' +
-      '.note-cl-row, .minimized-dock-chip, canvas, .email-card-reader';
+      '.note-cl-row, .minimized-dock-chip, canvas';
     let sx = 0, sy = 0, tracking = false;
 
     document.addEventListener('touchstart', (e) => {
@@ -3505,7 +3472,6 @@ function startNobodyApp() {
     'rail-notes':     'tool-notes-btn',
     'rail-memory':    'tool-memory-btn',
     'rail-theme':     'tool-theme-btn',
-    'rail-email':     'email-section-title',
   };
   Object.entries(_railToolMap).forEach(([railId, toolId]) => {
     const railBtn = el(railId);

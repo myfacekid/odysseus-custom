@@ -2,19 +2,22 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from src.one_thing import (
     CHECKBOX_RE,
     DEFAULT_BOARD_PATH,
     HORIZONS,
     OneThingTask,
+    TASK_ID_RE,
     add_task,
     archive_stale_completed_tasks,
     extract_horizon_section,
     format_horizon_section,
     get_or_create_board,
+    get_task,
     list_tasks,
     merge_section,
     parse_task_line,
@@ -27,6 +30,22 @@ from src.vault_write import (
 )
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_TODOS_TWO_WAY = True
+VAULT_PUSH_DEBOUNCE_SEC = 0.45
+_push_debounce_lock = threading.Lock()
+_push_debounce_timers: Dict[str, threading.Timer] = {}
+
+
+def is_todos_two_way_sync_enabled(owner: str) -> bool:
+    """Whether Obsidian checkbox edits flow back into Nobody on board refresh."""
+    from routes.prefs_routes import _load_for_user
+
+    cfg = (_load_for_user(owner) or {}).get("obsidian_vault") or {}
+    value = cfg.get("todos_two_way", DEFAULT_TODOS_TWO_WAY)
+    if isinstance(value, str):
+        return value.strip().lower() not in ("0", "false", "no", "off")
+    return bool(value)
 
 
 def _board_path(config: VaultConfig, owner: str) -> str:
@@ -93,10 +112,17 @@ def sync_board_file(
 ) -> str:
     """Write the todos board (immediate + miscellaneous) to a vault note."""
     rel = _board_path(config, owner)
+    if is_todos_two_way_sync_enabled(owner):
+        hint = (
+            "_Two-way sync: checkbox edits in Obsidian import when Todos opens. "
+            "Lines with `nobody:` ids match existing tasks._"
+        )
+    else:
+        hint = "_Synced from Nobody — edit tasks in the Todos panel for consistency._"
     parts = [
         "# Todos Board",
         "",
-        "_Synced from Nobody — edit tasks in Todos for consistency._",
+        hint,
         "",
     ]
     body = "\n\n".join(parts)
@@ -106,6 +132,38 @@ def sync_board_file(
 
     _write_note(config, rel, body.strip() + "\n", owner=owner)
     return rel
+
+
+def _apply_vault_task_to_local(
+    db,
+    owner: str,
+    current: OneThingTask,
+    parsed: OneThingTask,
+    *,
+    full_merge: bool,
+) -> bool:
+    """Merge vault checkbox line into an existing Nobody task."""
+    if full_merge:
+        updates = {}
+        if parsed.text.strip() and parsed.text.strip().lower() != current.text.strip().lower():
+            updates["text"] = parsed.text.strip()
+        if parsed.priority != current.priority:
+            updates["priority"] = parsed.priority
+        if (parsed.due_date or None) != (current.due_date or None):
+            updates["due_date"] = parsed.due_date or ""
+        if (parsed.parent_ids or []) != (current.parent_ids or []):
+            updates["parent_ids"] = parsed.parent_ids or []
+        if current.done != parsed.done:
+            updates["done"] = parsed.done
+        if not updates:
+            return False
+        update_task(db, owner, current.id, **updates)
+        return True
+
+    if current.done == parsed.done:
+        return False
+    update_task(db, owner, current.id, done=parsed.done)
+    return True
 
 
 def _import_section_tasks(
@@ -119,6 +177,7 @@ def _import_section_tasks(
         return 0
 
     existing = list_tasks(db, owner, horizon=horizon, include_done=True, include_archived=True)
+    all_tasks = list_tasks(db, owner, include_done=True, include_archived=True)
     by_id = {t.id.lower(): t for t in existing}
     by_text = {t.text.strip().lower(): t for t in existing}
     changed = 0
@@ -126,23 +185,39 @@ def _import_section_tasks(
     for line in section_text.splitlines():
         if not CHECKBOX_RE.match(line or ""):
             continue
-        parsed = parse_task_line(line, default_horizon=horizon)
+        parsed = parse_task_line(
+            line, default_horizon=horizon, all_tasks=all_tasks
+        )
         if not parsed or not parsed.text.strip():
             continue
 
+        line_has_id = bool(TASK_ID_RE.search(line or ""))
         tid_key = parsed.id.lower()
         text_key = parsed.text.strip().lower()
+
         if tid_key in by_id:
             current = by_id[tid_key]
-            if current.done != parsed.done:
-                update_task(db, owner, current.id, done=parsed.done)
+            if _apply_vault_task_to_local(
+                db, owner, current, parsed, full_merge=line_has_id
+            ):
                 changed += 1
+                refreshed = get_task(db, owner, current.id)
+                if refreshed:
+                    by_text[refreshed.text.strip().lower()] = refreshed
+                    all_tasks = list_tasks(
+                        db, owner, include_done=True, include_archived=True
+                    )
             continue
+
         if text_key in by_text:
             current = by_text[text_key]
-            if current.done != parsed.done:
-                update_task(db, owner, current.id, done=parsed.done)
+            if _apply_vault_task_to_local(
+                db, owner, current, parsed, full_merge=line_has_id
+            ):
                 changed += 1
+                all_tasks = list_tasks(
+                    db, owner, include_done=True, include_archived=True
+                )
             continue
 
         new_task = add_task(
@@ -152,10 +227,15 @@ def _import_section_tasks(
             horizon=horizon,
             priority=parsed.priority,
             due_date=parsed.due_date,
+            parent_ids=parsed.parent_ids,
+            require_links=False,
         )
+        if parsed.done:
+            update_task(db, owner, new_task.id, done=True)
         changed += 1
         by_text[text_key] = new_task
         by_id[new_task.id.lower()] = new_task
+        all_tasks = list_tasks(db, owner, include_done=True, include_archived=True)
 
     return changed
 
@@ -170,6 +250,9 @@ def import_from_vault(db, owner: str, config: VaultConfig) -> dict:
     board_body = _read_note_body(config, board_rel)
 
     focus_imported = _import_section_tasks(db, owner, focus_section, "focus")
+    focus_board_section = extract_horizon_section(board_body, "focus")
+    focus_imported += _import_section_tasks(db, owner, focus_board_section, "focus")
+
     board_imported = 0
     board_counts = {}
     for horizon in ("build", "aim", "misc"):
@@ -232,6 +315,18 @@ def push_one_thing_to_vault(owner: str) -> dict:
         return {"synced": False, "error": str(e)}
 
 
+def refresh_board_from_vault(owner: str) -> dict:
+    """Import Obsidian checkbox edits, then push merged state back to the vault.
+
+    Called when the Todos panel opens (two-way mode). Local mutations still
+    use push-only via sync_after_task_change to avoid clobbering in-flight toggles.
+    """
+    if not is_todos_two_way_sync_enabled(owner):
+        return {"two_way": False, "skipped": True}
+
+    return sync_one_thing_to_vault(owner)
+
+
 def sync_one_thing_to_vault(owner: str) -> dict:
     """Pull vault checkboxes, then push all todos to Obsidian."""
     from core.database import SessionLocal
@@ -255,6 +350,7 @@ def sync_one_thing_to_vault(owner: str) -> dict:
     try:
         out = _export_tasks_to_vault(config, owner, tasks)
         out.update(import_stats)
+        out["two_way"] = is_todos_two_way_sync_enabled(owner)
         return out
     except Exception as e:
         logger.warning(f"Todos vault sync failed: {e}")
@@ -262,10 +358,24 @@ def sync_one_thing_to_vault(owner: str) -> dict:
 
 
 def sync_after_task_change(owner: str) -> None:
-    """Best-effort push after a local task mutation; never raises."""
+    """Debounced background vault push after local mutations; returns immediately."""
     if not owner:
         return
-    try:
-        push_one_thing_to_vault(owner)
-    except Exception as e:
-        logger.debug(f"Todos push skipped: {e}")
+
+    def _do_push() -> None:
+        try:
+            push_one_thing_to_vault(owner)
+        except Exception as e:
+            logger.debug(f"Todos push skipped: {e}")
+        finally:
+            with _push_debounce_lock:
+                _push_debounce_timers.pop(owner, None)
+
+    with _push_debounce_lock:
+        existing = _push_debounce_timers.get(owner)
+        if existing:
+            existing.cancel()
+        timer = threading.Timer(VAULT_PUSH_DEBOUNCE_SEC, _do_push)
+        timer.daemon = True
+        _push_debounce_timers[owner] = timer
+        timer.start()

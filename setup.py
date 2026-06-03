@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Odysseus — first-time setup script.
+"""Nobody — first-time setup script.
 
 Creates data directories, initializes the database, and sets up an
 initial admin user. Safe to re-run (skips what already exists).
@@ -23,6 +23,7 @@ DIRS = [
     os.path.join(DATA_DIR, "chroma"),
     os.path.join(DATA_DIR, "rag"),
     os.path.join(DATA_DIR, "memory_vectors"),
+    os.path.join(DATA_DIR, "knowledge"),
     os.path.join(BASE_DIR, "logs"),
 ]
 
@@ -168,7 +169,7 @@ def check_deps():
 
 
 def main():
-    print("\n=== Odysseus Setup ===\n")
+    print("\n=== Nobody Setup ===\n")
 
     print("1. Creating directories...")
     create_dirs()

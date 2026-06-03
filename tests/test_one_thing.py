@@ -12,7 +12,7 @@ from src.one_thing import (
     parse_task_line,
     tasks_from_section,
 )
-from src.vault_one_thing_sync import import_from_vault
+from src.vault_one_thing_sync import import_from_vault, _import_section_tasks
 
 
 def test_normalize_horizon_aliases():
@@ -186,6 +186,70 @@ def test_import_does_not_run_during_push_after_local_toggle():
     assert calls == ["export"]
 
 
+def test_import_merges_vault_edits_by_nobody_id():
+    from dataclasses import dataclass
+    from unittest.mock import patch
+
+    task_id = "abc12345-0000-4000-8000-000000000001"
+    stored = [
+        OneThingTask(
+            id=task_id,
+            text="Old title",
+            horizon="focus",
+            priority="steady",
+            due_date="2026-06-01",
+        )
+    ]
+
+    class FakeNote:
+        items = "[]"
+
+    def fake_load(_note):
+        return list(stored)
+
+    def fake_save(db, note, tasks):
+        stored.clear()
+        stored.extend(tasks)
+
+    line = format_task_line(
+        OneThingTask(
+            id=task_id,
+            text="Updated in Obsidian",
+            done=True,
+            horizon="focus",
+            priority="critical",
+            due_date="2026-06-10",
+        )
+    )
+    section = f"## Immediate Tasks\n<!-- nobody-horizon:focus -->\n\n{line}\n"
+
+    with patch("src.one_thing.get_or_create_board", return_value=FakeNote()), patch(
+        "src.one_thing._load_tasks", fake_load
+    ), patch("src.one_thing._save_tasks", fake_save):
+        changed = _import_section_tasks(object(), "tester", section, "focus")
+
+    assert changed == 1
+    assert len(stored) == 1
+    task = stored[0]
+    assert task.text == "Updated in Obsidian"
+    assert task.done
+    assert task.priority == "critical"
+    assert task.due_date == "2026-06-10"
+
+
+def test_refresh_board_skipped_when_two_way_disabled():
+    from unittest.mock import patch
+
+    with patch(
+        "src.vault_one_thing_sync.is_todos_two_way_sync_enabled", return_value=False
+    ), patch("src.vault_one_thing_sync.sync_one_thing_to_vault") as full_sync:
+        from src.vault_one_thing_sync import refresh_board_from_vault
+
+        out = refresh_board_from_vault("tester")
+        full_sync.assert_not_called()
+        assert out.get("skipped") is True
+
+
 def test_import_from_vault_extracts_immediate_and_misc():
     import tempfile
     from dataclasses import dataclass
@@ -281,3 +345,56 @@ def test_import_from_vault_extracts_immediate_and_misc():
         assert "Done already" in texts
         assert "Quarterly goal" in texts
         assert "Fix edge case" in texts
+
+
+def test_format_and_parse_parent_links_roundtrip():
+    parent = OneThingTask(
+        id="parent-0000-4000-8000-000000000001",
+        text="Ship the thesis",
+        horizon="build",
+    )
+    child = OneThingTask(
+        id="child-0000-4000-8000-000000000002",
+        text="Draft methods section",
+        horizon="focus",
+        parent_ids=[parent.id],
+    )
+    all_tasks = [parent, child]
+    line = format_task_line(child, all_tasks=all_tasks)
+    assert "[[Ship the thesis]]" in line
+    assert "`parents:parent-0000-4000-8000-000000000001`" in line
+    parsed = parse_task_line(line, default_horizon="focus", all_tasks=all_tasks)
+    assert parsed is not None
+    assert parsed.parent_ids == [parent.id]
+    assert parsed.text == "Draft methods section"
+
+
+def test_validate_parent_links_requires_focus_parent():
+    from src.one_thing import validate_parent_links
+
+    parent = OneThingTask(id="p1", text="Quarterly outcome", horizon="build")
+    child = OneThingTask(id="c1", text="Today task", horizon="focus", parent_ids=[])
+    try:
+        validate_parent_links(child, [parent, child])
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+    child.parent_ids = [parent.id]
+    validate_parent_links(child, [parent, child])
+    assert child.parent_ids == [parent.id]
+
+
+def test_validate_parent_links_build_requires_aim():
+    from src.one_thing import validate_parent_links
+
+    aim = OneThingTask(id="a1", text="Year direction", horizon="aim")
+    build = OneThingTask(id="b1", text="Quarter goal", horizon="build", parent_ids=[])
+    try:
+        validate_parent_links(build, [aim, build])
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+    build.parent_ids = [aim.id]
+    validate_parent_links(build, [aim, build])

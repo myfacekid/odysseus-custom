@@ -107,7 +107,6 @@ export function initKeyboardShortcuts(modules) {
     'cookbook-modal':         'tool-cookbook-btn',
     'compare-model-overlay':  'tool-compare-btn',
     'calendar-modal':         'tool-calendar-btn',
-    'email-lib-modal':        'email-section-title',
   };
   let _lastWindow = 'settings-modal';
 
@@ -211,7 +210,7 @@ export function initKeyboardShortcuts(modules) {
           } else {
             sessionModule.setCurrentSessionId(null);
             el('chat-history').innerHTML = '';
-            el('current-meta').textContent = 'Odysseus Chat';
+            el('current-meta').textContent = 'Nobody Chat';
             Storage.remove('lastSessionId');
             if (chatModule && chatModule.showWelcomeScreen) chatModule.showWelcomeScreen();
           }

@@ -1263,8 +1263,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
       switch_model <model>    — Change the model for the current session
       set_theme <preset>      — Apply a theme preset (dark, light, paper, nord, dracula, gruvbox, gpt, claude, lavender, etc.)
       create_theme <name> <bg> <fg> <panel> <border> <accent> [key=val ...] — Create custom theme. Optional key=val: advanced color overrides AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false
-      open_panel <name>       — Open a panel (documents, gallery, email, sessions, notes, memories, skills, settings, cookbook)
-      open_email_reply <uid> [folder] [reply|reply-all|ai-reply] — Open a reply draft document for an email; does not send
+      open_panel <name>       — Open a panel (documents, gallery, sessions, notes, memories, skills, settings, cookbook)
       get_toggles             — Return current toggle states (server-side knowledge)
     """
     lines = content.strip().split("\n")
@@ -1477,10 +1476,6 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
             "doclib": "documents",
             "gallery": "gallery",
             "images": "gallery",
-            "email": "email",
-            "emails": "email",
-            "inbox": "email",
-            "mail": "email",
             "sessions": "sessions",
             "chats": "sessions",
             "history": "sessions",
@@ -1502,28 +1497,11 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
         }
         target = _panel_aliases.get(panel)
         if not target:
-            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, email, sessions, notes, memories, skills, settings, cookbook."}
+            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, sessions, notes, memories, skills, settings, cookbook."}
         return {
             "ui_event": "open_panel",
             "panel": target,
             "results": f"Opening {target} panel",
-        }
-
-    elif action == "open_email_reply":
-        reply_parts = lines[0].strip().split()
-        uid = reply_parts[1].strip() if len(reply_parts) > 1 else ""
-        folder = reply_parts[2].strip() if len(reply_parts) > 2 else "INBOX"
-        mode = reply_parts[3].strip().lower() if len(reply_parts) > 3 else "reply"
-        if not uid:
-            return {"error": "open_email_reply needs: open_email_reply <uid> [folder] [reply|reply-all|ai-reply]"}
-        if mode not in ("reply", "reply-all", "ai-reply"):
-            mode = "reply"
-        return {
-            "ui_event": "open_email_reply",
-            "uid": uid,
-            "folder": folder or "INBOX",
-            "mode": mode,
-            "results": f"Opening reply draft for email UID {uid}",
         }
 
     elif action == "get_toggles":

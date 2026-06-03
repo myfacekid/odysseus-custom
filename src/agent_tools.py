@@ -39,9 +39,6 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "manage_endpoints", "manage_mcp", "manage_webhooks",
              "manage_tokens", "manage_documents", "manage_settings",
              "manage_notes", "manage_calendar",
-             "resolve_contact", "manage_contact", "list_email_accounts", "send_email", "list_emails",
-             "read_email", "reply_to_email", "bulk_email", "archive_email",
-             "delete_email", "mark_email_read",
              # Cookbook tools (LLM serving + downloads). Without these
              # entries, native function calls to e.g. list_served_models
              # are rejected as "Unknown function call" before reaching
@@ -54,9 +51,9 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "list_serve_presets", "serve_preset", "adopt_served_model",
              "list_cookbook_servers",
              # Other tools the agent reaches for that were also missing.
-             "edit_image", "trigger_research", "manage_research", "search_vault", "search_zotero",
+             "edit_image", "trigger_research", "manage_research", "search_vault", "search_knowledge", "search_zotero",
              # Generic loopback to any UI-button endpoint (cookbook,
-             # gallery, email folders, etc.) — agent uses this when
+             # gallery folders, etc.) — agent uses this when
              # there's no named tool wrapper for the action.
              "app_api"}
 

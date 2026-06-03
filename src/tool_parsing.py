@@ -168,6 +168,8 @@ _TOOL_NAME_MAP = {
     "open_research": "manage_research",
     "delete_research": "manage_research",
     "search_vault": "search_vault",
+    "search_knowledge": "search_knowledge",
+    "knowledge_graph": "search_knowledge",
     "vault_search_notes": "search_vault",
     "obsidian": "search_vault",
     "search_zotero": "search_zotero",

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -29,8 +29,8 @@ HORIZON_LABELS = {
 }
 
 HORIZON_TAGLINES = {
-    "focus": "Concrete commitments — synced to today's Obsidian daily note.",
-    "build": "Shorter-term outcomes you are building toward.",
+    "focus": "Concrete commitments — each task links to an intermediate goal.",
+    "build": "Shorter-term outcomes — each goal links to your long horizon.",
     "aim": "Directional goals for the year ahead.",
     "misc": "Tasks that do not fit the other categories.",
 }
@@ -56,8 +56,19 @@ PRIORITY_MARKERS = {
 }
 
 HORIZON_MARKER = "<!-- nobody-horizon:{horizon} -->"
-TASK_ID_RE = re.compile(r"`nobody:([a-f0-9-]{8,36})`", re.I)
+TASK_ID_RE = re.compile(r"`nobody:([^`]+)`", re.I)
+PARENT_IDS_RE = re.compile(r"`parents:([^`]+)`", re.I)
+WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 CHECKBOX_RE = re.compile(r"^\s*-\s*\[([ xX])\]\s*(.+)$")
+
+# Child horizon → parent horizon for goal linking (misc is optional / unlinked).
+PARENT_HORIZON = {
+    "focus": "build",
+    "build": "aim",
+    "aim": None,
+    "misc": None,
+}
+LINK_REQUIRED_HORIZONS = frozenset({"focus", "build"})
 
 DEFAULT_BOARD_PATH = "Nobody/Todos Board.md"
 BOARD_NOTE_TITLE = "Todos Board"
@@ -74,6 +85,7 @@ class OneThingTask:
     due_date: Optional[str] = None  # YYYY-MM-DD
     completed_at: Optional[str] = None  # YYYY-MM-DD — set when marked done
     archived: bool = False
+    parent_ids: List[str] = field(default_factory=list)
 
     def to_item(self) -> dict:
         out = {
@@ -84,6 +96,8 @@ class OneThingTask:
             "priority": self.priority,
             "archived": self.archived,
         }
+        if self.parent_ids:
+            out["parent_ids"] = list(self.parent_ids)
         if self.due_date:
             out["due_date"] = self.due_date
         if self.completed_at:
@@ -104,6 +118,7 @@ class OneThingTask:
             priority = "steady"
         due = _normalize_date(raw.get("due_date"))
         completed = _normalize_date(raw.get("completed_at"))
+        parent_ids = _normalize_parent_id_list(raw.get("parent_ids"))
         return cls(
             id=tid,
             text=text,
@@ -113,6 +128,7 @@ class OneThingTask:
             due_date=due,
             completed_at=completed,
             archived=bool(raw.get("archived")),
+            parent_ids=parent_ids,
         )
 
 
@@ -125,6 +141,133 @@ def _normalize_date(value: Any) -> Optional[str]:
         return s
     except ValueError:
         return None
+
+
+def _normalize_parent_id_list(value: Any) -> List[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.replace(";", ",").split(",")]
+    elif isinstance(value, (list, tuple, set)):
+        parts = [str(p).strip() for p in value]
+    else:
+        return []
+    out: List[str] = []
+    seen = set()
+    for part in parts:
+        if not part or part in seen:
+            continue
+        seen.add(part)
+        out.append(part)
+    return out
+
+
+def parent_horizon_for(horizon: str) -> Optional[str]:
+    return PARENT_HORIZON.get(normalize_horizon(horizon))
+
+
+def links_required_for(horizon: str) -> bool:
+    return normalize_horizon(horizon) in LINK_REQUIRED_HORIZONS
+
+
+def _resolve_task_id(tasks: List[OneThingTask], task_id: str) -> Optional[OneThingTask]:
+    prefix = (task_id or "").strip().lower()
+    if not prefix:
+        return None
+    for task in tasks:
+        if task.id.lower().startswith(prefix):
+            return task
+    return None
+
+
+def _tasks_by_id(tasks: List[OneThingTask]) -> Dict[str, OneThingTask]:
+    return {t.id.lower(): t for t in tasks}
+
+
+def normalize_parent_ids(
+    parent_ids: Any,
+    all_tasks: List[OneThingTask],
+    *,
+    child_horizon: str,
+) -> List[str]:
+    """Resolve parent ids to canonical task ids in the expected parent horizon."""
+    parent_hz = parent_horizon_for(child_horizon)
+    if not parent_hz:
+        return []
+    by_id = _tasks_by_id(all_tasks)
+    out: List[str] = []
+    seen = set()
+    for raw_id in _normalize_parent_id_list(parent_ids):
+        parent = _resolve_task_id(all_tasks, raw_id)
+        if not parent or parent.horizon != parent_hz:
+            continue
+        if parent.id in seen:
+            continue
+        seen.add(parent.id)
+        out.append(parent.id)
+    return out
+
+
+def validate_parent_links(task: OneThingTask, all_tasks: List[OneThingTask]) -> None:
+    parent_hz = parent_horizon_for(task.horizon)
+    if not parent_hz:
+        if task.parent_ids:
+            raise ValueError(f"{HORIZON_LABELS[task.horizon]} cannot link to other goals")
+        return
+
+    normalized = normalize_parent_ids(
+        task.parent_ids, all_tasks, child_horizon=task.horizon
+    )
+    if links_required_for(task.horizon) and not normalized:
+        raise ValueError(
+            f"{HORIZON_LABELS[task.horizon]} must link to at least one "
+            f"{HORIZON_LABELS[parent_hz].lower()} goal"
+        )
+
+    for pid in normalized:
+        parent = _resolve_task_id(all_tasks, pid)
+        if not parent:
+            raise ValueError("Linked parent goal not found")
+        if parent.horizon != parent_hz:
+            raise ValueError(
+                f"{HORIZON_LABELS[task.horizon]} can only link to "
+                f"{HORIZON_LABELS[parent_hz].lower()} goals"
+            )
+        if parent.id == task.id:
+            raise ValueError("A task cannot link to itself")
+
+    task.parent_ids = normalized
+
+
+def enrich_task_item(task: OneThingTask, all_tasks: List[OneThingTask]) -> dict:
+    item = task.to_item()
+    parents = []
+    for pid in task.parent_ids or []:
+        parent = _resolve_task_id(all_tasks, pid)
+        if not parent:
+            continue
+        parents.append(
+            {
+                "id": parent.id,
+                "text": parent.text,
+                "horizon": parent.horizon,
+                "label": HORIZON_LABELS.get(parent.horizon, parent.horizon),
+            }
+        )
+    item["parents"] = parents
+    item["parent_ids"] = [p["id"] for p in parents]
+    return item
+
+
+def _strip_parent_refs(tasks: List[OneThingTask], deleted_id: str) -> bool:
+    prefix = (deleted_id or "").strip().lower()
+    changed = False
+    for task in tasks:
+        before = list(task.parent_ids or [])
+        task.parent_ids = [pid for pid in before if not pid.lower().startswith(prefix)]
+        if task.parent_ids != before:
+            changed = True
+    return changed
 
 
 def normalize_horizon(value: Any) -> str:
@@ -348,6 +491,8 @@ def add_task(
     horizon: str = "focus",
     priority: str = "steady",
     due_date: Optional[str] = None,
+    parent_ids: Optional[List[str]] = None,
+    require_links: bool = True,
 ) -> OneThingTask:
     note = get_or_create_board(db, owner)
     tasks = _load_tasks(note)
@@ -357,9 +502,15 @@ def add_task(
         horizon=normalize_horizon(horizon),
         priority=normalize_priority(priority),
         due_date=_normalize_date(due_date),
+        parent_ids=_normalize_parent_id_list(parent_ids),
     )
     if not task.text:
         raise ValueError("Task text is required")
+    task.parent_ids = normalize_parent_ids(
+        task.parent_ids, tasks, child_horizon=task.horizon
+    )
+    if require_links:
+        validate_parent_links(task, tasks)
     tasks.append(task)
     _save_tasks(db, note, tasks)
     return task
@@ -375,6 +526,7 @@ def update_task(
     priority: Optional[str] = None,
     due_date: Optional[str] = None,
     done: Optional[bool] = None,
+    parent_ids: Optional[List[str]] = None,
 ) -> Optional[OneThingTask]:
     note = get_or_create_board(db, owner)
     tasks = _load_tasks(note)
@@ -386,12 +538,21 @@ def update_task(
             t.text = text.strip() or t.text
         if horizon is not None:
             t.horizon = normalize_horizon(horizon)
+            if not parent_horizon_for(t.horizon):
+                t.parent_ids = []
         if priority is not None:
             t.priority = normalize_priority(priority)
         if due_date is not None:
             t.due_date = _normalize_date(due_date)
         if done is not None:
             _apply_done_transition(t, done)
+        if parent_ids is not None:
+            t.parent_ids = _normalize_parent_id_list(parent_ids)
+        if parent_ids is not None or horizon is not None:
+            t.parent_ids = normalize_parent_ids(
+                t.parent_ids, tasks, child_horizon=t.horizon
+            )
+            validate_parent_links(t, tasks)
         tasks[i] = t
         updated = t
         break
@@ -415,6 +576,7 @@ def delete_task(db, owner: str, task_id: str) -> bool:
     new_tasks = [t for t in tasks if not t.id.lower().startswith(prefix)]
     if len(new_tasks) == len(tasks):
         return False
+    _strip_parent_refs(new_tasks, task_id)
     _save_tasks(db, note, new_tasks)
     return True
 
@@ -434,10 +596,20 @@ def board_to_dict(
             continue
         if not include_done and t.done:
             continue
-        grouped.setdefault(t.horizon, []).append(t.to_item())
+        grouped.setdefault(t.horizon, []).append(enrich_task_item(t, tasks))
     return {
         "note_id": note.id,
         "title": note.title,
+        "linking": {
+            h: {
+                "required": links_required_for(h),
+                "parent_horizon": parent_horizon_for(h),
+                "parent_label": HORIZON_LABELS[parent_horizon_for(h)]
+                if parent_horizon_for(h)
+                else None,
+            }
+            for h in HORIZONS
+        },
         "horizons": {
             h: {
                 "key": h,
@@ -465,20 +637,69 @@ def get_daily_summary(db, owner: str) -> dict:
     }
 
 
-def format_task_line(task: OneThingTask) -> str:
+def format_task_line(
+    task: OneThingTask,
+    *,
+    all_tasks: Optional[List[OneThingTask]] = None,
+) -> str:
     """Markdown checkbox line for Obsidian (Tasks-plugin friendly)."""
     mark = "x" if task.done else " "
     parts = [task.text.strip()]
+    if all_tasks and task.parent_ids:
+        by_id = _tasks_by_id(all_tasks)
+        for pid in task.parent_ids:
+            parent = by_id.get(pid.lower()) or _resolve_task_id(all_tasks, pid)
+            if parent and parent.text.strip():
+                safe = parent.text.strip().replace("]]", "]]")
+                parts.append(f"[[{safe}]]")
     if task.due_date:
         parts.append(f"📅 {task.due_date}")
     emoji = PRIORITY_MARKERS.get(task.priority, "")
     if emoji:
         parts.append(emoji)
     body = " ".join(parts)
-    return f"- [{mark}] {body} · `nobody:{task.id}`"
+    suffix = f" · `nobody:{task.id}`"
+    if task.parent_ids:
+        suffix += f" · `parents:{','.join(task.parent_ids)}`"
+    return f"- [{mark}] {body}{suffix}"
 
 
-def parse_task_line(line: str, default_horizon: str = "focus") -> Optional[OneThingTask]:
+def _parent_ids_from_wikilinks(
+    rest: str,
+    all_tasks: Optional[List[OneThingTask]],
+    *,
+    child_horizon: str,
+) -> List[str]:
+    if not all_tasks:
+        return []
+    parent_hz = parent_horizon_for(child_horizon)
+    if not parent_hz:
+        return []
+    out: List[str] = []
+    seen = set()
+    for match in WIKILINK_RE.finditer(rest or ""):
+        label = (match.group(2) or match.group(1) or "").strip()
+        target = (match.group(1) or "").strip()
+        for candidate in (label, target):
+            if not candidate:
+                continue
+            key = candidate.lower()
+            for task in all_tasks:
+                if task.horizon != parent_hz:
+                    continue
+                if task.text.strip().lower() == key and task.id not in seen:
+                    seen.add(task.id)
+                    out.append(task.id)
+                    break
+    return out
+
+
+def parse_task_line(
+    line: str,
+    default_horizon: str = "focus",
+    *,
+    all_tasks: Optional[List[OneThingTask]] = None,
+) -> Optional[OneThingTask]:
     m = CHECKBOX_RE.match(line or "")
     if not m:
         return None
@@ -489,6 +710,16 @@ def parse_task_line(line: str, default_horizon: str = "focus") -> Optional[OneTh
     if id_m:
         tid = id_m.group(1)
         rest = TASK_ID_RE.sub("", rest).strip().strip("·").strip()
+
+    parent_ids: List[str] = []
+    parent_m = PARENT_IDS_RE.search(rest)
+    if parent_m:
+        parent_ids = normalize_parent_ids(
+            parent_m.group(1).split(","),
+            all_tasks or [],
+            child_horizon=default_horizon,
+        ) or _normalize_parent_id_list(parent_m.group(1).split(","))
+        rest = PARENT_IDS_RE.sub("", rest).strip().strip("·").strip()
 
     due = None
     due_m = re.search(r"📅\s*(\d{4}-\d{2}-\d{2})", rest)
@@ -502,6 +733,12 @@ def parse_task_line(line: str, default_horizon: str = "focus") -> Optional[OneTh
             priority = p
             rest = rest.replace(emoji, "").strip()
 
+    if not parent_ids:
+        parent_ids = _parent_ids_from_wikilinks(
+            rest, all_tasks, child_horizon=default_horizon
+        )
+
+    rest = WIKILINK_RE.sub("", rest).strip().strip("·").strip()
     text = rest.strip().strip("·").strip()
     if not text:
         return None
@@ -512,6 +749,7 @@ def parse_task_line(line: str, default_horizon: str = "focus") -> Optional[OneTh
         horizon=normalize_horizon(default_horizon),
         priority=priority,
         due_date=due,
+        parent_ids=parent_ids,
     )
 
 
@@ -522,7 +760,7 @@ def format_horizon_section(horizon: str, tasks: List[OneThingTask]) -> str:
         "",
     ]
     hz_tasks = [t for t in tasks if t.horizon == horizon]
-    lines.extend(format_task_line(t) for t in hz_tasks)
+    lines.extend(format_task_line(t, all_tasks=tasks) for t in hz_tasks)
     return "\n".join(lines)
 
 
@@ -576,10 +814,15 @@ def merge_section(content: str, horizon: str, section_body: str) -> str:
     return content.rstrip() + sep + block
 
 
-def tasks_from_section(text: str, horizon: str) -> List[OneThingTask]:
+def tasks_from_section(
+    text: str,
+    horizon: str,
+    *,
+    all_tasks: Optional[List[OneThingTask]] = None,
+) -> List[OneThingTask]:
     out = []
     for line in (text or "").splitlines():
-        t = parse_task_line(line, default_horizon=horizon)
+        t = parse_task_line(line, default_horizon=horizon, all_tasks=all_tasks)
         if t:
             out.append(t)
     return out

@@ -1,7 +1,10 @@
-"""Read-only access to a local Obsidian vault directory on disk.
+"""Filesystem access to a local markdown vault directory on disk.
 
-Hybrid search: keyword/BM25, frontmatter/tags, wikilink graph, vector semantic,
-and optional Obsidian plugin indexes (Smart Connections, Local REST API, Omnisearch).
+Native capabilities (no Obsidian app required): read/write markdown, `[[wikilinks]]`
+via VaultGraph, backlinks/follow, YAML frontmatter/tags, Chroma semantic search.
+
+Optional hybrid mode merges Obsidian plugin caches (Smart Connections, Omnisearch)
+and Local REST API when the app is running — not needed for links or core search.
 """
 from __future__ import annotations
 
@@ -19,6 +22,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_DAILY_NOTES_FOLDER = "Daily Notes"
 DEFAULT_DAILY_NOTE_FORMAT = "%Y-%m-%d.md"
 DEFAULT_VAULT_PATH = os.path.expanduser("~/Documents/Vault_1/Vault_1")
+DEFAULT_VAULT_MODE = "filesystem"
+VALID_VAULT_MODES = frozenset({"filesystem", "hybrid"})
 READABLE_EXTENSIONS = {".md", ".markdown", ".txt"}
 SKIP_DIR_NAMES = {".obsidian", ".git", ".trash", "__pycache__"}
 
@@ -174,6 +179,29 @@ def resolve_vault_config(owner: str = "") -> Optional[VaultConfig]:
         daily_note_format=(cfg.get("daily_note_format") or DEFAULT_DAILY_NOTE_FORMAT).strip()
         or DEFAULT_DAILY_NOTE_FORMAT,
     )
+
+
+def _load_vault_user_cfg(owner: str = "") -> Dict[str, Any]:
+    if not owner:
+        return {}
+    try:
+        from routes.prefs_routes import _load_for_user
+
+        raw = (_load_for_user(owner) or {}).get("obsidian_vault") or {}
+        return dict(raw) if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def resolve_vault_mode(owner: str = "") -> str:
+    """Return vault integration mode: filesystem (default) or hybrid (Obsidian plugins)."""
+    mode = str(_load_vault_user_cfg(owner).get("vault_mode") or DEFAULT_VAULT_MODE).strip().lower()
+    return mode if mode in VALID_VAULT_MODES else DEFAULT_VAULT_MODE
+
+
+def vault_plugins_enabled(owner: str = "") -> bool:
+    """True when hybrid mode may call Obsidian plugin indexes / Local REST API."""
+    return resolve_vault_mode(owner) == "hybrid"
 
 
 def _resolve_within_vault(config: VaultConfig, relative: str = "") -> Tuple[Optional[Path], Optional[str]]:
@@ -459,10 +487,12 @@ def search_vault_notes(
     limit: int = 15,
     owner: str = "",
     use_semantic: bool = True,
-    use_plugins: bool = True,
+    use_plugins: Optional[bool] = None,
     expand_links: bool = True,
 ) -> Dict[str, Any]:
-    """Hybrid vault search: keyword, tags/frontmatter, semantic, plugins, wikilinks."""
+    """Vault search: keyword, tags/frontmatter, semantic, wikilink graph; plugins optional."""
+    if use_plugins is None:
+        use_plugins = vault_plugins_enabled(owner)
     raw_q = (query or "").strip()
     if not raw_q and not folder:
         return {
@@ -662,7 +692,12 @@ def test_vault_connection(config: VaultConfig) -> Tuple[bool, str, Optional[dict
     if sample:
         msg += f" — top folders: {sample}"
 
-    info: Dict[str, Any] = {"note_count": note_count, "folders": folder_names[:20]}
+    info: Dict[str, Any] = {
+        "note_count": note_count,
+        "folders": folder_names[:20],
+        "wikilinks": True,
+        "native_search": True,
+    }
     try:
         from src.vault_plugins import detect_obsidian_plugins
 
@@ -687,8 +722,8 @@ def execute_search_vault_tool(args: dict, owner: str = "") -> Dict[str, Any]:
     if not config:
         return {
             "output": (
-                "Obsidian vault is not configured or the path does not exist. "
-                "Ask the user to set the vault path under Settings → Search → Obsidian Vault "
+                "Markdown vault is not configured or the path does not exist. "
+                "Ask the user to set the vault folder under Settings → Search → Vault "
                 f"(default: {DEFAULT_VAULT_PATH})."
             ),
             "exit_code": 1,
@@ -741,6 +776,11 @@ def execute_search_vault_tool(args: dict, owner: str = "") -> Dict[str, Any]:
             limit = int(args.get("limit", 15))
         except (TypeError, ValueError):
             limit = 15
+        plugins_arg = args.get("plugins")
+        if plugins_arg is None:
+            use_plugins: Optional[bool] = None
+        else:
+            use_plugins = str(plugins_arg).lower() != "false"
         result = search_vault_notes(
             config,
             query=(args.get("query") or args.get("q") or "").strip(),
@@ -748,7 +788,7 @@ def execute_search_vault_tool(args: dict, owner: str = "") -> Dict[str, Any]:
             limit=limit,
             owner=owner,
             use_semantic=str(args.get("semantic", "true")).lower() != "false",
-            use_plugins=str(args.get("plugins", "true")).lower() != "false",
+            use_plugins=use_plugins,
         )
         if result.get("exit_code") == 0 and result.get("output"):
             result = {**result, "output": append_vault_sources_marker(result["output"])}
@@ -862,17 +902,16 @@ def execute_search_vault_tool(args: dict, owner: str = "") -> Dict[str, Any]:
 
 
 def _execute_one_thing_actions(action: str, args: dict, owner: str) -> Optional[Dict[str, Any]]:
-    """One Thing board + daily note task actions (Nobody ↔ Obsidian sync)."""
+    """One Thing task actions — DB source of truth; knowledge graph indexes links."""
     from core.database import SessionLocal
+    from src.knowledge_sync import after_task_change, force_rebuild
     from src.one_thing import (
         add_task,
         format_agent_list,
         get_daily_summary,
         list_tasks,
         toggle_task,
-        update_task,
     )
-    from src.vault_one_thing_sync import sync_one_thing_to_vault, push_one_thing_to_vault
 
     _ALIASES = {
         "get_daily_note": "get_daily",
@@ -890,24 +929,22 @@ def _execute_one_thing_actions(action: str, args: dict, owner: str) -> Optional[
     try:
         if action == "get_daily":
             summary = get_daily_summary(db, owner)
-            sync = sync_one_thing_to_vault(owner)
             lines = [
-                f"Daily note: `{summary.get('daily_note_path') or '(vault not configured)'}`",
                 f"Date: {summary.get('date')}",
-                f"Open One Thing (focus) tasks: {summary.get('open_count', 0)}",
+                f"Open focus tasks: {summary.get('open_count', 0)}",
                 "",
             ]
             focus = summary.get("focus_tasks") or []
             if focus:
-                lines.append("## One Thing — This Week")
+                lines.append("## Immediate Tasks")
                 for item in focus:
                     mark = "x" if item.get("done") else " "
                     due = f" 📅 {item['due_date']}" if item.get("due_date") else ""
-                    lines.append(f"- [{mark}] {item.get('text', '')}{due}")
+                    tid = item.get("id") or ""
+                    anchor = f"[{item.get('text', '')}](#task-{tid})" if tid else item.get("text", "")
+                    lines.append(f"- [{mark}] {anchor}{due}")
             else:
                 lines.append("_No open focus tasks._")
-            if sync.get("synced"):
-                lines.append(f"\nVault synced → `{sync.get('daily_note_path')}`")
             return {"output": "\n".join(lines), "exit_code": 0}
 
         if action == "list_tasks":
@@ -928,11 +965,11 @@ def _execute_one_thing_actions(action: str, args: dict, owner: str) -> Optional[
                 priority=args.get("priority") or "steady",
                 due_date=args.get("due_date"),
             )
-            push_one_thing_to_vault(owner)
+            after_task_change(owner)
             return {
                 "output": (
-                    f"Added One Thing task `{task.id[:8]}` ({task.horizon}, {task.priority}): "
-                    f"{task.text}"
+                    f"Added task `{task.id[:8]}` ({task.horizon}, {task.priority}): "
+                    f"[{task.text}](#task-{task.id})"
                 ),
                 "exit_code": 0,
             }
@@ -944,18 +981,18 @@ def _execute_one_thing_actions(action: str, args: dict, owner: str) -> Optional[
             task = toggle_task(db, owner, tid)
             if not task:
                 return {"output": f"Task not found: {tid}", "exit_code": 1}
-            push_one_thing_to_vault(owner)
+            after_task_change(owner)
             state = "done" if task.done else "open"
             return {"output": f"Task `{task.id[:8]}` marked {state}: {task.text}", "exit_code": 0}
 
         if action == "sync_tasks":
-            sync = sync_one_thing_to_vault(owner)
-            if not sync.get("synced"):
-                return {"output": sync.get("error") or "Sync failed", "exit_code": 1}
+            stats = force_rebuild(owner)
+            if not stats.get("ok"):
+                return {"output": stats.get("error") or "Rebuild failed", "exit_code": 1}
             return {
                 "output": (
-                    f"Synced {sync.get('task_count', 0)} tasks → "
-                    f"board `{sync.get('board_path')}`, daily `{sync.get('daily_note_path')}`"
+                    f"Knowledge graph rebuilt — {stats.get('nodes', 0)} nodes, "
+                    f"{stats.get('edges', 0)} edges."
                 ),
                 "exit_code": 0,
             }
@@ -969,8 +1006,8 @@ def search_vault_for_chat(query: str, owner: str = "", limit: int = 5) -> Tuple[
     config = resolve_vault_config(owner)
     if not config:
         return (
-            "Obsidian vault is not configured or the folder was not found. "
-            "Set the vault path under Settings → Search → Obsidian Vault.",
+            "Markdown vault is not configured or the folder was not found. "
+            "Set the vault folder under Settings → Search → Vault.",
             [],
         )
     q = (query or "").strip()
