@@ -1,7 +1,7 @@
 // compare/stream.js — SSE streaming to panes
 import state from './state.js';
 import { addFinishBadge } from './vote.js';
-import { getModelCost } from '../chatRenderer.js';
+import { getModelCost, inferSourcesDisplayType } from '../chatRenderer.js';
 import markdownModule from '../markdown.js';
 import spinnerModule from '../spinner.js';
 import uiModule from '../ui.js';
@@ -293,11 +293,15 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
           } else if (json.type === 'research_sources' || json.type === 'web_sources') {
             const sources = json.data || [];
             if (sources.length > 0) {
-              const label = json.type === 'research_sources' ? 'Research' : 'Web';
+              const label = json.type === 'research_sources'
+                ? 'Research'
+                : ({ vault: 'Vault', zotero: 'Zotero', web: 'Web', mixed: '' }[
+                    inferSourcesDisplayType(sources, json.type)] || 'Web');
               const box = document.createElement('div');
               box.className = 'compare-sources-box';
-              box.innerHTML = '<span class="sources-label">' + sources.length + ' ' + label + ' sources</span>';
-              box.title = sources.map(s => s.title || s.url).join('\n');
+              const suffix = label ? label + ' sources' : 'Sources';
+              box.innerHTML = '<span class="sources-label">' + sources.length + ' ' + suffix + '</span>';
+              box.title = sources.map(s => s.title || s.path || s.url).join('\n');
               // Replace spinner with sources + new spinner
               aiBody.innerHTML = '';
               aiBody.appendChild(box);

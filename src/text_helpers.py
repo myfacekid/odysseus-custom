@@ -15,18 +15,18 @@ from __future__ import annotations
 
 import re
 
-# Closed reasoning blocks. Multi-pass loop in `strip_think` handles nested
-# `<think><think>...</think></think>` patterns some models emit.
-_THINK_CLOSED_RE = re.compile(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>\s*", re.IGNORECASE)
+# Tag names models use for chain-of-thought: , <thinking>,  (Gemma).
+_THINK = r"(?:think(?:ing)?|thought)"
+# Closed reasoning blocks. Multi-pass loop in `strip_think` handles nested blocks.
+_THINK_CLOSED_RE = re.compile(rf"<{_THINK}>[\s\S]*?</{_THINK}>\s*", re.IGNORECASE)
 # Orphan opening or closing tags that survive after the closed-pass.
-_THINK_TAG_RE = re.compile(r"</?think(?:ing)?[^>]*>\s*", re.IGNORECASE)
+_THINK_TAG_RE = re.compile(rf"</?{_THINK}[^>]*>\s*", re.IGNORECASE)
 # Dangling opener anywhere in the response with no closer — strip everything
-# from `<think>` to the end of string.
-_THINK_OPEN_RE = re.compile(r"<think(?:ing)?>[\s\S]*$", re.IGNORECASE)
+# from the opening tag to the end of string.
+_THINK_OPEN_RE = re.compile(rf"<{_THINK}>[\s\S]*$", re.IGNORECASE)
 # Streaming models occasionally emit `<thinking time="0.42">`-style attributes.
-# Normalize to a plain `<think>` so the regexes above catch them.
-_THINK_ATTR_RE = re.compile(r"<think(?:ing)?\s+[^>]*>", re.IGNORECASE)
-_THINK_ATTR_CLOSE_RE = re.compile(r"</think(?:ing)?\s+[^>]*>", re.IGNORECASE)
+_THINK_ATTR_RE = re.compile(rf"<{_THINK}\s+[^>]*>", re.IGNORECASE)
+_THINK_ATTR_CLOSE_RE = re.compile(rf"</{_THINK}\s+[^>]*>", re.IGNORECASE)
 # Qwen and a few other models prefix the response with a "Thinking Process:"
 # block before the real answer.
 _QWEN_THINKING_RE = re.compile(

@@ -14,6 +14,7 @@ from core.database import Session as DBSession, ModelEndpoint
 from src.llm_core import normalize_model_id
 from src.endpoint_resolver import normalize_base
 from src.context_compactor import maybe_compact, trim_for_context
+from src.text_helpers import _THINK
 from src.auth_helpers import get_current_user
 from src.prompt_security import untrusted_context_message
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
@@ -604,7 +605,7 @@ def _normalize_thinking(text: str) -> str:
     # Handle garbled <think> tags: reasoning text followed by <think> as separator
     # e.g. "The user said...I should respond.\n<think>Hey! What's up?"
     garbled = re.match(
-        r'^([\s\S]+?)\n*<think(?:ing)?>\s*([\s\S]*?)(?:</think(?:ing)?>)?\s*$',
+        rf'^([\s\S]+?)\n*<{_THINK}>\s*([\s\S]*?)(?:</{_THINK}>)?\s*$',
         text, re.IGNORECASE
     )
     if garbled:
@@ -622,7 +623,7 @@ def _normalize_thinking(text: str) -> str:
             stripped_before = thinking_prefix_re.sub('', stripped_before)
             return '<think>' + stripped_before + '</think>\n' + after
 
-    if '<think' in text.lower():
+    if re.search(rf'</?{_THINK}\b', text, re.IGNORECASE):
         return text  # already has proper think tags
 
     # Qwen3.5: "Thinking Process:" or "Thinking:" prefix
@@ -707,12 +708,12 @@ def _extract_thinking_meta(text: str) -> dict | None:
         return None
 
     # Check for <think> tags (native or injected)
-    time_match = re.search(r'<think(?:ing)?\s+time="([\d.]+)"', text)
+    time_match = re.search(rf'<{_THINK}\s+time="([\d.]+)"', text)
     think_time = time_match.group(1) if time_match else None
     # Strip time attr for parsing
-    clean = re.sub(r'<think(?:ing)?\s+time="[\d.]+"', '<think', text)
+    clean = re.sub(rf'<{_THINK}\s+time="[\d.]+"', '<think', text)
 
-    think_match = re.match(r'^[\s]*<think(?:ing)?>([\s\S]*?)</think(?:ing)?>\s*([\s\S]*)', clean, re.IGNORECASE)
+    think_match = re.match(rf'^[\s]*<{_THINK}>([\s\S]*?)</{_THINK}>\s*([\s\S]*)', clean, re.IGNORECASE)
     if think_match:
         thinking = think_match.group(1).strip()
         reply = think_match.group(2).strip()
@@ -728,7 +729,7 @@ def _extract_thinking_meta(text: str) -> dict | None:
     # Detect Thinking Process: or Gemma-style reasoning
     normalized = _normalize_thinking(text)
     if '<think>' in normalized:
-        think_match2 = re.match(r'^[\s]*<think(?:ing)?>([\s\S]*?)</think(?:ing)?>\s*([\s\S]*)', normalized, re.IGNORECASE)
+        think_match2 = re.match(rf'^[\s]*<{_THINK}>([\s\S]*?)</{_THINK}>\s*([\s\S]*)', normalized, re.IGNORECASE)
         if think_match2:
             thinking = think_match2.group(1).strip()
             reply = think_match2.group(2).strip()

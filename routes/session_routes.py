@@ -12,6 +12,7 @@ from core.models import ChatMessage
 from src.request_models import SessionResponse
 from core.database import Session as DbSession, SessionLocal, Document, GalleryImage
 from src.auth_helpers import get_current_user, effective_user
+from src.text_helpers import _THINK
 
 
 def _sanitize_export_filename(name: str) -> str:
@@ -1075,7 +1076,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             text = raw.strip()
             # Reasoning models emit <think>…</think> (often containing { } that
             # would derail the brace scan) before the answer — drop it first.
-            text = re.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', text, flags=re.I).strip()
+            text = re.sub(rf'<{_THINK}>[\s\S]*?</{_THINK}>', '', text, flags=re.I).strip()
 
             def _loads_lenient(s):
                 """Parse JSON, retrying once with trailing commas stripped."""

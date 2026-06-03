@@ -575,6 +575,27 @@ def search_vault_notes(
     return {"output": "\n".join(lines), "exit_code": 0}
 
 
+def vault_ui_sources_from_output(output: str) -> List[dict]:
+    """Parse ``- `path``` lines from vault search output for UI source chips."""
+    sources: List[dict] = []
+    for line in (output or "").splitlines():
+        m = re.match(r"^- `([^`]+)`", line.strip())
+        if m:
+            rel = m.group(1)
+            sources.append({"path": rel, "title": Path(rel).name, "source": "vault"})
+    return sources
+
+
+def append_vault_sources_marker(output: str) -> str:
+    """Append hidden SOURCES marker so the agent stream can render vault chips."""
+    sources = vault_ui_sources_from_output(output)
+    if not sources:
+        return output
+    import json
+
+    return output + "\n\n<!-- SOURCES:" + json.dumps(sources) + " -->"
+
+
 def search_vault_backlinks(
     config: VaultConfig,
     path: str,
@@ -691,6 +712,15 @@ def execute_search_vault_tool(args: dict, owner: str = "") -> Dict[str, Any]:
         "traverse": "follow",
         "graph": "follow",
         "daily": "append_daily",
+        "get_daily": "get_daily",
+        "get_daily_note": "get_daily",
+        "list_tasks": "list_tasks",
+        "list_todos": "list_tasks",
+        "add_task": "add_task",
+        "add_todo": "add_task",
+        "toggle_task": "toggle_task",
+        "toggle_todo": "toggle_task",
+        "sync_tasks": "sync_tasks",
     }
     action = _ALIASES.get(action, action)
 
@@ -711,7 +741,7 @@ def execute_search_vault_tool(args: dict, owner: str = "") -> Dict[str, Any]:
             limit = int(args.get("limit", 15))
         except (TypeError, ValueError):
             limit = 15
-        return search_vault_notes(
+        result = search_vault_notes(
             config,
             query=(args.get("query") or args.get("q") or "").strip(),
             folder=(args.get("folder") or args.get("path") or "").strip(),
@@ -720,6 +750,9 @@ def execute_search_vault_tool(args: dict, owner: str = "") -> Dict[str, Any]:
             use_semantic=str(args.get("semantic", "true")).lower() != "false",
             use_plugins=str(args.get("plugins", "true")).lower() != "false",
         )
+        if result.get("exit_code") == 0 and result.get("output"):
+            result = {**result, "output": append_vault_sources_marker(result["output"])}
+        return result
 
     if action in ("backlinks", "links"):
         path = (args.get("path") or args.get("note") or args.get("file") or "").strip()
@@ -814,13 +847,121 @@ def execute_search_vault_tool(args: dict, owner: str = "") -> Dict[str, Any]:
             owner=owner,
         )
 
+    one_thing_result = _execute_one_thing_actions(action, args, owner)
+    if one_thing_result is not None:
+        return one_thing_result
+
     return {
         "output": (
             "Unknown action. Use list, read, search, backlinks, follow, "
-            "create, append, append_daily, patch, or link."
+            "create, append, append_daily, patch, link, "
+            "get_daily, list_tasks, add_task, toggle_task."
         ),
         "exit_code": 1,
     }
+
+
+def _execute_one_thing_actions(action: str, args: dict, owner: str) -> Optional[Dict[str, Any]]:
+    """One Thing board + daily note task actions (Nobody ↔ Obsidian sync)."""
+    from core.database import SessionLocal
+    from src.one_thing import (
+        add_task,
+        format_agent_list,
+        get_daily_summary,
+        list_tasks,
+        toggle_task,
+        update_task,
+    )
+    from src.vault_one_thing_sync import sync_one_thing_to_vault, push_one_thing_to_vault
+
+    _ALIASES = {
+        "get_daily_note": "get_daily",
+        "daily": "get_daily",
+        "list_todos": "list_tasks",
+        "list_one_thing": "list_tasks",
+        "add_todo": "add_task",
+        "toggle_todo": "toggle_task",
+    }
+    action = _ALIASES.get(action, action)
+    if action not in ("get_daily", "list_tasks", "add_task", "toggle_task", "sync_tasks"):
+        return None
+
+    db = SessionLocal()
+    try:
+        if action == "get_daily":
+            summary = get_daily_summary(db, owner)
+            sync = sync_one_thing_to_vault(owner)
+            lines = [
+                f"Daily note: `{summary.get('daily_note_path') or '(vault not configured)'}`",
+                f"Date: {summary.get('date')}",
+                f"Open One Thing (focus) tasks: {summary.get('open_count', 0)}",
+                "",
+            ]
+            focus = summary.get("focus_tasks") or []
+            if focus:
+                lines.append("## One Thing — This Week")
+                for item in focus:
+                    mark = "x" if item.get("done") else " "
+                    due = f" 📅 {item['due_date']}" if item.get("due_date") else ""
+                    lines.append(f"- [{mark}] {item.get('text', '')}{due}")
+            else:
+                lines.append("_No open focus tasks._")
+            if sync.get("synced"):
+                lines.append(f"\nVault synced → `{sync.get('daily_note_path')}`")
+            return {"output": "\n".join(lines), "exit_code": 0}
+
+        if action == "list_tasks":
+            horizon = (args.get("horizon") or args.get("bucket") or "").strip() or None
+            include_done = str(args.get("include_done", "false")).lower() in ("1", "true", "yes")
+            tasks = list_tasks(db, owner, horizon=horizon, include_done=include_done)
+            return {"output": format_agent_list(tasks), "exit_code": 0}
+
+        if action == "add_task":
+            text = (args.get("text") or args.get("content") or args.get("title") or "").strip()
+            if not text:
+                return {"output": "text is required for add_task", "exit_code": 1}
+            task = add_task(
+                db,
+                owner,
+                text,
+                horizon=args.get("horizon") or "focus",
+                priority=args.get("priority") or "steady",
+                due_date=args.get("due_date"),
+            )
+            push_one_thing_to_vault(owner)
+            return {
+                "output": (
+                    f"Added One Thing task `{task.id[:8]}` ({task.horizon}, {task.priority}): "
+                    f"{task.text}"
+                ),
+                "exit_code": 0,
+            }
+
+        if action == "toggle_task":
+            tid = (args.get("id") or args.get("task_id") or "").strip()
+            if not tid:
+                return {"output": "id is required for toggle_task", "exit_code": 1}
+            task = toggle_task(db, owner, tid)
+            if not task:
+                return {"output": f"Task not found: {tid}", "exit_code": 1}
+            push_one_thing_to_vault(owner)
+            state = "done" if task.done else "open"
+            return {"output": f"Task `{task.id[:8]}` marked {state}: {task.text}", "exit_code": 0}
+
+        if action == "sync_tasks":
+            sync = sync_one_thing_to_vault(owner)
+            if not sync.get("synced"):
+                return {"output": sync.get("error") or "Sync failed", "exit_code": 1}
+            return {
+                "output": (
+                    f"Synced {sync.get('task_count', 0)} tasks → "
+                    f"board `{sync.get('board_path')}`, daily `{sync.get('daily_note_path')}`"
+                ),
+                "exit_code": 0,
+            }
+    finally:
+        db.close()
+    return None
 
 
 def search_vault_for_chat(query: str, owner: str = "", limit: int = 5) -> Tuple[str, List[dict]]:
@@ -840,11 +981,7 @@ def search_vault_for_chat(query: str, owner: str = "", limit: int = 5) -> Tuple[
     search_q = extract_vault_search_query(q) or q
     result = search_vault_notes(config, query=search_q, limit=limit, owner=owner)
     output = result.get("output") or result.get("error") or ""
-    sources: List[dict] = []
-    for line in output.splitlines():
-        m = re.match(r"^- `([^`]+)`", line.strip())
-        if m:
-            sources.append({"path": m.group(1), "title": Path(m.group(1)).name, "source": "vault"})
+    sources = vault_ui_sources_from_output(output)
 
     # Include short excerpts from top hits so local models see actual note content.
     excerpt_parts: List[str] = []

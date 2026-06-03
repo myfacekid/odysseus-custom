@@ -7,12 +7,14 @@ import pytest
 
 from src.obsidian_vault import (
     VaultConfig,
+    append_vault_sources_marker,
     execute_search_vault_tool,
     extract_vault_search_query,
     list_vault,
     read_vault_note,
     resolve_vault_config,
     search_vault_notes,
+    vault_ui_sources_from_output,
     _resolve_within_vault,
 )
 
@@ -82,6 +84,16 @@ def test_execute_tool_not_configured(monkeypatch):
     out = execute_search_vault_tool({"action": "list"}, owner="user")
     assert out["exit_code"] == 1
     assert "not configured" in out["output"].lower()
+
+
+def test_vault_ui_sources_from_output():
+    output = "Vault search — scope: entire vault\n\n- `Epistasis and Influenza.md` (keyword)"
+    sources = vault_ui_sources_from_output(output)
+    assert len(sources) == 1
+    assert sources[0]["source"] == "vault"
+    assert sources[0]["path"] == "Epistasis and Influenza.md"
+    marked = append_vault_sources_marker(output)
+    assert "<!-- SOURCES:" in marked
 
 
 def test_default_vault_path_exists():

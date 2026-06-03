@@ -1,6 +1,5 @@
 /**
- * Notes Module — Google Keep-style notes and todos.
- * Renders as a sidebar panel (like document editor), not a modal.
+ * Todos Module — Immediate Tasks + Miscellaneous, synced to Obsidian vault.
  */
 
 import uiModule from './ui.js';
@@ -42,7 +41,32 @@ const REMINDER_ACTIVE_HIGHLIGHT_KEY = 'odysseus-notes-reminder-active-highlight'
 // Timestamp of the last time the user opened the notes panel — used to gate
 // the rail "fired" badge so old reminders don't re-fire on every page reload.
 const REMINDER_DISMISSED_AT_KEY = 'odysseus-notes-reminder-dismissed-at';
-const NOTES_FIRST_OPEN_HINT_KEY = 'odysseus-notes-first-open-hint-v1';
+const NOTES_FIRST_OPEN_HINT_KEY = 'odysseus-todos-first-open-hint-v1';
+
+const _TODOS_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><rect x="3" y="5" width="6" height="6" rx="1"/><line x1="13" y1="8" x2="21" y2="8"/><rect x="3" y="13" width="6" height="6" rx="1"/><line x1="13" y1="16" x2="21" y2="16"/></svg>';
+
+const _ONE_THING_HORIZON_CLASS = {
+  focus: 'one-thing-horizon-focus',
+  build: 'one-thing-horizon-build',
+  aim: 'one-thing-horizon-aim',
+  misc: 'one-thing-horizon-misc',
+};
+
+const _TODO_HORIZON_CHIPS = [
+  { key: 'focus', label: 'Immediate Tasks' },
+  { key: 'build', label: 'Intermediate Goals' },
+  { key: 'aim', label: 'Long Horizon' },
+  { key: 'misc', label: 'Miscellaneous' },
+];
+const _ONE_THING_PRIORITY_CLASS = {
+  critical: 'one-thing-priority-critical',
+  elevated: 'one-thing-priority-elevated',
+  steady: 'one-thing-priority-steady',
+};
+
+let _oneThingBoard = null;
+let _oneThingMeta = null;
+let _oneThingHorizon = 'focus';
 
 function _forceCloseNotesPanel() {
   _open = false;
@@ -80,7 +104,7 @@ function _showNotesFirstOpenHint(pane) {
   hint.id = 'notes-first-open-hint';
   hint.className = 'tour-hint';
   hint.innerHTML = `
-    <div class="tour-hint-text"><b>Notes</b> is your basic todo list, and also where reminders are managed.</div>
+    <div class="tour-hint-text"><b>Todos</b> tracks Immediate Tasks, Intermediate Goals, Long Horizon, and Miscellaneous — synced to your Obsidian vault.</div>
     <button type="button" class="tour-hint-dismiss">OK</button>
   `;
   document.body.appendChild(hint);
@@ -1116,7 +1140,7 @@ export function openPanel() {
   pane.innerHTML = `
     <div class="notes-mobile-grabber" id="notes-mobile-grabber" aria-hidden="true"></div>
     <div class="notes-pane-header">
-      <h4 class="notes-pane-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>Notes</h4>
+      <h4 class="notes-pane-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>Todos</h4>
       <span style="flex:1"></span>
       <button id="notes-archive-toggle" class="doc-action-icon-btn notes-header-text-btn" title="View archive" style="opacity:0.8;gap:5px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 002 2h12a2 2 0 002-2V8"/><path d="M10 12h4"/></svg>
@@ -1450,81 +1474,450 @@ async function _clearPastReminders() {
   uiModule.showToast?.(`Cleared ${targets.length} past reminder${targets.length === 1 ? '' : 's'}`);
 }
 
+async function _fetchOneThingBoard() {
+  try {
+    const res = await fetch(`${API_BASE}/api/one-thing?include_done=true`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('fetch failed');
+    _oneThingBoard = await res.json();
+    return _oneThingBoard;
+  } catch (e) {
+    console.warn('One Thing board load failed', e);
+    _oneThingBoard = null;
+    return null;
+  }
+}
+
+async function _fetchOneThingMeta() {
+  if (_oneThingMeta) return _oneThingMeta;
+  try {
+    const res = await fetch(`${API_BASE}/api/one-thing/meta`, { credentials: 'same-origin' });
+    if (res.ok) _oneThingMeta = await res.json();
+  } catch {}
+  return _oneThingMeta;
+}
+
+function _oneThingOpenCount() {
+  if (!_oneThingBoard?.horizons) return 0;
+  let n = 0;
+  for (const key of ['focus', 'build', 'aim']) {
+    n += (_oneThingBoard.horizons[key]?.tasks || []).filter(t => !t.done).length;
+  }
+  return n;
+}
+
+function _oneThingPriorityLabel(key) {
+  const labels = { critical: 'Critical', elevated: 'Elevated', steady: 'Steady' };
+  return labels[key] || 'Steady';
+}
+
+const _ONE_THING_DATE_WD = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+
+function _oneThingYmd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function _oneThingTodayYmd() { return _oneThingYmd(new Date()); }
+
+function _oneThingDueLabel(ymd) {
+  if (!ymd) return 'Due date';
+  const d = new Date(`${ymd}T12:00:00`);
+  if (isNaN(d.getTime())) return 'Due date';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function _oneThingMonthTitle(d) {
+  return d.toLocaleDateString([], { month: 'long', year: 'numeric' });
+}
+
+function _oneThingDateGridHtml(viewDate, selectedYmd) {
+  const today = _oneThingTodayYmd();
+  const y = viewDate.getFullYear();
+  const m = viewDate.getMonth();
+  const first = new Date(y, m, 1);
+  const dow = (first.getDay() + 6) % 7;
+  const gs = new Date(y, m, 1 - dow);
+  let h = '<div class="cal-week-headers">';
+  for (const wd of _ONE_THING_DATE_WD) h += `<div class="cal-weekday">${wd}</div>`;
+  h += '</div>';
+  for (let row = 0; row < 6; row++) {
+    h += '<div class="cal-week-row one-thing-date-row">';
+    for (let col = 0; col < 7; col++) {
+      const i = row * 7 + col;
+      const cd = new Date(gs);
+      cd.setDate(gs.getDate() + i);
+      const d = _oneThingYmd(cd);
+      const isOther = cd.getMonth() !== m;
+      let cls = 'cal-day one-thing-date-day';
+      if (isOther) cls += ' cal-other';
+      if (d === today) cls += ' cal-today';
+      if (d === selectedYmd) cls += ' cal-selected';
+      h += `<button type="button" class="${cls}" data-date="${d}"><span class="cal-day-num">${cd.getDate()}</span></button>`;
+    }
+    h += '</div>';
+  }
+  return h;
+}
+
+function _syncOneThingDueTrigger(trigger, hiddenInput) {
+  if (!trigger) return;
+  const v = hiddenInput?.value || '';
+  trigger.textContent = _oneThingDueLabel(v);
+  trigger.classList.toggle('has-date', !!v);
+  trigger.classList.toggle('is-empty', !v);
+}
+
+function _closeOneThingDatePopover() {
+  document.querySelector('.one-thing-date-popover')?.remove();
+  document.removeEventListener('keydown', _oneThingDatePopoverEsc);
+  document.removeEventListener('mousedown', _oneThingDatePopoverOutside, true);
+}
+
+function _oneThingDatePopoverEsc(e) {
+  if (e.key === 'Escape') _closeOneThingDatePopover();
+}
+
+function _oneThingDatePopoverOutside(e) {
+  const pop = document.querySelector('.one-thing-date-popover');
+  if (!pop || pop.contains(e.target) || e.target.closest('.one-thing-date-trigger, .one-thing-due')) return;
+  _closeOneThingDatePopover();
+}
+
+function _positionOneThingDatePopover(pop, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const pw = pop.offsetWidth || 260;
+  const ph = pop.offsetHeight || 280;
+  let top = rect.bottom + 6;
+  let left = rect.left;
+  if (top + ph > vh - 8) top = Math.max(8, rect.top - ph - 6);
+  if (left + pw > vw - 8) left = Math.max(8, vw - pw - 8);
+  if (left < 8) left = 8;
+  pop.style.top = `${top}px`;
+  pop.style.left = `${left}px`;
+}
+
+function _showOneThingDatePopover(anchor, { value = '', onPick, onClear } = {}) {
+  if (!anchor) return;
+  _closeOneThingDatePopover();
+  let viewDate = value ? new Date(`${value}T12:00:00`) : new Date();
+  if (isNaN(viewDate.getTime())) viewDate = new Date();
+  let selected = value || '';
+
+  const pop = document.createElement('div');
+  pop.className = 'one-thing-date-popover';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Pick due date');
+
+  const paint = () => {
+    pop.innerHTML = `
+      <div class="one-thing-date-popover-head">
+        <button type="button" class="cal-nav one-thing-date-prev" aria-label="Previous month">‹</button>
+        <span class="cal-title one-thing-date-title">${_esc(_oneThingMonthTitle(viewDate))}</span>
+        <button type="button" class="cal-nav one-thing-date-next" aria-label="Next month">›</button>
+      </div>
+      <div class="cal-grid one-thing-date-grid">${_oneThingDateGridHtml(viewDate, selected)}</div>
+      <div class="one-thing-date-popover-foot">
+        <button type="button" class="cal-nav one-thing-date-today">Today</button>
+        ${selected ? '<button type="button" class="cal-nav one-thing-date-clear">Clear</button>' : ''}
+      </div>`;
+
+    pop.querySelector('.one-thing-date-prev')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1);
+      paint();
+    });
+    pop.querySelector('.one-thing-date-next')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
+      paint();
+    });
+    pop.querySelector('.one-thing-date-today')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selected = _oneThingTodayYmd();
+      onPick?.(selected);
+      _closeOneThingDatePopover();
+    });
+    pop.querySelector('.one-thing-date-clear')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selected = '';
+      onClear?.();
+      _closeOneThingDatePopover();
+    });
+    pop.querySelectorAll('.one-thing-date-day[data-date]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selected = btn.dataset.date || '';
+        onPick?.(selected);
+        _closeOneThingDatePopover();
+      });
+    });
+  };
+
+  document.body.appendChild(pop);
+  paint();
+  requestAnimationFrame(() => _positionOneThingDatePopover(pop, anchor));
+  document.addEventListener('keydown', _oneThingDatePopoverEsc);
+  setTimeout(() => document.addEventListener('mousedown', _oneThingDatePopoverOutside, true), 0);
+}
+
+async function _patchOneThingDue(taskId, dueDate) {
+  const res = await fetch(`${API_BASE}/api/one-thing/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ due_date: dueDate || null }),
+  });
+  if (!res.ok) throw new Error('update failed');
+}
+
+let _oneThingRenderToken = 0;
+
+async function _toggleOneThingTask(taskId, body, markBtn) {
+  if (!taskId || !markBtn || markBtn.disabled) return;
+  const row = markBtn.closest('.one-thing-row');
+  const wasDone = row?.classList.contains('done');
+  const nextDone = !wasDone;
+
+  row?.classList.toggle('done', nextDone);
+  const box = markBtn.querySelector('.one-thing-mark-box');
+  if (box) box.textContent = nextDone ? '[x]' : '[ ]';
+  markBtn.setAttribute('aria-label', nextDone ? 'Mark not done' : 'Mark done');
+  row?.querySelector('.one-thing-row-title')?.classList.toggle('is-done', nextDone);
+  markBtn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/one-thing/tasks/${encodeURIComponent(taskId)}/toggle`, {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'toggle failed');
+    const done = !!data.task?.done;
+    row?.classList.toggle('done', done);
+    if (box) box.textContent = done ? '[x]' : '[ ]';
+    markBtn.setAttribute('aria-label', done ? 'Mark not done' : 'Mark done');
+    row?.querySelector('.one-thing-row-title')?.classList.toggle('is-done', done);
+    _oneThingBoard = null;
+    _renderLabels(body);
+  } catch {
+    row?.classList.toggle('done', wasDone);
+    if (box) box.textContent = wasDone ? '[x]' : '[ ]';
+    markBtn.setAttribute('aria-label', wasDone ? 'Mark not done' : 'Mark done');
+    row?.querySelector('.one-thing-row-title')?.classList.toggle('is-done', wasDone);
+    uiModule.showToast?.('Could not update task', 3000);
+  } finally {
+    markBtn.disabled = false;
+  }
+}
+
+function _ensureOneThingClickDelegation(body) {
+  if (!body || body.dataset.oneThingClickBound) return;
+  body.dataset.oneThingClickBound = '1';
+  body.addEventListener('click', (e) => {
+    const mark = e.target.closest('.one-thing-mark');
+    if (mark && body.contains(mark)) {
+      e.preventDefault();
+      e.stopPropagation();
+      void _toggleOneThingTask(mark.dataset.taskId, body, mark);
+    }
+  });
+}
+
+async function _renderOneThingView(body) {
+  const token = ++_oneThingRenderToken;
+  await _fetchOneThingMeta();
+  await _fetchOneThingBoard();
+  if (token !== _oneThingRenderToken || !body) return;
+  body.innerHTML = '';
+  _renderLabelsInto(body);
+  const horizons = (_oneThingBoard && _oneThingBoard.horizons) || {};
+  const bucket = horizons[_oneThingHorizon] || {};
+
+  let html = `<div class="one-thing-wrap">
+    <div class="one-thing-section ${_ONE_THING_HORIZON_CLASS[_oneThingHorizon] || ''}">
+    <div class="one-thing-section-head">
+      <div class="one-thing-section-label">${_esc(bucket.label || _oneThingHorizon)}</div>
+      <div class="one-thing-section-tagline">${_esc(bucket.tagline || '')}</div>
+    </div>
+    <div class="one-thing-add">
+      <input type="text" class="one-thing-add-text" placeholder="What needs your attention?" maxlength="500" />
+      <button type="button" class="one-thing-date-trigger one-thing-add-field" title="Planned completion">Due date</button>
+      <input type="hidden" class="one-thing-add-due" value="" />
+      <select class="one-thing-add-priority one-thing-add-field" title="Priority">
+        <option value="steady">Steady</option>
+        <option value="elevated">Elevated</option>
+        <option value="critical">Critical</option>
+      </select>
+      <button type="button" class="one-thing-add-btn">Add</button>
+    </div>
+    <div class="one-thing-list">`;
+
+  const tasks = [...(bucket.tasks || [])].sort((a, b) => {
+    if (!!a.done !== !!b.done) return a.done ? 1 : -1;
+    return 0;
+  });
+  if (!tasks.length) {
+    html += `<div class="notes-empty one-thing-empty">Nothing here yet — add one clear commitment.</div>`;
+  } else {
+    for (const task of tasks) {
+      const doneCls = task.done ? ' done' : '';
+      const priCls = _ONE_THING_PRIORITY_CLASS[task.priority] || '';
+      const due = task.due_date ? `<button type="button" class="one-thing-due" data-task-id="${_esc(task.id)}" title="Change due date">${_esc(task.due_date)}</button>` : '';
+      const mark = task.done ? '[x]' : '[ ]';
+      html += `<div class="one-thing-row${doneCls}" data-task-id="${_esc(task.id)}">
+        <button type="button" class="one-thing-mark" data-task-id="${_esc(task.id)}" title="${task.done ? 'Mark not done' : 'Mark done'}" aria-label="${task.done ? 'Mark not done' : 'Mark done'}"><span class="one-thing-mark-box" aria-hidden="true">${mark}</span></button>
+        <div class="one-thing-row-text">
+          <div class="one-thing-row-title${task.done ? ' is-done' : ''}">${_esc(task.text || '')}</div>
+          <div class="one-thing-row-meta">
+            <span class="one-thing-priority ${priCls}">${_esc(_oneThingPriorityLabel(task.priority))}</span>${due}
+          </div>
+        </div>
+      </div>`;
+    }
+  }
+  html += `</div></div>
+    <div class="one-thing-footer">
+      <button type="button" class="one-thing-sync-btn" title="Push tasks to Obsidian vault">Sync to Obsidian</button>
+      <span class="one-thing-sync-hint">Immediate tasks mirror to today's daily note</span>
+    </div>
+  </div>`;
+  body.insertAdjacentHTML('beforeend', html);
+  _ensureOneThingClickDelegation(body);
+  _wireOneThingView(body);
+}
+
+function _wireOneThingView(body) {
+  const addBtn = body.querySelector('.one-thing-add-btn');
+  const addInput = body.querySelector('.one-thing-add-text');
+  const dueInput = body.querySelector('.one-thing-add-due');
+  const dueTrigger = body.querySelector('.one-thing-date-trigger');
+  const priInput = body.querySelector('.one-thing-add-priority');
+
+  _syncOneThingDueTrigger(dueTrigger, dueInput);
+  dueTrigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _showOneThingDatePopover(dueTrigger, {
+      value: dueInput?.value || '',
+      onPick: (ymd) => {
+        if (dueInput) dueInput.value = ymd;
+        _syncOneThingDueTrigger(dueTrigger, dueInput);
+      },
+      onClear: () => {
+        if (dueInput) dueInput.value = '';
+        _syncOneThingDueTrigger(dueTrigger, dueInput);
+      },
+    });
+  });
+
+  const submitAdd = async () => {
+    const text = (addInput?.value || '').trim();
+    if (!text) return;
+    addBtn.disabled = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/one-thing/tasks`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          horizon: _oneThingHorizon,
+          priority: priInput?.value || 'steady',
+          due_date: dueInput?.value || null,
+        }),
+      });
+      if (!res.ok) throw new Error('add failed');
+      addInput.value = '';
+      if (dueInput) dueInput.value = '';
+      _syncOneThingDueTrigger(dueTrigger, dueInput);
+      _oneThingBoard = null;
+      await _renderOneThingView(body);
+      uiModule.showToast?.('Added to todos');
+    } catch {
+      uiModule.showToast?.('Could not add task', 3000);
+    } finally {
+      addBtn.disabled = false;
+    }
+  };
+  addBtn?.addEventListener('click', submitAdd);
+  addInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitAdd(); }
+  });
+
+  body.querySelectorAll('.one-thing-due[data-task-id]').forEach(dueBtn => {
+    dueBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const tid = dueBtn.dataset.taskId;
+      if (!tid) return;
+      _showOneThingDatePopover(dueBtn, {
+        value: dueBtn.textContent.trim(),
+        onPick: async (ymd) => {
+          try {
+            await _patchOneThingDue(tid, ymd);
+            _oneThingBoard = null;
+            await _renderOneThingView(body);
+          } catch {
+            uiModule.showToast?.('Could not update due date', 3000);
+          }
+        },
+        onClear: async () => {
+          try {
+            await _patchOneThingDue(tid, null);
+            _oneThingBoard = null;
+            await _renderOneThingView(body);
+          } catch {
+            uiModule.showToast?.('Could not clear due date', 3000);
+          }
+        },
+      });
+    });
+  });
+
+  body.querySelector('.one-thing-sync-btn')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/one-thing/sync`, { method: 'POST', credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || 'sync failed');
+      uiModule.showToast?.('Synced to Obsidian vault');
+    } catch {
+      uiModule.showToast?.('Vault sync failed — check Settings → Obsidian Vault', 4000);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 function _renderLabels(root = document) {
   const bar = root.querySelector?.('.notes-labels-bar') || document.querySelector('.notes-labels-bar');
   if (!bar) return;
-  const labels = new Set();
-  for (const n of _notes) for (const t of _visibleNoteTags(n)) labels.add(t);
-  const sortedLabels = [...labels].sort();
-  // Count active reminders (not archived, has datetime due_date)
-  const reminderCount = _notes.filter(n => !n.archived && n.due_date && _hasTimeComponent(n.due_date)).length;
-  const pastReminderCount = _notes.filter(n => !n.archived && _isPastReminder(n)).length;
-  const defaultCount = _notes.filter(n => !n.archived && _visibleNoteTags(n).length === 0).length;
-  // Active goals = non-archived goal notes. Today view lists pending steps
-  // from each, so we surface the count next to the chip.
-  const goalCount = _notes.filter(n => n.note_type === 'goal' && !n.archived).length;
-  const todayCount = _notes.filter(n => n.note_type === 'goal' && !n.archived && _nextGoalStep(n)).length;
   bar.style.display = '';
-  const allActive = _activeLabel === null && _activeFilter === null;
-  let html = `<button class="notes-label-chip${allActive ? ' active' : ''}" data-action="all">All</button>`;
-  html += `<button class="notes-label-chip${_activeFilter === 'default' ? ' active' : ''}" data-action="default" title="Show notes without tags">Default <span class="notes-label-chip-count">${defaultCount}</span></button>`;
-  if (todayCount > 0) {
-    const isOn = _activeFilter === 'today';
-    const icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:2px"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
-    html += `<button class="notes-label-chip notes-label-chip-today${isOn ? ' active' : ''}" data-action="today" title="Next step from every goal">${icon}Today <span class="notes-label-chip-count">${todayCount}</span></button>`;
-  }
-  if (goalCount > 0) {
-    const isOn = _activeFilter === 'goals';
-    const icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg>';
-    html += `<button class="notes-label-chip notes-label-chip-goals${isOn ? ' active' : ''}" data-action="goals" title="Show only goals">${icon}Goals <span class="notes-label-chip-count">${goalCount}</span></button>`;
-  }
-  const isReminderOn = _activeFilter === 'reminders';
-  const isReminderOff = _activeFilter === 'no-reminders';
-  const reminderCls = `notes-label-chip notes-label-chip-reminders${isReminderOn ? ' active' : ''}${isReminderOff ? ' active negated' : ''}`;
-  const reminderIcon = isReminderOff
-    // bell-off icon
-    ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:2px"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
-    : '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:2px"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
-  html += `<button class="${reminderCls}" data-action="reminders" title="${isReminderOn ? 'Showing only reminders — click to show all' : isReminderOff ? 'Hiding reminders — click to show only reminders' : 'Click to filter reminders'}">${reminderIcon}Reminders <span class="notes-label-chip-count">${reminderCount}</span></button>`;
-  const showingReminders = _activeFilter === 'reminders';
-  if (showingReminders && pastReminderCount > 0) {
-    html += `<button class="notes-label-chip notes-label-clear-past" data-action="clear-past-reminders" title="Delete reminders whose time has passed"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Clear past <span class="notes-label-chip-count">${pastReminderCount}</span></button>`;
-  }
-  for (const lbl of sortedLabels) {
-    html += `<button class="notes-label-chip${_activeLabel === lbl ? ' active' : ''}" data-label="${_esc(lbl)}">#${_esc(lbl)}</button>`;
+  const horizons = (_oneThingBoard && _oneThingBoard.horizons) || {};
+  let html = `<button type="button" class="notes-label-chip notes-label-chip-add-todo" data-action="add-todo" title="Add a todo in the current category">+ Add a Todo</button>`;
+  for (const chip of _TODO_HORIZON_CHIPS) {
+    const count = (horizons[chip.key]?.tasks || []).filter(t => !t.done).length;
+    const cls = _ONE_THING_HORIZON_CLASS[chip.key] || '';
+    const active = _oneThingHorizon === chip.key ? ' active' : '';
+    html += `<button type="button" class="notes-label-chip ${cls}${active}" data-action="todo-horizon" data-horizon="${chip.key}">${_esc(chip.label)} <span class="notes-label-chip-count">${count}</span></button>`;
   }
   bar.innerHTML = html;
   bar.querySelectorAll('.notes-label-chip').forEach(chip => {
     chip.addEventListener('click', () => {
-      if (chip.dataset.action === 'all') {
-        _activeLabel = null;
-        _activeFilter = null;
-      } else if (chip.dataset.action === 'today') {
-        _activeLabel = null;
-        _activeFilter = (_activeFilter === 'today') ? null : 'today';
-      } else if (chip.dataset.action === 'goals') {
-        _activeLabel = null;
-        _activeFilter = (_activeFilter === 'goals') ? null : 'goals';
-      } else if (chip.dataset.action === 'default') {
-        _activeLabel = null;
-        _activeFilter = (_activeFilter === 'default') ? null : 'default';
-      } else if (chip.dataset.action === 'reminders') {
-        _activeLabel = null;
-        // Cycle: null → reminders → null → no-reminders → null → reminders → ...
-        if (_activeFilter === null) {
-          _activeFilter = _reminderChipNext;
-          _reminderChipNext = (_reminderChipNext === 'reminders') ? 'no-reminders' : 'reminders';
-        } else {
-          _activeFilter = null;
-        }
-      } else if (chip.dataset.action === 'clear-past-reminders') {
-        _clearPastReminders();
+      const paneBody = document.querySelector('#notes-pane .notes-pane-body');
+      if (chip.dataset.action === 'add-todo') {
+        const input = paneBody?.querySelector('.one-thing-add-text');
+        input?.focus();
+        input?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
         return;
-      } else {
-        _activeFilter = null;
-        _activeLabel = chip.dataset.label || null;
       }
-      _renderNotes();
+      if (chip.dataset.action === 'todo-horizon') {
+        _oneThingHorizon = chip.dataset.horizon || 'focus';
+        if (paneBody) void _renderOneThingView(paneBody);
+      }
     });
   });
 }
@@ -1659,9 +2052,12 @@ function _animateReflow(prevPositions) {
 }
 
 function _renderNotes() {
-  _updateRailBadge();
   const body = document.querySelector('#notes-pane .notes-pane-body');
   if (!body) return;
+  void _renderOneThingView(body);
+  return;
+
+  _updateRailBadge();
   const prevPositions = _captureCardPositions();
   const activeReminderHighlights = _loadActiveHighlights();
 
@@ -1713,6 +2109,10 @@ function _renderNotes() {
   });
 
   let html = '';
+  if (_activeFilter === 'one-thing') {
+    void _renderOneThingView(body);
+    return;
+  }
   // Today view: render a compact card listing the next-unchecked step from
   // each active goal. Tapping a step toggles it done (same idx-based wiring
   // as regular checkboxes). Tapping the title opens the goal note for full

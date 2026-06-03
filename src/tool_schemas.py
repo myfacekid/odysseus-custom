@@ -102,8 +102,9 @@ FUNCTION_TOOL_SCHEMAS = [
                         "enum": [
                             "search", "list", "read", "backlinks", "follow",
                             "create", "append", "append_daily", "patch", "link",
+                            "get_daily", "list_tasks", "add_task", "toggle_task", "sync_tasks",
                         ],
-                        "description": "Vault operation: read/search graph, or write/edit notes with wikilinks.",
+                        "description": "Vault operation: read/search graph, write/edit notes, or One Thing tasks (get_daily/list_tasks/add_task).",
                     },
                     "query": {"type": "string", "description": "Search terms (filename, body, #tag)"},
                     "folder": {
@@ -139,6 +140,19 @@ FUNCTION_TOOL_SCHEMAS = [
                     "depth": {"type": "integer", "description": "Wikilink follow depth (0-3, default 1)"},
                     "limit": {"type": "integer", "description": "Max search results (1-30, default 15)"},
                     "max_chars": {"type": "integer", "description": "Max characters when reading/following notes"},
+                    "horizon": {
+                        "type": "string",
+                        "enum": ["focus", "build", "aim"],
+                        "description": "One Thing horizon: focus=this week, build=~3 months, aim=this year",
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["critical", "elevated", "steady"],
+                        "description": "One Thing priority (critical/elevated/steady)",
+                    },
+                    "due_date": {"type": "string", "description": "Planned completion YYYY-MM-DD (One Thing tasks)"},
+                    "text": {"type": "string", "description": "Task text for add_task"},
+                    "id": {"type": "string", "description": "Task id for toggle_task"},
                 },
             },
         },

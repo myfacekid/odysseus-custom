@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from services.memory.skills import SkillsManager
 from src.auth_helpers import get_current_user
+from src.text_helpers import _THINK
 from core.middleware import require_admin
 
 logger = logging.getLogger(__name__)
@@ -152,8 +153,8 @@ async def _eval_skill_run(skill_md: str, task: str, transcript: str,
         # Strip closed think blocks. If a <think> was opened but never closed
         # (the model ran out of budget mid-reasoning), drop everything from it
         # onward so its stray braces don't poison JSON extraction.
-        text = _re.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', text, flags=_re.I)
-        text = _re.sub(r'<think(?:ing)?>[\s\S]*$', '', text, flags=_re.I).strip()
+        text = _re.sub(rf'<{_THINK}>[\s\S]*?</{_THINK}>', '', text, flags=_re.I)
+        text = _re.sub(rf'<{_THINK}>[\s\S]*$', '', text, flags=_re.I).strip()
 
         def _coerce(d):
             return d if (isinstance(d, dict) and "verdict" in d) else None
@@ -280,8 +281,8 @@ async def _eval_skill_necessity(skill_md: str, others: list, url: str, model: st
     except Exception as e:
         logger.warning(f"Necessity check failed: {e}")
         return None
-    text = _re.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', (raw or ''), flags=_re.I)
-    text = _re.sub(r'<think(?:ing)?>[\s\S]*$', '', text, flags=_re.I).strip()
+    text = _re.sub(rf'<{_THINK}>[\s\S]*?</{_THINK}>', '', (raw or ''), flags=_re.I)
+    text = _re.sub(rf'<{_THINK}>[\s\S]*$', '', text, flags=_re.I).strip()
     data = None
     a, b = text.find('{'), text.rfind('}')
     if a >= 0 and b > a:
@@ -368,8 +369,8 @@ async def _eval_skill_retrieval_precision(skill_md: str, others: list,
     except Exception as e:
         logger.warning(f"Retrieval precision check failed: {e}")
         return None
-    text = _re.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', (raw or ''), flags=_re.I)
-    text = _re.sub(r'<think(?:ing)?>[\s\S]*$', '', text, flags=_re.I).strip()
+    text = _re.sub(rf'<{_THINK}>[\s\S]*?</{_THINK}>', '', (raw or ''), flags=_re.I)
+    text = _re.sub(rf'<{_THINK}>[\s\S]*$', '', text, flags=_re.I).strip()
     data = None
     a, b = text.find('{'), text.rfind('}')
     if a >= 0 and b > a:
@@ -741,9 +742,9 @@ async def _improve_skill_md(skill_md: str, verdict: dict, transcript: str, url, 
     except Exception as e:
         logger.warning(f"Audit: improve call failed: {e}")
         return None
-    text = _re.sub(r'<think(?:ing)?>[\s\S]*?</think(?:ing)?>', '', (raw or ''), flags=_re.I)
-    text = _re.sub(r'<think(?:ing)?>[\s\S]*$', '', text, flags=_re.I)
-    text = _re.sub(r'</think(?:ing)?>', '', text, flags=_re.I).strip()
+    text = _re.sub(rf'<{_THINK}>[\s\S]*?</{_THINK}>', '', (raw or ''), flags=_re.I)
+    text = _re.sub(rf'<{_THINK}>[\s\S]*$', '', text, flags=_re.I)
+    text = _re.sub(rf'</{_THINK}>', '', text, flags=_re.I).strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
     # Some reasoning models still prepend analysis or echo the old skill before

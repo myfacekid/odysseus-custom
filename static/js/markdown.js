@@ -112,13 +112,22 @@ function sanitizeAllowedHtml(html) {
   return out;
 }
 
+/** Model reasoning tag names: , <thinking>, <thought> (Gemma). */
+export const THINK_TAG = '(?:think(?:ing)?|thought)';
+const THINK_OPEN = `<${THINK_TAG}(?:\\s+[^>]*)?>`;
+const THINK_CLOSE = `</${THINK_TAG}>`;
+
 /**
  * Check if text has unclosed think tag
  */
 export function hasUnclosedThinkTag(text) {
-  const openCount = (text.match(/<think(?:ing)?>/gi) || []).length;
-  const closeCount = (text.match(/<\/think(?:ing)?>/gi) || []).length;
+  const openCount = (text.match(new RegExp(THINK_OPEN, 'gi')) || []).length;
+  const closeCount = (text.match(new RegExp(THINK_CLOSE, 'gi')) || []).length;
   return openCount > closeCount;
+}
+
+export function hasThinkTag(text) {
+  return new RegExp(THINK_OPEN, 'i').test(text || '');
 }
 
 export function startsWithReasoningPrefix(text) {
@@ -126,7 +135,7 @@ export function startsWithReasoningPrefix(text) {
 }
 
 function normalizePlainThinking(text) {
-  if (!text || /<think/i.test(text)) return text;
+  if (!text || hasThinkTag(text)) return text;
 
   const trimmed = text.trimStart();
   if (!startsWithReasoningPrefix(trimmed)) return text;
@@ -185,20 +194,20 @@ export function extractThinkingBlocks(text) {
   let normalized = normalizePlainThinking(text);
   // Collapse <think>short</think>...real thinking...</think> into one block
   // Models sometimes emit a trivial first block then continue thinking outside tags
-  normalized = normalized.replace(/<think(?:ing)?(?:\s+[^>]*)?>.{0,30}<\/think(?:ing)?>\s*([\s\S]*?)<\/think(?:ing)?>/gi, (m, content) => {
+  normalized = normalized.replace(new RegExp(`${THINK_OPEN}.{0,30}${THINK_CLOSE}\\s*([\\s\\S]*?)${THINK_CLOSE}`, 'gi'), (m, content) => {
     return '<think>' + content.trim() + '</think>';
   });
 
-  // Merge consecutive <think> blocks (some models split thinking across multiple tags)
-  normalized = normalized.replace(/<\/think(?:ing)?>\s*<think(?:ing)?(?:\s+[^>]*)?>/gi, '\n\n');
+  // Merge consecutive thinking blocks (some models split thinking across multiple tags)
+  normalized = normalized.replace(new RegExp(`${THINK_CLOSE}\\s*${THINK_OPEN}`, 'gi'), '\n\n');
 
   // Extract thinking time attribute if present
-  const timeMatch = normalized.match(/<think(?:ing)?\s+time="([\d.]+)"/i);
+  const timeMatch = normalized.match(new RegExp(`<${THINK_TAG}\\s+time="([\\d.]+)"`, 'i'));
   const thinkingTime = timeMatch ? timeMatch[1] : null;
   // Strip time attribute for content extraction
-  normalized = normalized.replace(/<think(?:ing)?\s+time="[\d.]+"/gi, '<think');
+  normalized = normalized.replace(new RegExp(`<${THINK_TAG}\\s+time="[\\d.]+"`, 'gi'), '<think');
 
-  const thinkRegex = /<think(?:ing)?(?:\s+[^>]*)?>([\s\S]*?)<\/think(?:ing)?>/gi;
+  const thinkRegex = new RegExp(`${THINK_OPEN}([\\s\\S]*?)${THINK_CLOSE}`, 'gi');
   const thinkingBlocks = [];
   let match;
 
@@ -220,23 +229,23 @@ export function extractThinkingBlocks(text) {
   // (b) Cut-off mid-generation — there's already real reply text before the
   //     opener. Drop from the tag onward as before (it's truncated thinking).
   if (hasUnclosedThinkTag(normalized)) {
-    const strayOpener = cleanContent.match(/^\s*<think(?:ing)?(?:\s+[^>]*)?>([\s\S]*)$/i);
+    const strayOpener = cleanContent.match(new RegExp(`^\\s*${THINK_OPEN}([\\s\\S]*)$`, 'i'));
     if (strayOpener) {
       cleanContent = strayOpener[1];
     } else {
-      cleanContent = cleanContent.replace(/<think(?:ing)?(?:\s+[^>]*)?>[\s\S]*$/gi, '');
+      cleanContent = cleanContent.replace(new RegExp(`${THINK_OPEN}[\\s\\S]*$`, 'gi'), '');
     }
   }
 
-  // Handle orphaned </think> with no opening tag — text before it is leaked thinking
-  const orphanMatch = cleanContent.match(/^([\s\S]+?)<\/think(?:ing)?>/i);
+  // Handle orphaned closing tag with no opening tag — text before it is leaked thinking
+  const orphanMatch = cleanContent.match(new RegExp(`^([\\s\\S]+?)${THINK_CLOSE}`, 'i'));
   if (orphanMatch && orphanMatch[1].trim()) {
     thinkingBlocks.push(orphanMatch[1].trim());
     cleanContent = cleanContent.slice(orphanMatch[0].length);
   }
 
   // Strip any remaining orphaned closing tags
-  cleanContent = cleanContent.replace(/<\/think(?:ing)?>/gi, '');
+  cleanContent = cleanContent.replace(new RegExp(THINK_CLOSE, 'gi'), '');
 
   // Merge all thinking blocks into one — no reason to show multiple dropdowns
   const mergedBlocks = thinkingBlocks.length > 1
@@ -685,6 +694,7 @@ const markdownModule = {
   processWithThinking,
   createCollapsible,
   hasUnclosedThinkTag,
+  hasThinkTag,
   extractThinkingBlocks,
   startsWithReasoningPrefix,
   renderMermaid

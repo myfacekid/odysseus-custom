@@ -712,6 +712,9 @@ app.include_router(setup_zotero_routes())
 from routes.obsidian_vault_routes import setup_obsidian_vault_routes
 app.include_router(setup_obsidian_vault_routes())
 
+from routes.one_thing_routes import setup_one_thing_routes
+app.include_router(setup_one_thing_routes())
+
 # ========= ROUTES (kept in app.py) =========
 
 def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:

@@ -780,26 +780,64 @@ export function stripToolBlocks(text) {
   return cleaned.trim();
 }
 
-/**
- * Build a collapsible sources box (used by both research and web search).
- */
-export function buildSourcesBox(sources, type, expanded) {
+const SOURCE_KIND_LABELS = {
+  research: 'Research sources',
+  web: 'Web sources',
+  zotero: 'Zotero sources',
+  vault: 'Vault sources',
+};
+
+function _sourceKind(item) {
+  var k = String((item && item.source) || '').toLowerCase();
+  if (k === 'zotero' || k === 'vault') return k;
+  if (item && item.path && !item.url) return 'vault';
+  return 'web';
+}
+
+function _groupSourcesByKind(sources, explicitType) {
+  if (!sources || !sources.length) return [];
+  if (explicitType === 'research') return [{ kind: 'research', sources: sources }];
+  var groups = {};
+  for (var i = 0; i < sources.length; i++) {
+    var kind = _sourceKind(sources[i]);
+    if (!groups[kind]) groups[kind] = [];
+    groups[kind].push(sources[i]);
+  }
+  var order = ['vault', 'zotero', 'web'];
+  var out = [];
+  for (var j = 0; j < order.length; j++) {
+    if (groups[order[j]]) out.push({ kind: order[j], sources: groups[order[j]] });
+  }
+  return out;
+}
+
+function _renderSourceRow(s, index, kind, esc) {
+  var title = esc(s.title || s.path || s.url || '');
+  var domain = '';
+  var safeUrl = '';
+  if (kind === 'vault' || (s.path && !s.url)) {
+    domain = esc(s.path || s.title || 'Vault note');
+  } else {
+    safeUrl = _safeHref(s.url || '');
+    try { domain = esc(new URL(s.url).hostname.replace('www.', '')); } catch (e) { domain = esc(s.url || ''); }
+  }
+  var inner = '<span class="source-num">' + (index + 1) + '</span>'
+    + '<span class="source-title">' + title + '</span>'
+    + '<span class="source-domain">' + domain + '</span>';
+  if (safeUrl) {
+    return '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" class="source-link">' + inner + '</a>';
+  }
+  return '<div class="source-link source-link-static">' + inner + '</div>';
+}
+
+function _buildSingleSourcesBox(sources, kind, expanded) {
   var esc = uiModule.esc;
   var id = 'sources-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5);
   var count = sources.length;
-  var label = type === 'research' ? 'Research sources' : 'Web sources';
+  var label = SOURCE_KIND_LABELS[kind] || SOURCE_KIND_LABELS.web;
   var lines = '';
   for (var i = 0; i < count; i++) {
-    var s = sources[i];
-    var domain = '';
-    try { domain = new URL(s.url).hostname.replace('www.', ''); } catch(e) { domain = s.url; }
-    var title = esc(s.title || domain || '');
-    var safeUrl = _safeHref(s.url);
-    lines += '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" class="source-link">'
-      + '<span class="source-num">' + (i + 1) + '</span>'
-      + '<span class="source-title">' + title + '</span>'
-      + '<span class="source-domain">' + esc(domain) + '</span>'
-      + '</a>';
+    lines += _renderSourceRow(sources[i], i, kind, esc);
   }
   var arrow = expanded ? 'down' : 'right';
   var expandedClass = expanded ? ' expanded' : '';
@@ -811,6 +849,26 @@ export function buildSourcesBox(sources, type, expanded) {
     + '<div class="sources-content' + expandedClass + '" id="' + id + '">'
     + '<div class="sources-content-inner">' + lines + '</div>'
     + '</div></div>';
+}
+
+/**
+ * Build collapsible source boxes (web, Zotero, vault, or research).
+ * When `type` is omitted, groups by each item's `source` field.
+ */
+export function buildSourcesBox(sources, type, expanded) {
+  if (!sources || !sources.length) return '';
+  var groups = _groupSourcesByKind(sources, type);
+  return groups.map(function (g) { return _buildSingleSourcesBox(g.sources, g.kind, expanded); }).join('');
+}
+
+export function inferSourcesDisplayType(sources, eventType) {
+  if (eventType === 'research' || eventType === 'research_sources') return 'research';
+  if (!sources || !sources.length) return 'web';
+  var kinds = {};
+  for (var i = 0; i < sources.length; i++) kinds[_sourceKind(sources[i])] = true;
+  var keys = Object.keys(kinds);
+  if (keys.length === 1) return keys[0];
+  return 'mixed';
 }
 
 /**
@@ -1885,7 +1943,7 @@ export function addMessage(role, content, modelName, metadata) {
           }
           var agentFindingsSuffix = '';
           if (isLastTextRound && metadata?.web_sources?.length) {
-            agentSourcesPrefix = buildSourcesBox(metadata.web_sources, 'web');
+            agentSourcesPrefix = buildSourcesBox(metadata.web_sources);
           } else if (isLastTextRound && metadata?.research_sources?.length) {
             agentSourcesPrefix = buildSourcesBox(metadata.research_sources, 'research');
           }
@@ -2023,7 +2081,7 @@ export function addMessage(role, content, modelName, metadata) {
     if (role === 'assistant' && metadata?.research_sources?.length) {
       sourcesPrefix = buildSourcesBox(metadata.research_sources, 'research');
     } else if (role === 'assistant' && metadata?.web_sources?.length) {
-      sourcesPrefix = buildSourcesBox(metadata.web_sources, 'web');
+      sourcesPrefix = buildSourcesBox(metadata.web_sources);
     }
     if (role === 'assistant' && metadata?.research_findings?.length) {
       findingsSuffix = buildFindingsBox(metadata.research_findings);
@@ -2258,6 +2316,7 @@ const chatRenderer = {
   roleTimestamp,
   stripToolBlocks,
   buildSourcesBox,
+  inferSourcesDisplayType,
   buildFindingsBox,
   appendReportButton,
   buildImageBubble,

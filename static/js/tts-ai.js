@@ -66,8 +66,8 @@ class AITTSManager {
     }
 
     extractPlainText(content) {
-        // Strip <think>/<thinking> blocks (model reasoning)
-        let cleaned = content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+        // Strip model reasoning blocks (, <thinking>,  for Gemma)
+        let cleaned = content.replace(/<(?:think(?:ing)?|thought)>[\s\S]*?<\/(?:think(?:ing)?|thought)>/gi, '');
 
         // Create a temporary div to parse HTML/markdown
         const temp = document.createElement('div');

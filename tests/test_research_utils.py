@@ -8,6 +8,10 @@ class TestStripThinking:
         text = "<think>some internal reasoning</think>Final answer."
         assert strip_thinking(text) == "Final answer."
 
+    def test_removes_thought_tags(self):
+        text = "<thought>some internal reasoning</thought>Final answer."
+        assert strip_thinking(text) == "Final answer."
+
     def test_removes_thinking_tags(self):
         text = "<thinking>some internal reasoning</thinking>Final answer."
         assert strip_thinking(text) == "Final answer."

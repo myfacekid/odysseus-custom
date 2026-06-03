@@ -2026,8 +2026,53 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
             mark = "done" if items[index]["done"] else "undone"
             return {"response": f"Item '{items[index].get('text', '')}' marked {mark}", "exit_code": 0}
 
+        elif action in ("list_one_thing", "one_thing_list", "list_tasks"):
+            from src.one_thing import format_agent_list, list_tasks as ot_list
+            from src.vault_one_thing_sync import sync_one_thing_to_vault
+
+            horizon = args.get("horizon") or args.get("bucket")
+            include_done = bool(args.get("include_done", False))
+            tasks = ot_list(db, owner or "", horizon=horizon, include_done=include_done)
+            return {"results": format_agent_list(tasks), "exit_code": 0}
+
+        elif action in ("add_one_thing", "add_task"):
+            from src.one_thing import add_task as ot_add
+            from src.vault_one_thing_sync import sync_one_thing_to_vault
+
+            text = (args.get("text") or args.get("title") or args.get("content") or "").strip()
+            if not text:
+                return {"error": "text is required", "exit_code": 1}
+            task = ot_add(
+                db,
+                owner or "",
+                text,
+                horizon=args.get("horizon") or "focus",
+                priority=args.get("priority") or "steady",
+                due_date=args.get("due_date"),
+            )
+            sync_one_thing_to_vault(owner or "")
+            return {
+                "response": f"One Thing task added ({task.horizon}, {task.priority}): {task.text} (id: {task.id[:8]})",
+                "task_id": task.id,
+                "exit_code": 0,
+            }
+
+        elif action in ("toggle_one_thing", "toggle_task"):
+            from src.one_thing import toggle_task as ot_toggle
+            from src.vault_one_thing_sync import sync_one_thing_to_vault
+
+            tid = (args.get("id") or args.get("task_id") or "").strip()
+            if not tid:
+                return {"error": "id is required", "exit_code": 1}
+            task = ot_toggle(db, owner or "", tid)
+            if not task:
+                return {"error": f"Task '{tid}' not found", "exit_code": 1}
+            sync_one_thing_to_vault(owner or "")
+            state = "done" if task.done else "open"
+            return {"response": f"Task marked {state}: {task.text} (id: {task.id[:8]})", "exit_code": 0}
+
         else:
-            return {"error": f"Unknown action: {action}. Use list/add/update/delete/toggle_item", "exit_code": 1}
+            return {"error": f"Unknown action: {action}. Use list/add/update/delete/toggle_item/list_one_thing/add_one_thing/toggle_one_thing", "exit_code": 1}
     except Exception as e:
         logger.error(f"manage_notes error: {e}")
         return {"error": str(e), "exit_code": 1}

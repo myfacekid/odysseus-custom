@@ -259,11 +259,6 @@ export function applyColors(colors) {
   s.setProperty('--border', colors.border);
   if (colors.red) s.setProperty('--red', colors.red);
 
-  // Keep the mobile browser toolbar / status bar matched to the theme bg
-  // (same as the early head-script does on first paint).
-  const _mtc = document.querySelector('meta[name="theme-color"]');
-  if (_mtc && colors.bg) _mtc.setAttribute('content', colors.bg);
-
   // Derive and apply syntax highlighting colors
   const syn = deriveSyntaxColors(colors);
   s.setProperty('--hl-bg', syn.bg);
@@ -284,7 +279,18 @@ export function applyColors(colors) {
     s.setProperty(css, adv[key] || defaults[key]);
   }
 
-  // Update favicon to match theme accent color
+  // Shared accent tokens for Todos, Calendar, chips, and focus highlights.
+  const accentPrimary = adv.accentPrimary || colors.red || '#e06c75';
+  const accentWarm = adv.accentWarm || syn.string || syn.number || accentPrimary;
+  s.setProperty('--accent-primary', accentPrimary);
+  s.setProperty('--accent', accentPrimary);
+  s.setProperty('--accent-warm', accentWarm);
+  if (adv.accentError) s.setProperty('--accent-error', adv.accentError);
+
+  // Keep the mobile browser toolbar / status bar matched to the theme bg
+  // (same as the early head-script does on first paint).
+  const _mtc = document.querySelector('meta[name="theme-color"]');
+  if (_mtc && colors.bg) _mtc.setAttribute('content', colors.bg);
   _updateFavicon(colors.red || '#e06c75');
 }
 

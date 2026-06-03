@@ -339,7 +339,8 @@ class ToolIndex:
         frozenset({"obsidian", "my vault", "vault note", "daily note", "daily notes",
                    "meeting notes", "meeting transcript", "in my notes", "my notes folder",
                    "notes folder", "permanent notes", "wikilink", "wiki link", "backlink",
-                   "what did i write", "find my note", "read my note"}):
+                   "what did i write", "find my note", "read my note",
+                   "one thing", "intermediate goal", "long horizon", "my todos today"}):
             {"search_vault"},
         # Settings-change intent — "change my…/set my…/use X for…/turn on…".
         frozenset({"change my", "set my", "use the voice", "change the voice",

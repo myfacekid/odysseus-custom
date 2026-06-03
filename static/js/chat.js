@@ -11,7 +11,16 @@ import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
 import { addAITTSButton } from './tts-ai.js';
-import markdownModule from './markdown.js';
+import markdownModule, { THINK_TAG } from './markdown.js';
+
+const _THINK_OPEN = `<${THINK_TAG}(?:\\s+[^>]*)?>`;
+const _THINK_CLOSE = `</${THINK_TAG}>`;
+const _THINK_CLOSE_RE = new RegExp(_THINK_CLOSE, 'gi');
+const _THINK_OPEN_RE = new RegExp(_THINK_OPEN, 'i');
+const _THINK_STRIP_RE = new RegExp(`</?${THINK_TAG}(?:\\s+[^>]*)?>`, 'gi');
+const _THINK_PAIR_RE = new RegExp(`${_THINK_OPEN}([\\s\\S]*?)${_THINK_CLOSE}`, 'i');
+const _THINK_EMPTY_PAIR_RE = new RegExp(`^${_THINK_OPEN}\\s*${_THINK_CLOSE}`, 'i');
+const _THINK_GARBLED_RE = new RegExp(`^[\\s\\S]+?${_THINK_OPEN}\\s*([\\s\\S]*?)(?:${_THINK_CLOSE})?\\s*$`, 'i');
 import spinnerModule from './spinner.js';
 import presetsModule from './presets.js';
 import fileHandlerModule from './fileHandler.js';
@@ -93,6 +102,7 @@ import createResearchSynapse from './researchSynapse.js';
 
   // Sources box builder and toggleSources are now in chatRenderer.js
   var _buildSourcesBox = chatRenderer.buildSourcesBox;
+  var _inferSourcesDisplayType = chatRenderer.inferSourcesDisplayType;
 
   // Browser notifications now in chatStream.js
   var _notifyResearchComplete = chatStream.notifyResearchComplete;
@@ -1107,7 +1117,7 @@ import createResearchSynapse from './researchSynapse.js';
       let _measureDiv = null;
 
       function _replyAfterClosedThinking(text) {
-        const closeRe = /<\/think(?:ing)?>/gi;
+        const closeRe = _THINK_CLOSE_RE;
         let match = null;
         let last = null;
         while ((match = closeRe.exec(text || '')) !== null) last = match;
@@ -1134,7 +1144,7 @@ import createResearchSynapse from './researchSynapse.js';
             replyTrimmed = (replyText || '').trim();
           } else {
             // Non-tag: check for garbled <think> (reasoning\n<think>reply)
-            const _gm = dt.match(/^[\s\S]+?<think(?:ing)?>\s*([\s\S]*?)(?:<\/think(?:ing)?>)?\s*$/i);
+            const _gm = dt.match(_THINK_GARBLED_RE);
             if (_gm && _gm[1].trim()) {
               replyTrimmed = _gm[1].trim();
             } else {
@@ -1175,8 +1185,8 @@ import createResearchSynapse from './researchSynapse.js';
         const prevLen = contentEl._prevTextLen || 0;
         // If thinking is still streaming (unclosed <think>), show indicator instead of raw text
         if (markdownModule.hasUnclosedThinkTag && markdownModule.hasUnclosedThinkTag(dt)) {
-          const thinkStart = dt.search(/<think(?:ing)?>/i);
-          const thinkContent = dt.substring(thinkStart).replace(/<think(?:ing)?>/i, '').trim();
+          const thinkStart = dt.search(_THINK_OPEN_RE);
+          const thinkContent = dt.substring(thinkStart).replace(_THINK_OPEN_RE, '').trim();
           const lines = thinkContent.split('\n').length;
           // Don't show beforeThink text during streaming — it'll appear in the final render
           // This prevents the "split into two" duplication
@@ -1435,7 +1445,7 @@ import createResearchSynapse from './researchSynapse.js';
                 // Detect non-tag thinking patterns: "Thinking:", "Thinking Process:", Gemma-style reasoning
                 // These patterns don't use <think> tags, so we simulate unclosed thinking during streaming
                 const _replyPrefixes = ['Hey', 'Hi ', 'Hi!', 'Hello', 'Sure', 'Yes', 'No ', 'No,', 'Yo', 'OK', 'Here', 'Absolutely', 'Of course', 'Great', 'Alright', 'Thanks', 'Welcome', 'Good ', "I'm happy", "I'd be"];
-                if (!hasUnclosedThink && !roundText.includes('<think')) {
+                if (!hasUnclosedThink && !markdownModule.hasThinkTag(roundText)) {
                   const _trimmedRT = roundText.trimStart();
                   const _isReasoning = markdownModule.startsWithReasoningPrefix(_trimmedRT);
                   if (_isReasoning) {
@@ -1461,10 +1471,10 @@ import createResearchSynapse from './researchSynapse.js';
                     }
                   }
                 }
-                if (!hasUnclosedThink && /^<think(?:ing)?>\s*<\/think(?:ing)?>/i.test(roundText)) {
-                  // Empty <think></think> — the model likely put thinking outside the tags
-                  const afterEmpty = roundText.replace(/^<think(?:ing)?>\s*<\/think(?:ing)?>/i, '').trim();
-                  const closeTags = (afterEmpty.match(/<\/think(?:ing)?>/gi) || []).length;
+                if (!hasUnclosedThink && _THINK_EMPTY_PAIR_RE.test(roundText)) {
+                  // Empty think tag pair — the model likely put thinking outside the tags
+                  const afterEmpty = roundText.replace(_THINK_EMPTY_PAIR_RE, '').trim();
+                  const closeTags = (afterEmpty.match(_THINK_CLOSE_RE) || []).length;
                   if (closeTags === 0 && afterEmpty.length > 0) {
                     hasUnclosedThink = true; // still waiting for real closing tag
                   }
@@ -1473,13 +1483,12 @@ import createResearchSynapse from './researchSynapse.js';
                 // Only applies when there's a second </think> later (model leaked thinking outside tags)
                 // Do NOT trigger if the text after </think> contains tool calls (that's real content)
                 if (!hasUnclosedThink && isThinking) {
-                  const _thinkMatch = roundText.match(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/i);
+                  const _thinkMatch = roundText.match(_THINK_PAIR_RE);
                   const _thinkLen = _thinkMatch ? _thinkMatch[1].trim().length : 0;
                   if (_thinkLen < 20) {
-                    const _afterClose = roundText.replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/i, '').trim();
-                    // Only keep waiting if there's trailing text that looks like thinking (not tool calls)
+                    const _afterClose = roundText.replace(_THINK_PAIR_RE, '').trim();
                     const _hasToolCall = /```(?:bash|python|web_search|read_file|write_file|create_document|edit_document|manage_|generate_image)/i.test(_afterClose);
-                    const _hasOrphanClose = /<\/think(?:ing)?>/i.test(_afterClose);
+                    const _hasOrphanClose = _THINK_CLOSE_RE.test(_afterClose);
                     if (!_hasToolCall && (_hasOrphanClose || (Date.now() - thinkingStartTime) < 500)) {
                       hasUnclosedThink = true; // keep waiting for real </think>
                     }
@@ -1537,7 +1546,7 @@ import createResearchSynapse from './researchSynapse.js';
                 } else if (hasUnclosedThink && isThinking) {
                   if (_liveThinkInner) {
                     // Extract raw thinking text (strip all <think>/<thinking> open/close tags and prefixes)
-                    var thinkText = roundText.replace(/<\/?think(?:ing)?>/gi, '');
+                    var thinkText = roundText.replace(_THINK_STRIP_RE, '');
                     thinkText = thinkText.replace(/^\s*Thinking(?:\s+Process)?:\s*/i, '');
                     _liveThinkInner.innerHTML = markdownModule.mdToHtml(thinkText);
                     // Keep thinking box scrolled to bottom
@@ -1749,17 +1758,18 @@ import createResearchSynapse from './researchSynapse.js';
               } else if (json.type === 'web_sources') {
                 if (_isBg) {
                   if (json.data && json.data.length > 0) {
-                    _sourcesHtml = _buildSourcesBox(json.data, 'web');
+                    _sourcesHtml = _buildSourcesBox(json.data);
                     var bgE2 = _backgroundStreams.get(streamSessionId);
                     if (bgE2) bgE2.sourcesHtml = _sourcesHtml;
                   }
                   continue;
                 }
-                // Web search done — store sources for final render (don't render mid-stream)
+                // Web/Zotero/vault search done — store sources for final render
                 holder._webSources = json.data;
                 if (json.data && json.data.length > 0) {
-                  _sourcesData = json.data; _sourcesType = 'web';
-                  _sourcesHtml = _buildSourcesBox(json.data, 'web');
+                  _sourcesData = json.data;
+                  _sourcesType = _inferSourcesDisplayType(json.data, json.type);
+                  _sourcesHtml = _buildSourcesBox(json.data);
                 }
               } else if (json.type === 'model_fallback') {
                 // Model went offline — switched to fallback
@@ -2363,7 +2373,7 @@ import createResearchSynapse from './researchSynapse.js';
             } else {
               // Non-tag thinking: extract reply from raw text
               // Handle garbled <think> tag: "Thinking: reasoning\n<think>reply"
-              const _garbledMatch = finalDisplay.match(/^[\s\S]+?<think(?:ing)?>\s*([\s\S]*?)(?:<\/think(?:ing)?>)?\s*$/i);
+              const _garbledMatch = finalDisplay.match(_THINK_GARBLED_RE);
               if (_garbledMatch && _garbledMatch[1].trim()) {
                 _finalReply = _garbledMatch[1].trim();
               } else {
@@ -2412,7 +2422,7 @@ import createResearchSynapse from './researchSynapse.js';
           _body4b.innerHTML = _sourcesData ? _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded2) : _sourcesHtml;
         } else if (roundHolder !== holder) {
           // Check if there's thinking content worth showing
-          const _thinkMatch = roundText.match(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/i);
+          const _thinkMatch = roundText.match(_THINK_PAIR_RE);
           if (_thinkMatch && _thinkMatch[1].trim()) {
             // Show thinking in a collapsed section even if no visible reply text
             const _body4c = roundHolder.querySelector('.body');
