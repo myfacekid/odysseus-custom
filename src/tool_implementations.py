@@ -246,7 +246,7 @@ async def do_create_document(content_block: str, session_id: Optional[str] = Non
         _sess = db.query(DbSession).filter(DbSession.id == session_id).first()
         if owner is not None and (not _sess or _sess.owner != owner):
             return {"error": "Cannot create document in another user's session"}
-        _owner = _sess.owner if _sess else None
+        _owner = (_sess.owner if _sess else None) or owner
 
         doc = Document(
             id=doc_id,
@@ -276,10 +276,17 @@ async def do_create_document(content_block: str, session_id: Optional[str] = Non
             fire_event("document_created", _owner)
         except Exception:
             logger.debug("document_created event dispatch failed", exc_info=True)
+        if _owner:
+            try:
+                from src.knowledge_sync import after_document_change
+                after_document_change(_owner)
+            except Exception:
+                logger.debug("knowledge sync after create_document failed", exc_info=True)
 
         return {
             "action": "create",
             "doc_id": doc_id,
+            "graph_node_id": f"document:{doc_id}",
             "title": title,
             "language": language,
             "content": content,
@@ -329,9 +336,17 @@ async def do_update_document(content: str, doc_id: Optional[str] = None, owner: 
         db.add(ver)
         db.commit()
 
+        if doc.owner:
+            try:
+                from src.knowledge_sync import after_document_change
+                after_document_change(doc.owner)
+            except Exception:
+                logger.debug("knowledge sync after update_document failed", exc_info=True)
+
         return {
             "action": "update",
             "doc_id": target_id,
+            "graph_node_id": f"document:{target_id}",
             "title": doc.title,
             "language": doc.language,
             "content": new_content,
@@ -421,9 +436,17 @@ async def do_edit_document(content: str, doc_id: Optional[str] = None, owner: Op
         db.add(ver)
         db.commit()
 
+        if doc.owner:
+            try:
+                from src.knowledge_sync import after_document_change
+                after_document_change(doc.owner)
+            except Exception:
+                logger.debug("knowledge sync after edit_document failed", exc_info=True)
+
         return {
             "action": "edit",
             "doc_id": target_id,
+            "graph_node_id": f"document:{target_id}",
             "title": doc.title,
             "language": doc.language,
             "content": updated_content,
@@ -3769,6 +3792,12 @@ async def do_manage_research(content: str, owner: Optional[str] = None) -> Dict:
 
 async def do_search_vault(content: str, owner: Optional[str] = None) -> Dict:
     """List, read, or search the user's local markdown vault."""
+    from src.constants import OBSIDIAN_INTEGRATION_ENABLED
+    if not OBSIDIAN_INTEGRATION_ENABLED:
+        return {
+            "error": "Vault integration is disabled. Use create_document for library files or manage_notes for todos.",
+            "exit_code": 1,
+        }
     import asyncio
     from src.obsidian_vault import execute_search_vault_tool
     try:

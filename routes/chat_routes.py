@@ -21,6 +21,7 @@ from src.chat_helpers import coerce_message_and_session
 from src.endpoint_resolver import normalize_base as _normalize_base, build_chat_url
 from src.prompt_security import untrusted_context_message
 from core.exceptions import SessionNotFoundError
+from src.constants import OBSIDIAN_INTEGRATION_ENABLED
 from src.auth_helpers import get_current_user
 from routes.session_routes import _verify_session_owner
 from routes.document_helpers import _owner_session_filter
@@ -560,6 +561,8 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
+        if not OBSIDIAN_INTEGRATION_ENABLED:
+            disabled_tools.add("search_vault")
         if str(allow_bash).lower() != "true":
             disabled_tools.add("bash")
         if str(allow_web_search).lower() != "true":
@@ -994,7 +997,7 @@ def setup_chat_routes(
                                 elif data.get("type") in (
                                     "tool_start", "tool_output", "agent_step",
                                     "doc_stream_open", "doc_stream_delta",
-                                    "doc_update", "doc_suggestions", "ui_control",
+                                    "doc_update", "doc_suggestions", "link_suggestion", "ui_control",
                                 ):
                                     if data.get("type") == "agent_step":
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))

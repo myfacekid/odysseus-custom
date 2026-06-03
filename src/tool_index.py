@@ -61,8 +61,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "python": "Execute Python code for computation, data processing, math, scripting, parsing, API calls. Not for writing code for the user.",
     "web_search": "Quick single web lookup for a fact, current event, or doc mid-task. NOT for the user's Zotero library — use search_zotero. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
     "search_zotero": "Search the user's personal Zotero library — saved papers, citations, PDF excerpts. action=list_collections lists folder paths/keys; action=search with query and/or collection finds items (collection accepts path like 'Projects / ML' or a key). Use for 'my Zotero', 'my papers', 'saved sources', 'papers in folder X'. NOT web_search (public web) or trigger_research (new deep-research job).",
-    "search_vault": "Read, search, write, and wikilink the user's markdown vault (filesystem — no Obsidian app). Native graph traversal (follow/backlinks/link). Write via create/append/append_daily/patch/link — use [[wikilinks]] to connect notes. NOT manage_notes or read_file/write_file/bash.",
-    "search_knowledge": "Search the unified knowledge graph (tasks, documents, memories, skills, vault notes) and follow conceptual links. Compact snippets + neighbors; use read for full content. Prefer over multiple list/search tools for cross-entity context.",
+    "search_knowledge": "Search the unified knowledge graph (tasks, documents, memories, skills) and follow conceptual links. Use suggest_link to propose connections for user approval; use link only when the user explicitly asked to connect items.",
     "web_fetch": "Fetch and read the text content of a specific URL/website the user names (e.g. 'check example.com', 'open this link'). Use when you have a concrete URL; for open-ended lookups use web_search instead.",
     "read_file": "Read a file from disk and return its contents. View source code, config files, logs.",
     "write_file": "Write content to a file on disk. Create new files, save output, update configs.",
@@ -314,11 +313,10 @@ class ToolIndex:
                    "saved sources", "my citations", "zotero folder", "zotero collection",
                    "in my library", "from zotero", "papers in folder", "papers in my"}):
             {"search_zotero"},
-        frozenset({"obsidian", "my vault", "vault note", "daily note", "daily notes",
-                   "meeting notes", "meeting transcript", "in my notes", "my notes folder",
-                   "notes folder", "permanent notes", "wikilink", "wiki link", "backlink",
-                   "what did i write", "find my note", "read my note"}):
-            {"search_vault"},
+        frozenset({"create a document", "create document", "new document", "write a document",
+                   "make a document", "new file", "create a file", "write a file",
+                   "draft a document", "start a document"}):
+            {"create_document"},
         frozenset({"knowledge graph", "conceptual link", "what connects", "linked to",
                    "related task", "related document", "cross-entity", "show links",
                    "browse links", "how does this relate", "parent goal", "goal hierarchy",
@@ -432,8 +430,6 @@ class ToolIndex:
         for keywords, tools in self._KEYWORD_HINTS.items():
             if any(re.search(rf"\b{re.escape(kw)}\b", ql) for kw in keywords):
                 base.update(tools)
-        if "search_vault" in base:
-            base.discard("manage_notes")
         # Structural scheduling-intent detection — typo-resilient (the literal
         # keyword "every day" misses "every dya"). Catches "every <word>",
         # daily/nightly/etc., or a clock time like "at 7:30 am" / "7am", which

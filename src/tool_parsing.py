@@ -171,7 +171,7 @@ _TOOL_NAME_MAP = {
     "search_knowledge": "search_knowledge",
     "knowledge_graph": "search_knowledge",
     "vault_search_notes": "search_vault",
-    "obsidian": "search_vault",
+    "obsidian": "search_knowledge",
     "search_zotero": "search_zotero",
     "zotero": "search_zotero",
     "zotero_search": "search_zotero",

@@ -1728,8 +1728,7 @@ function initializeEventListeners() {
     _syncRagIndicator(ragState);
     const zoteroState = st.zotero || false;
     _syncZoteroIndicator(zoteroState);
-    const vaultState = st.vault || false;
-    _syncVaultIndicator(vaultState);
+    _syncVaultIndicator(false);
   }
 
   // ── Overflow "..." menu (Research) ──

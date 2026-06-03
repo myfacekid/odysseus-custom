@@ -340,6 +340,12 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     }
   }
 
+  if (typeof window !== 'undefined') {
+    window.addEventListener('document-library-refresh', () => {
+      if (_libraryOpen) void libraryFetch(false);
+    });
+  }
+
   function libraryRenderStats() {
     const el = document.getElementById('doclib-stats');
     if (!el) return;

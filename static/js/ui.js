@@ -303,8 +303,10 @@ export function showToast(msg, durationOrOpts) {
   _wireToastSwipe(toastEl);
   toastEl.textContent = '';
   toastEl.classList.remove('error');
+  toastEl._onToastDismiss = null;
 
   let duration = 1200, actionLabel = null, onAction = null, actionHint = null, actionIcon = null, leadingIcon = null;
+  let secondaryActionLabel = null, onSecondaryAction = null;
   if (typeof durationOrOpts === 'object' && durationOrOpts) {
     duration = durationOrOpts.duration || 5000;
     actionLabel = durationOrOpts.action;
@@ -312,6 +314,8 @@ export function showToast(msg, durationOrOpts) {
     actionHint = durationOrOpts.actionHint || null;
     actionIcon = durationOrOpts.actionIcon || null;
     leadingIcon = durationOrOpts.leadingIcon || null;
+    secondaryActionLabel = durationOrOpts.secondaryAction || null;
+    onSecondaryAction = durationOrOpts.onSecondaryAction || null;
   } else if (typeof durationOrOpts === 'number') {
     duration = durationOrOpts;
   }
@@ -338,6 +342,32 @@ export function showToast(msg, durationOrOpts) {
     const stack = document.createElement('span');
     stack.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;gap:1px;margin-left:10px;line-height:1;';
 
+    const btnRow = document.createElement('span');
+    btnRow.style.cssText = 'display:inline-flex;align-items:center;gap:6px;';
+
+    const btnStyle = 'padding:2px 10px;border:1px solid var(--fg);border-radius:4px;background:none;color:var(--fg);cursor:pointer;font-size:12px;pointer-events:auto;display:inline-flex;align-items:center;';
+
+    const finishToast = () => {
+      clearTimeout(toastEl._hideTimer);
+      toastEl.classList.add('exiting');
+      toastEl.classList.remove('show');
+      toastEl.style.pointerEvents = '';
+      toastEl._onToastDismiss = null;
+    };
+
+    if (secondaryActionLabel && onSecondaryAction) {
+      const secondaryBtn = document.createElement('button');
+      secondaryBtn.textContent = secondaryActionLabel;
+      secondaryBtn.style.cssText = btnStyle + 'opacity:0.85;';
+      secondaryBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        finishToast();
+        onSecondaryAction();
+      });
+      btnRow.appendChild(secondaryBtn);
+    }
+
     const btn = document.createElement('button');
     // If the caller supplied an SVG icon, prepend it. We trust the icon string
     // (only set internally) � never accept caller-controlled HTML otherwise.
@@ -347,19 +377,15 @@ export function showToast(msg, durationOrOpts) {
     } else {
       btn.textContent = actionLabel;
     }
-    // The toast itself is `pointer-events: none` so it doesn't block clicks
-    // beneath it. With an action button we need to flip both the toast AND
-    // the button so the user can actually click Undo. The flag is reset on
-    // the next plain showToast / showError call (those overwrite textContent
-    // which strips the button + we clear inline style at the top below).
-    btn.style.cssText = 'padding:2px 10px;border:1px solid var(--fg);border-radius:4px;background:none;color:var(--fg);cursor:pointer;font-size:12px;pointer-events:auto;display:inline-flex;align-items:center;';
+    btn.style.cssText = btnStyle;
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      toastEl.classList.remove('show');
+      finishToast();
       onAction();
     });
-    stack.appendChild(btn);
+    btnRow.appendChild(btn);
+    stack.appendChild(btnRow);
 
     // Keyboard-shortcut hints (Ctrl+Z / ?Z) are meaningless on touch devices �
     // skip them on mobile so the toast just shows the Undo button.
@@ -385,13 +411,15 @@ export function showToast(msg, durationOrOpts) {
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      clearTimeout(toastEl._hideTimer);
-      toastEl.classList.add('exiting');
-      toastEl.classList.remove('show');
+      finishToast();
+      if (onSecondaryAction) onSecondaryAction();
     });
     toastEl.appendChild(closeBtn);
 
     toastEl.style.pointerEvents = 'auto';
+    if (onSecondaryAction) {
+      toastEl._onToastDismiss = onSecondaryAction;
+    }
   } else {
     // No action � restore the default non-blocking behavior.
     toastEl.style.pointerEvents = '';
@@ -416,6 +444,11 @@ export function showToast(msg, durationOrOpts) {
     // NEXT plain toast, so a lingering action-toast could appear to
     // "lock" interaction near the top-right.
     toastEl.style.pointerEvents = '';
+    if (typeof toastEl._onToastDismiss === 'function') {
+      const cb = toastEl._onToastDismiss;
+      toastEl._onToastDismiss = null;
+      cb();
+    }
   }, duration);
 }
 

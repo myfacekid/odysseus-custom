@@ -1842,7 +1842,7 @@ async function _toggleOneThingTask(taskId, body, markBtn) {
     if (box) box.textContent = done ? '[x]' : '[ ]';
     markBtn.setAttribute('aria-label', done ? 'Mark not done' : 'Mark done');
     row?.querySelector('.one-thing-row-title')?.classList.toggle('is-done', done);
-    _oneThingBoard = null;
+    if (data.task) _upsertTaskInLocalBoard(data.task);
     _renderLabels(body);
   } catch {
     row?.classList.toggle('done', wasDone);
@@ -2075,11 +2075,12 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
   if (refresh === 'full') {
     await _fetchOneThingMeta();
     await _fetchOneThingBoard({ skipVault: false });
-  } else if (refresh === 'light') {
+  } else if (refresh === 'light' || (refresh === 'none' && !_oneThingBoard)) {
     await _fetchOneThingBoard({ skipVault: true });
   }
   if (token !== _oneThingRenderToken || !body) return;
   if (refresh !== 'none' && !_oneThingBoard) return;
+  if (!_oneThingBoard) return;
   body.innerHTML = '';
   _renderLabelsInto(body);
   const horizons = (_oneThingBoard && _oneThingBoard.horizons) || {};
@@ -2158,7 +2159,7 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
             <div class="one-thing-row-main">
               ${showEditPanel ? '' : `<div class="one-thing-row-title${task.done ? ' is-done' : ''}">${_esc(task.text || '')}</div>`}
               ${showEditPanel ? _oneThingRenderEditPanel(task) : ''}
-              ${showLinksPanel ? `<div class="one-thing-row-links-panel">${_oneThingRenderLinkPicker(_oneThingHorizon, task.parent_ids || [], { inputName: `links-${task.id}` })}<button type="button" class="one-thing-link-save" data-task-id="${_esc(task.id)}">Save links</button></div>` : ''}
+              ${showLinksPanel ? `<div class="one-thing-row-links-panel">${_oneThingRenderLinkPicker(_oneThingHorizon, task.parent_ids || [], { inputName: `links-${task.id}` })}<button type="button" class="one-thing-link-save" data-task-id="${_esc(task.id)}">Save links</button><div class="one-thing-graph-links" data-graph-from="task:${_esc(task.id)}"></div></div>` : ''}
               ${!showEditPanel && !showLinksPanel ? `<div class="one-thing-row-meta">
                 <span class="one-thing-priority ${priCls}">${_esc(_oneThingPriorityLabel(task.priority))}</span>${due}${completed}${missingLinks ? '<span class="one-thing-link-warning">Needs parent goal</span>' : ''}
               </div>${parentChips}` : ''}
@@ -2179,6 +2180,26 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
   _ensureOneThingClickDelegation(body);
   _wireOneThingEditPanels(body);
   _wireOneThingView(body);
+  void _mountOneThingGraphLinkPickers(body);
+}
+
+async function _mountOneThingGraphLinkPickers(body) {
+  const mounts = body?.querySelectorAll('.one-thing-graph-links[data-graph-from]');
+  if (!mounts?.length) return;
+  try {
+    const kg = await import('./knowledge.js');
+    const mount = kg.mountGraphLinkPicker || kg.default?.mountGraphLinkPicker;
+    if (!mount) return;
+    for (const el of mounts) {
+      const fromId = el.dataset.graphFrom;
+      if (!fromId) continue;
+      await mount(el, fromId, {
+        onUpdate: () => mount(el, fromId),
+      });
+    }
+  } catch {
+    /* graph picker optional */
+  }
 }
 
 function _wireOneThingView(body) {

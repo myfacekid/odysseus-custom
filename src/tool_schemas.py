@@ -161,17 +161,25 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_knowledge",
-            "description": "Search the unified knowledge graph: todos, documents, memories, skills, and vault notes — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use read action for full bodies.",
+            "description": "Search the unified knowledge graph: todos, documents, memories, skills — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use read action for full bodies. Use suggest_link (not link) when proposing connections the user should confirm.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["search", "read", "neighbors", "rebuild"],
-                        "description": "search=compact hits; read=full body; neighbors=linked nodes; rebuild=re-index graph",
+                        "enum": ["search", "read", "neighbors", "suggest_link", "link", "unlink", "rebuild"],
+                        "description": "search=compact hits; read=full body; neighbors=linked nodes; suggest_link=propose link for user approval; link/unlink=explicit edges (link only when user asked); rebuild=re-index graph",
                     },
                     "query": {"type": "string", "description": "Search terms"},
                     "id": {"type": "string", "description": "Node id for read/neighbors (e.g. task:uuid, document:id)"},
+                    "from": {"type": "string", "description": "Source node id for suggest_link/link/unlink"},
+                    "to": {"type": "string", "description": "Target node id for suggest_link/link/unlink"},
+                    "reason": {"type": "string", "description": "Brief reason shown to the user when suggesting a link"},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["link", "related", "supports"],
+                        "description": "Edge kind for link/unlink (default link)",
+                    },
                     "types": {
                         "type": "array",
                         "items": {"type": "string"},

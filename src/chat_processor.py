@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from src.chat_helpers import extract_urls
 from src.youtube_handler import is_youtube_url
 from src.search import comprehensive_web_search, fetch_webpage_content
+from src.constants import OBSIDIAN_INTEGRATION_ENABLED
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
 
 logger = logging.getLogger(__name__)
@@ -294,13 +295,9 @@ class ChatProcessor:
                     "content": "Zotero library search encountered an error and could not retrieve results.",
                 })
 
-        _inject_vault = use_vault
-        if not _inject_vault:
-            try:
-                from src.obsidian_vault import resolve_vault_config, vault_intent_in_query
-                _inject_vault = bool(resolve_vault_config(owner or "")) and vault_intent_in_query(message)
-            except Exception:
-                _inject_vault = False
+        _inject_vault = False
+        if OBSIDIAN_INTEGRATION_ENABLED and use_vault:
+            _inject_vault = True
         if _inject_vault:
             try:
                 from src.obsidian_vault import search_vault_for_chat

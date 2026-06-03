@@ -76,8 +76,7 @@ _AGENT_RULES = """\
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add.
-- "Create/add/write a note" / in-app "todos" / "remind me to X at <time>" (quick reminders, NOT Obsidian vault) → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate.
-- Obsidian vault / linked notes / daily notes / meeting transcripts / "what's in my notes folder" → call `search_vault` (list/read/search/follow/backlinks/create/append/patch/link). Use `follow` to traverse `[[wikilinks]]`; use `link` to connect notes; use `append_daily` for today's daily note. NOT `manage_notes` (in-app quick todos). NOT `read_file`/`write_file`/`bash` for vault paths.
+- "Create/add/write a note" / in-app todos / "remind me to X at <time>" → use `manage_notes` (checklist, reminders). Do NOT store note content in `manage_memory`.
 - "Do X every morning / daily / on a schedule / automatically" (e.g. "summarize my inbox every morning") → this is a request to CREATE A SCHEDULED TASK, not to do X once right now. Call `manage_tasks` with action=create (prompt = what to do, schedule + cron/time). Do NOT just perform the action inline this turn — the user wants it to recur. After creating, return a clickable `[Task name](#task-<id>)` link and tell them it'll run on schedule and show in the Tasks panel. If you also want to show a sample of this run, do that AFTER creating the task, not instead of it.
 
 ## UI conventions
@@ -116,13 +115,13 @@ _API_AGENT_RULES = """\
 - AFTER A TOOL FAILS, DO NOT GO SILENT. The user expects a follow-up: retry with a fix, run a diagnostic (`tail`, `ls`, `which`), or explicitly tell them what didn't work and what you'll try next. Failure is not a stopping condition.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
-- "Create/add/write a note" / in-app quick reminders / "remind me at 3pm" (NOT One Thing horizons) → use `manage_notes`. For **One Thing** tasks (this week / ~3 months / this year horizons with priority + due date, synced to Obsidian daily note) → use `search_vault` with `action=list_tasks|add_task|toggle_task|get_daily` OR `manage_notes` with `action=list_one_thing|add_one_thing|toggle_one_thing`. Horizons: `focus`=One Thing this week, `build`=Intermediate ~3 months, `aim`=Long horizon this year. Priorities: `critical`, `elevated`, `steady`. Do NOT store notes in `manage_memory`.
+- "Create/add/write a note" / quick reminders / "remind me at 3pm" → use `manage_notes`. For **One Thing** horizons (this week / ~3 months / this year with priority + due date) → use `manage_notes` with `action=list_one_thing|add_one_thing|toggle_one_thing`. Horizons: `focus`=this week, `build`=~3 months, `aim`=this year. Priorities: `critical`, `elevated`, `steady`. Do NOT store notes in `manage_memory`.
+- New documents, articles, files, or long-form content for the Library → `create_document` (appears in Documents library + Links). NOT `write_file` or markdown-on-disk tools.
 - Cross-entity context ("what connects to X", tasks + docs + memories together) → call `search_knowledge` (search/read/neighbors). Prefer over calling manage_documents + manage_memory + list_tasks separately.
-- Markdown vault folder (freeform notes, daily log, wikilinks on disk) → call `search_vault` for read/write/search/follow on files. One Thing todos live in Nobody + the knowledge graph — NOT vault markdown checkboxes.
+- When two graph items clearly relate (documents, tasks, memories, skills) → call `search_knowledge` with `action=suggest_link` and a brief `reason`. The user gets a notification to link or dismiss — do NOT call `link` unless they explicitly asked to connect them. Use graph ids like `document:<uuid>` from create_document results or search_knowledge hits.
 - "Disable/turn off/enable/turn on <tool>" (shell, search, research, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, search→web, deepresearch→research, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
 - "Research X" / "do research on X" / "look into Y" / "deep dive on Z" → call `trigger_research` with `topic`. This starts a live job that appears in the Deep Research sidebar (streams progress + final report). **Do NOT use `web_search` for these** — saw the agent do a plain web_search for "do research on X" when the user wanted the deep-research job. "research X" is a deep-research request, not a quick lookup. (web_search is only for a single quick fact mid-task.) Do NOT POST /api/research/start via app_api either — blocked. After starting, tell the user it's running in the Deep Research sidebar. Only if the user explicitly wants it inline/quick should you fall back to web_search.
 - "My Zotero library" / "my papers" / "saved sources" / "papers in folder X" / "what do I have on Y in Zotero" → call `search_zotero`. If the user names a folder and you're unsure of the exact path, call `search_zotero` with `action=list_collections` first, then search with `collection` set to the matching path or key. NOT web_search (that's the public web) and NOT trigger_research (that's a new deep-research job).
-- Obsidian vault / linked notes / daily notes / meeting transcripts / "what's in folder X" in my vault → call `search_vault`. Read/search: `action=read|search|follow|backlinks|get_daily|list_tasks`. Write: `create`, `append`, `append_daily`, `patch`, `link`, `add_task`, `toggle_task`. One Thing horizons: focus=this week, build=~3 months, aim=this year. NOT generic `manage_notes` for vault-synced One Thing tasks. NOT `read_file`/`write_file`/`bash`.
 - "Open/show <panel>" (documents, library, gallery, sessions, brain/memories, skills, settings, notes, cookbook) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open cookbook" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add.
 - You are running INSIDE Odysseus — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
@@ -257,7 +256,7 @@ Insert a wikilink from one note to another — builds the knowledge graph. NOT m
 ```search_knowledge
 {"action": "search", "query": "epistasis lab deadline", "types": ["task", "document"], "limit": 10, "expand_hops": 1}
 ```
-Unified knowledge graph search — todos, documents, memories, skills, vault notes. Returns compact snippets + linked neighbors. Prefer this for cross-entity context.
+Unified knowledge graph search — todos, documents, memories, skills. Returns compact snippets + linked neighbors. Prefer this for cross-entity context.
 
 ```search_knowledge
 {"action": "read", "id": "document:abc123", "max_chars": 4000}
@@ -267,7 +266,22 @@ Load full content for one graph node after search.
 ```search_knowledge
 {"action": "neighbors", "id": "task:uuid-here"}
 ```
-Browse conceptual links (parent goals, wikilinks, etc.) for a node.""",
+Browse conceptual links (parent goals, wikilinks, etc.) for a node.
+
+```search_knowledge
+{"action": "suggest_link", "from": "document:uuid-a", "to": "document:uuid-b", "kind": "related", "reason": "Both cover the same experiment methods"}
+```
+Propose a link between two graph nodes — the user gets a notification to accept or dismiss. Use during conversation when items clearly relate. Requires graph node ids (search first, or use graph_node_id from create_document). Do NOT use `link` unless the user explicitly asked to connect them.
+
+```search_knowledge
+{"action": "link", "from": "task:uuid", "to": "document:uuid", "kind": "related"}
+```
+Create an explicit cross-entity link immediately (only when the user explicitly requested linking).
+
+```search_knowledge
+{"action": "unlink", "from": "task:uuid", "to": "document:uuid"}
+```
+Remove a manual link between two nodes.""",
 
     "web_fetch": """\
 ```web_fetch
@@ -294,7 +308,7 @@ Write content to a file. First line is the path, rest is the content.""",
 <language>
 <content>
 ```
-Create a NEW document in the editor panel. Only use when the user explicitly asks for a new file/document. If a document is already open in the editor, the user's request "fix this", "add X", "change Y", etc. refers to THAT document — use edit_document, never create_document.""",
+Create a NEW document in the editor panel (Library + Links → Documents). Only use when the user explicitly asks for a new file/document. If a document is already open in the editor, the user's request "fix this", "add X", "change Y", etc. refers to THAT document — use edit_document, never create_document.""",
 
     "edit_document": """\
 ```edit_document
@@ -440,7 +454,7 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
         ]
         # Local/compact models still need fenced examples for retrieval tools.
         _FENCE_TOOLS = (
-            "search_vault", "search_zotero", "web_search", "web_fetch",
+            "search_zotero", "web_search", "web_fetch",
             "trigger_research", "manage_notes", "manage_calendar",
         )
         fence_blocks = []
@@ -1414,9 +1428,8 @@ async def stream_agent_loop(
             if any(kw in ql for kw in keywords):
                 _relevant_tools.update(tools)
         # Always include core document/memory tools
-        _relevant_tools.update({"create_document", "manage_memory", "manage_notes"})
-        if "search_vault" in _relevant_tools:
-            _relevant_tools.discard("manage_notes")
+        _relevant_tools.update({"create_document", "manage_memory", "manage_notes", "search_knowledge"})
+
         logger.info(f"[tool-rag] Keyword fallback selected: {sorted(_relevant_tools - ALWAYS_AVAILABLE)}")
 
     # If a document is open the model needs the editing tools available
@@ -1424,18 +1437,6 @@ async def stream_agent_loop(
     # or what keywords were in the latest user message.
     if _relevant_tools is not None and active_document is not None:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
-
-    # Vault: ensure search_vault reaches the prompt for local models (Gemma, etc.)
-    # when the vault exists and the user is asking vault-ish questions.
-    if _relevant_tools is not None and _retrieval_query:
-        try:
-            from src.obsidian_vault import resolve_vault_config, vault_intent_in_query
-            if resolve_vault_config(owner or "") and vault_intent_in_query(_retrieval_query):
-                _relevant_tools.add("search_vault")
-        except Exception:
-            pass
-        if "search_vault" in _relevant_tools:
-            _relevant_tools.discard("manage_notes")
 
     prep_timings["tool_selection"] = time.time() - _t1
 
@@ -2120,6 +2121,21 @@ async def stream_agent_loop(
                         f'data: {json.dumps({"type": "doc_update", "doc_id": result["doc_id"], "content": result["content"], "version": result["version"], "title": result.get("title", ""), "language": result.get("language")})}\n\n'
                     )
 
+            if block.tool_type == "search_knowledge" and result.get("action") == "suggest_link":
+                _link_payload = {
+                    "type": "link_suggestion",
+                    "from": result.get("from"),
+                    "to": result.get("to"),
+                    "from_title": result.get("from_title"),
+                    "to_title": result.get("to_title"),
+                    "from_type": result.get("from_type"),
+                    "to_type": result.get("to_type"),
+                    "kind": result.get("kind"),
+                    "reason": result.get("reason"),
+                    "suggestion_id": result.get("suggestion_id"),
+                }
+                yield f'data: {json.dumps(_link_payload)}\n\n'
+
             # Emit ui_control event for frontend to apply UI changes
             if "ui_event" in result:
                 yield (
@@ -2134,7 +2150,7 @@ async def stream_agent_loop(
                 title = result.get("title", "")
                 ver = result.get("version", "?")
                 if action == "create":
-                    output_text = f'Document created: "{title}" (v{ver})'
+                    output_text = f'Document created: "{title}" (v{ver}) — graph id document:{result.get("doc_id", "")}'
                 elif action == "edit":
                     output_text = f'Document edited: "{title}" (v{ver}, {result.get("applied", 0)} edit(s))'
                 elif action == "update":
@@ -2168,6 +2184,18 @@ async def stream_agent_loop(
 
             # Emit tool_output (include ui_event data if present)
             tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code")}
+            if block.tool_type == "search_knowledge" and result.get("action") == "suggest_link":
+                tool_output_data["link_suggestion"] = {
+                    "from": result.get("from"),
+                    "to": result.get("to"),
+                    "from_title": result.get("from_title"),
+                    "to_title": result.get("to_title"),
+                    "from_type": result.get("from_type"),
+                    "to_type": result.get("to_type"),
+                    "kind": result.get("kind"),
+                    "reason": result.get("reason"),
+                    "suggestion_id": result.get("suggestion_id"),
+                }
             if "ui_event" in result:
                 tool_output_data["ui_event"] = result["ui_event"]
                 for k in ("toggle_name", "state", "mode", "model", "endpoint_url", "theme_name", "colors"):

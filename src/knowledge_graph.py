@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from src.constants import DATA_DIR
+from src.constants import DATA_DIR, OBSIDIAN_INTEGRATION_ENABLED
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,8 @@ DEBOUNCE_SEC = 0.45
 
 _NODE_TYPES = frozenset({"task", "document", "memory", "skill", "note"})
 _EDGE_KINDS = frozenset({"parent", "link", "wikilink", "related", "supports"})
+_MANUAL_EDGE_KINDS = frozenset({"link", "related", "supports"})
+_INFERRED_EDGE_KINDS = frozenset({"parent", "wikilink"})
 
 _debounce_lock = threading.Lock()
 _debounce_timers: Dict[str, threading.Timer] = {}
@@ -137,6 +139,223 @@ def load_edges(owner: str) -> List[dict]:
     return _read_jsonl(_owner_dir(owner) / "edges.jsonl")
 
 
+def _manual_edges_path(owner: str) -> Path:
+    return _owner_dir(owner) / "manual_edges.jsonl"
+
+
+def load_manual_edges(owner: str) -> List[dict]:
+    rows = _read_jsonl(_manual_edges_path(owner))
+    out: List[dict] = []
+    for row in rows:
+        fr, to = (row.get("from") or "").strip(), (row.get("to") or "").strip()
+        if not fr or not to or fr == to:
+            continue
+        kind = row.get("kind") or "link"
+        if kind not in _MANUAL_EDGE_KINDS:
+            kind = "link"
+        out.append({"from": fr, "to": to, "kind": kind, "source": "manual"})
+    return out
+
+
+def save_manual_edges(owner: str, edges: List[dict]) -> None:
+    rows = []
+    seen: Set[Tuple[str, str, str]] = set()
+    for row in edges:
+        fr, to = (row.get("from") or "").strip(), (row.get("to") or "").strip()
+        if not fr or not to or fr == to:
+            continue
+        kind = row.get("kind") or "link"
+        if kind not in _MANUAL_EDGE_KINDS:
+            kind = "link"
+        key = (fr, to, kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"from": fr, "to": to, "kind": kind, "source": "manual"})
+    _write_jsonl(_manual_edges_path(owner), rows)
+
+
+def _merge_edge_lists(*lists: Iterable[dict]) -> List[dict]:
+    merged: List[dict] = []
+    seen: Set[Tuple[str, str, str]] = set()
+    for rows in lists:
+        for row in rows or []:
+            fr, to = (row.get("from") or "").strip(), (row.get("to") or "").strip()
+            if not fr or not to or fr == to:
+                continue
+            kind = row.get("kind") or "link"
+            if kind not in _EDGE_KINDS:
+                kind = "link"
+            key = (fr, to, kind)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append({"from": fr, "to": to, "kind": kind})
+    return merged
+
+
+def _is_library_document(node: dict) -> bool:
+    """Editor documents that appear in the Documents library (not vault markdown)."""
+    if (node.get("type") or "").lower() != "document":
+        return False
+    meta = node.get("meta") or {}
+    return meta.get("source") == "editor"
+
+
+def normalize_node_id(owner: str, ref: str) -> Optional[str]:
+    """Resolve a node reference to the canonical graph id."""
+    raw = (ref or "").strip()
+    if not raw:
+        return None
+    node = get_node(owner, raw)
+    return node.get("id") if node else None
+
+
+def _reindex_if_missing(owner: str, *refs: str) -> None:
+    """Rebuild the graph when a referenced node is missing (e.g. doc just created)."""
+    if not owner:
+        return
+    nodes = load_nodes(owner)
+    if not nodes:
+        rebuild_owner_graph(owner)
+        return
+    for ref in refs:
+        if ref and not get_node(owner, ref):
+            rebuild_owner_graph(owner)
+            return
+
+
+def _sync_edges_from_manual(owner: str) -> int:
+    """Rewrite edges.jsonl from inferred edges + manual list without reloading nodes."""
+    manual = load_manual_edges(owner)
+    edges = load_edges(owner)
+    inferred = [e for e in edges if e.get("kind") in _INFERRED_EDGE_KINDS]
+    merged = _merge_edge_lists(inferred, manual)
+    owner_dir = _owner_dir(owner)
+    _write_jsonl(owner_dir / "edges.jsonl", merged)
+    node_count = 0
+    manifest_path = owner_dir / "manifest.json"
+    if manifest_path.is_file():
+        try:
+            node_count = int(json.loads(manifest_path.read_text(encoding="utf-8")).get("node_count") or 0)
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            node_count = len(load_nodes(owner))
+    else:
+        node_count = len(load_nodes(owner))
+    _write_manifest(owner_dir, owner, node_count=node_count, edge_count=len(merged))
+    return len(merged)
+
+
+def add_graph_link(
+    owner: str,
+    from_ref: str,
+    to_ref: str,
+    *,
+    kind: str = "link",
+) -> Dict[str, Any]:
+    kind = (kind or "link").strip().lower()
+    if kind not in _MANUAL_EDGE_KINDS:
+        kind = "link"
+    fr = normalize_node_id(owner, from_ref)
+    to = normalize_node_id(owner, to_ref)
+    if not fr or not to:
+        _reindex_if_missing(owner, from_ref, to_ref)
+        fr = normalize_node_id(owner, from_ref)
+        to = normalize_node_id(owner, to_ref)
+    if not fr or not to:
+        return {"ok": False, "error": "Both nodes must exist in the graph — try Rebuild links first."}
+    if fr == to:
+        return {"ok": False, "error": "Cannot link a node to itself."}
+    manual = load_manual_edges(owner)
+    key = (fr, to, kind)
+    if any((e.get("from"), e.get("to"), e.get("kind")) == key for e in manual):
+        return {"ok": True, "from": fr, "to": to, "kind": kind, "duplicate": True}
+    manual.append({"from": fr, "to": to, "kind": kind, "source": "manual"})
+    save_manual_edges(owner, manual)
+    _sync_edges_from_manual(owner)
+    return {"ok": True, "from": fr, "to": to, "kind": kind}
+
+
+def remove_graph_link(
+    owner: str,
+    from_ref: str,
+    to_ref: str,
+    *,
+    kind: Optional[str] = None,
+) -> Dict[str, Any]:
+    fr = normalize_node_id(owner, from_ref)
+    to = normalize_node_id(owner, to_ref)
+    if not fr or not to:
+        return {"ok": False, "error": "Node not found"}
+    kind_l = (kind or "").strip().lower() or None
+    manual = load_manual_edges(owner)
+    before = len(manual)
+    manual = [
+        e
+        for e in manual
+        if not (
+            e.get("from") == fr
+            and e.get("to") == to
+            and (kind_l is None or e.get("kind") == kind_l)
+        )
+    ]
+    if len(manual) == before:
+        return {"ok": False, "error": "Manual link not found"}
+    save_manual_edges(owner, manual)
+    _sync_edges_from_manual(owner)
+    return {"ok": True, "removed": True}
+
+
+def suggest_graph_link(
+    owner: str,
+    from_ref: str,
+    to_ref: str,
+    *,
+    kind: str = "related",
+    reason: str = "",
+) -> Dict[str, Any]:
+    """Propose a manual graph link for user approval — does not write edges."""
+    kind = (kind or "related").strip().lower()
+    if kind not in _MANUAL_EDGE_KINDS:
+        kind = "related"
+    _reindex_if_missing(owner, from_ref, to_ref)
+    fr = normalize_node_id(owner, from_ref)
+    to = normalize_node_id(owner, to_ref)
+    if not fr or not to:
+        return {"ok": False, "error": "Both nodes must exist in the graph — search first, then suggest."}
+    if fr == to:
+        return {"ok": False, "error": "Cannot link a node to itself."}
+    from_node = get_node(owner, fr) or {}
+    to_node = get_node(owner, to) or {}
+    edges = load_edges(owner)
+    already = any(
+        e.get("from") == fr and e.get("to") == to and e.get("kind") == kind
+        for e in edges
+    )
+    reason_t = (reason or "").strip()
+    from_title = (from_node.get("title") or fr).strip()
+    to_title = (to_node.get("title") or to).strip()
+    return {
+        "ok": True,
+        "action": "suggest_link",
+        "from": fr,
+        "to": to,
+        "from_title": from_title,
+        "to_title": to_title,
+        "from_type": from_node.get("type") or "",
+        "to_type": to_node.get("type") or "",
+        "kind": kind,
+        "reason": reason_t,
+        "suggestion_id": f"{fr}|{to}|{kind}",
+        "already_linked": already,
+        "output": (
+            f"Suggested link ({kind}): {from_title} → {to_title}"
+            + (f" — {reason_t}" if reason_t else "")
+            + (" (already linked)" if already else "")
+        ),
+    }
+
+
 def save_graph(owner: str, nodes: Dict[str, dict], edges: List[dict]) -> None:
     owner_dir = _owner_dir(owner)
     _write_jsonl(owner_dir / "nodes.jsonl", nodes.values())
@@ -168,7 +387,7 @@ def _matches_type_filter(node: dict, type_filter: Optional[str]) -> bool:
     ntype = (node.get("type") or "").lower()
     want = type_filter.lower()
     if want == "document":
-        return ntype in ("document", "note")
+        return ntype in ("document", "note") and _is_library_document(node)
     return ntype == want
 
 
@@ -197,7 +416,7 @@ def _score_node(node: dict, tokens: List[str], phrase: str) -> float:
 
 
 def rebuild_owner_graph(owner: str) -> dict:
-    """Full re-index from DB + skills (+ optional vault notes)."""
+    """Full re-index from DB + skills."""
     if not owner:
         return {"ok": False, "error": "owner required"}
 
@@ -250,15 +469,20 @@ def rebuild_owner_graph(owner: str) -> dict:
     except Exception as e:
         logger.warning(f"Knowledge graph task index failed for {owner}: {e}")
 
-    # --- Documents ---
+    # --- Documents (match Documents library: active, not archived) ---
     try:
+        from sqlalchemy import or_
+
         from core.database import Document, SessionLocal
 
         db = SessionLocal()
         try:
+            _arch_cond = or_(Document.archived == False, Document.archived.is_(None))  # noqa: E712
             docs = (
                 db.query(Document)
-                .filter(Document.owner == owner, Document.archived == False)  # noqa: E712
+                .filter(Document.owner == owner)
+                .filter(Document.is_active == True)  # noqa: E712
+                .filter(_arch_cond)
                 .order_by(Document.updated_at.desc())
                 .limit(2000)
                 .all()
@@ -270,7 +494,12 @@ def rebuild_owner_graph(owner: str) -> dict:
                     type="document",
                     title=(doc.title or "Untitled").strip(),
                     snippet=_snippet(doc.current_content or ""),
-                    meta={"language": doc.language or "text", "archived": bool(doc.archived)},
+                    meta={
+                        "source": "editor",
+                        "document_id": doc.id,
+                        "language": doc.language or "text",
+                        "archived": bool(doc.archived),
+                    },
                 ).to_dict()
         finally:
             db.close()
@@ -326,47 +555,56 @@ def rebuild_owner_graph(owner: str) -> dict:
     except Exception as e:
         logger.warning(f"Knowledge graph skill index failed for {owner}: {e}")
 
-    # --- Vault markdown (indexed as documents — same conceptual bucket as editor docs) ---
-    try:
-        from src.obsidian_vault import resolve_vault_config, _iter_notes
-        from src.vault_note_parser import parse_note
+    # --- Vault markdown (optional — off when OBSIDIAN_INTEGRATION_ENABLED is False) ---
+    if OBSIDIAN_INTEGRATION_ENABLED:
+        try:
+            from src.obsidian_vault import resolve_vault_config, _iter_notes
+            from src.vault_note_parser import parse_note
 
-        cfg = resolve_vault_config(owner)
-        if cfg:
-            note_links: Dict[str, Set[str]] = {}
-            for rel, full in _iter_notes(cfg):
-                nid = node_id("document", f"vault:{rel}")
-                try:
-                    text = full.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    continue
-                parsed = parse_note(rel, text)
-                title = Path(rel).stem.replace("-", " ").replace("_", " ")
-                nodes[nid] = KnowledgeNode(
-                    id=nid,
-                    type="document",
-                    title=title,
-                    snippet=_snippet(parsed.body or text),
-                    meta={"source": "vault", "path": rel, "language": "markdown"},
-                ).to_dict()
-                note_links[nid] = set(parsed.wikilinks)
+            cfg = resolve_vault_config(owner)
+            if cfg:
+                note_links: Dict[str, Set[str]] = {}
+                for rel, full in _iter_notes(cfg):
+                    nid = node_id("document", f"vault:{rel}")
+                    try:
+                        text = full.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    parsed = parse_note(rel, text)
+                    title = Path(rel).stem.replace("-", " ").replace("_", " ")
+                    nodes[nid] = KnowledgeNode(
+                        id=nid,
+                        type="document",
+                        title=title,
+                        snippet=_snippet(parsed.body or text),
+                        meta={"source": "vault", "path": rel, "language": "markdown"},
+                    ).to_dict()
+                    note_links[nid] = set(parsed.wikilinks)
 
-            stems = {
-                Path(n.get("meta", {}).get("path", "")).stem.lower(): nid
-                for nid, n in nodes.items()
-                if n.get("meta", {}).get("source") == "vault"
-            }
-            for src, targets in note_links.items():
-                for target in targets:
-                    stem = Path(target).stem.lower() if target else ""
-                    dst = stems.get(stem) or stems.get(target.lower().replace(" ", "-"))
-                    if dst:
-                        add_edge(src, dst, "wikilink")
-    except Exception as e:
-        logger.debug(f"Vault note index skipped for {owner}: {e}")
+                stems = {
+                    Path(n.get("meta", {}).get("path", "")).stem.lower(): nid
+                    for nid, n in nodes.items()
+                    if n.get("meta", {}).get("source") == "vault"
+                }
+                for src, targets in note_links.items():
+                    for target in targets:
+                        stem = Path(target).stem.lower() if target else ""
+                        dst = stems.get(stem) or stems.get(target.lower().replace(" ", "-"))
+                        if dst:
+                            add_edge(src, dst, "wikilink")
+        except Exception as e:
+            logger.debug(f"Vault note index skipped for {owner}: {e}")
 
-    save_graph(owner, nodes, edges)
-    return {"ok": True, "nodes": len(nodes), "edges": len(edges), "owner": owner}
+    manual = load_manual_edges(owner)
+    all_edges = _merge_edge_lists(edges, manual)
+    save_graph(owner, nodes, all_edges)
+    return {
+        "ok": True,
+        "nodes": len(nodes),
+        "edges": len(all_edges),
+        "manual_edges": len(manual),
+        "owner": owner,
+    }
 
 
 def schedule_rebuild(owner: str) -> None:
@@ -446,12 +684,23 @@ def search_knowledge(
 
 
 def get_node(owner: str, full_id: str) -> Optional[dict]:
+    raw = (full_id or "").strip()
+    if not raw:
+        return None
     nodes = load_nodes(owner)
-    n = nodes.get(full_id)
+    n = nodes.get(raw)
     if n:
         return n
-    ntype, rid = parse_node_id(full_id)
-    return nodes.get(node_id(ntype, rid))
+    ntype, rid = parse_node_id(raw)
+    n = nodes.get(node_id(ntype, rid))
+    if n:
+        return n
+    # Legacy rows may omit the type prefix in stored ids.
+    for candidate in nodes.values():
+        cid = candidate.get("id") or ""
+        if cid == raw or cid.endswith(f":{raw}") or raw.endswith(f":{cid}"):
+            return candidate
+    return None
 
 
 def get_neighbors(
@@ -460,13 +709,16 @@ def get_neighbors(
     *,
     direction: str = "both",
 ) -> Dict[str, Any]:
-    ntype, rid = parse_node_id(full_id)
-    fid = node_id(ntype, rid)
     nodes = load_nodes(owner)
-    node = nodes.get(fid)
+    if not nodes:
+        rebuild_owner_graph(owner)
+        nodes = load_nodes(owner)
+
+    node = get_node(owner, (full_id or "").strip())
     if not node:
         return {"node": None, "outgoing": [], "incoming": []}
 
+    fid = node.get("id") or node_id(*parse_node_id(full_id))
     edges = load_edges(owner)
     outgoing: List[dict] = []
     incoming: List[dict] = []
@@ -526,7 +778,12 @@ def read_knowledge_content(owner: str, full_id: str, *, max_chars: int = 8000) -
                 doc = db.query(Document).filter(Document.id == rid, Document.owner == owner).first()
                 if doc:
                     body = doc.current_content or ""
-                    meta = {"title": doc.title, "language": doc.language, "source": "editor"}
+                    meta = {
+                        "title": doc.title,
+                        "language": doc.language,
+                        "source": "editor",
+                        "document_id": doc.id,
+                    }
             finally:
                 db.close()
     elif ntype == "memory":
@@ -726,7 +983,53 @@ def execute_knowledge_tool(args: dict, owner: str = "") -> Dict[str, Any]:
             "exit_code": 0,
         }
 
+    if action in ("link", "add_link", "connect"):
+        fr = (args.get("from") or args.get("from_id") or args.get("source") or "").strip()
+        to = (args.get("to") or args.get("to_id") or args.get("target") or "").strip()
+        if not fr or not to:
+            return {"error": "Provide from and to node ids (e.g. task:uuid → document:uuid)", "exit_code": 1}
+        kind = (args.get("kind") or "link").strip().lower()
+        result = add_graph_link(owner, fr, to, kind=kind)
+        if not result.get("ok"):
+            return {"error": result.get("error", "link failed"), "exit_code": 1}
+        return {
+            "output": f"Linked {result['from']} → {result['to']} ({result['kind']})",
+            "exit_code": 0,
+        }
+
+    if action in ("suggest_link", "propose_link"):
+        fr = (args.get("from") or args.get("from_id") or args.get("source") or "").strip()
+        to = (args.get("to") or args.get("to_id") or args.get("target") or "").strip()
+        if not fr or not to:
+            return {"error": "Provide from and to node ids to suggest a link", "exit_code": 1}
+        kind = (args.get("kind") or "related").strip().lower()
+        reason = (args.get("reason") or args.get("why") or "").strip()
+        result = suggest_graph_link(owner, fr, to, kind=kind, reason=reason)
+        if not result.get("ok"):
+            return {"error": result.get("error", "suggest failed"), "exit_code": 1}
+        if result.get("already_linked"):
+            return {
+                "output": result.get("output") or "Already linked.",
+                "exit_code": 0,
+            }
+        return {
+            **result,
+            "output": result.get("output") or f"Suggested link: {result.get('from_title')} → {result.get('to_title')}",
+            "exit_code": 0,
+        }
+
+    if action in ("unlink", "remove_link", "disconnect"):
+        fr = (args.get("from") or args.get("from_id") or "").strip()
+        to = (args.get("to") or args.get("to_id") or "").strip()
+        if not fr or not to:
+            return {"error": "Provide from and to node ids to remove the link", "exit_code": 1}
+        kind = args.get("kind")
+        result = remove_graph_link(owner, fr, to, kind=kind)
+        if not result.get("ok"):
+            return {"error": result.get("error", "unlink failed"), "exit_code": 1}
+        return {"output": "Link removed.", "exit_code": 0}
+
     return {
-        "error": "Unknown action. Use search, read, neighbors, rebuild.",
+        "error": "Unknown action. Use search, read, neighbors, suggest_link, link, unlink, rebuild.",
         "exit_code": 1,
     }

@@ -1,13 +1,10 @@
-"""Todos board — immediate tasks, miscellaneous items, and Obsidian vault sync.
+"""Todos board — immediate tasks, goal horizons, and knowledge graph index.
 
 Horizons:
-  focus — Immediate Tasks (mirrored to today's daily note)
+  focus — Immediate Tasks
   build — Intermediate Goals (~3 months)
   aim   — Long Horizon (~1 year)
   misc  — Miscellaneous tasks
-
-Nobody holds the source of truth (one pinned ``one_thing`` note per user).
-Vault markdown mirrors tasks for Obsidian ``- [ ]`` checkbox compatibility.
 """
 from __future__ import annotations
 
@@ -623,14 +620,8 @@ def board_to_dict(
 
 
 def get_daily_summary(db, owner: str) -> dict:
-    from src.vault_write import daily_vault_note_path
-    from src.obsidian_vault import resolve_vault_config
-
-    config = resolve_vault_config(owner)
-    daily_path = daily_vault_note_path(config, None) if config else None
     focus = list_tasks(db, owner, horizon="focus", include_done=False)
     return {
-        "daily_note_path": daily_path,
         "date": date.today().isoformat(),
         "focus_tasks": [t.to_item() for t in focus],
         "open_count": len(focus),

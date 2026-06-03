@@ -3,17 +3,19 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from src.auth_helpers import get_current_user
 from src.knowledge_graph import (
+    add_graph_link,
     execute_knowledge_tool,
     get_neighbors,
     get_node,
     list_graph_summary,
     read_knowledge_content,
     rebuild_owner_graph,
+    remove_graph_link,
     schedule_rebuild,
     search_knowledge,
 )
@@ -26,6 +28,18 @@ class KnowledgeSearchRequest(BaseModel):
     types: Optional[List[str]] = None
     limit: int = Field(default=20, ge=1, le=50)
     expand_hops: int = Field(default=1, ge=0, le=2)
+
+
+class GraphLinkCreate(BaseModel):
+    from_id: str = Field(..., min_length=1)
+    to_id: str = Field(..., min_length=1)
+    kind: str = Field(default="link")
+
+
+class GraphLinkRemove(BaseModel):
+    from_id: str = Field(..., min_length=1)
+    to_id: str = Field(..., min_length=1)
+    kind: Optional[str] = None
 
 
 def setup_knowledge_routes() -> APIRouter:
@@ -73,6 +87,15 @@ def setup_knowledge_routes() -> APIRouter:
             raise HTTPException(404, "Node not found")
         return {"node": node}
 
+    @router.get("/neighbors")
+    def neighbors_query(request: Request, id: str = Query(..., min_length=1)):
+        """Resolve links by node id — query param avoids path encoding issues with ``document:vault:…`` ids."""
+        owner = _owner(request)
+        result = get_neighbors(owner, id)
+        if not result.get("node"):
+            raise HTTPException(404, "Node not found")
+        return result
+
     @router.get("/nodes/{node_id:path}/neighbors")
     def neighbors_route(node_id: str, request: Request):
         owner = _owner(request)
@@ -81,6 +104,14 @@ def setup_knowledge_routes() -> APIRouter:
             raise HTTPException(404, "Node not found")
         return result
 
+    @router.get("/content")
+    def content_query(request: Request, id: str = Query(..., min_length=1), max_chars: int = 12000):
+        owner = _owner(request)
+        out = read_knowledge_content(owner, id, max_chars=max_chars)
+        if out.get("exit_code") != 0:
+            raise HTTPException(404, out.get("error") or "Not found")
+        return out
+
     @router.get("/nodes/{node_id:path}/content")
     def content_route(node_id: str, request: Request, max_chars: int = 12000):
         owner = _owner(request)
@@ -88,6 +119,27 @@ def setup_knowledge_routes() -> APIRouter:
         if out.get("exit_code") != 0:
             raise HTTPException(404, out.get("error") or "Not found")
         return out
+
+    @router.post("/links")
+    def create_link(body: GraphLinkCreate, request: Request):
+        owner = _owner(request)
+        result = add_graph_link(owner, body.from_id, body.to_id, kind=body.kind)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error") or "Link failed")
+        return result
+
+    @router.delete("/links")
+    def delete_link(
+        request: Request,
+        from_id: str = Query(..., min_length=1),
+        to_id: str = Query(..., min_length=1),
+        kind: Optional[str] = Query(None),
+    ):
+        owner = _owner(request)
+        result = remove_graph_link(owner, from_id, to_id, kind=kind)
+        if not result.get("ok"):
+            raise HTTPException(404, result.get("error") or "Link not found")
+        return result
 
     @router.post("/rebuild")
     def rebuild(request: Request):

@@ -8,11 +8,19 @@ import pytest
 from src.knowledge_graph import (
     KnowledgeEdge,
     KnowledgeNode,
+    add_graph_link,
     execute_knowledge_tool,
+    get_neighbors,
+    list_graph_summary,
+    load_edges,
+    load_manual_edges,
     node_id,
     rebuild_owner_graph,
+    remove_graph_link,
     save_graph,
     search_knowledge,
+    suggest_graph_link,
+    _is_library_document,
     _owner_dir,
 )
 
@@ -105,3 +113,159 @@ def test_rebuild_from_one_thing_db(tmp_path, monkeypatch):
     nb = execute_knowledge_tool({"action": "neighbors", "id": "task:child"}, owner="tester")
     assert nb["exit_code"] == 0
     assert "Parent goal" in nb["output"]
+
+
+def test_get_neighbors_resolves_document_ids_with_colons(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    owner = "tester"
+    doc_id = "document:vault:Daily Notes/2026-06-01.md"
+    task_id = "task:child"
+    parent_id = "task:parent"
+    nodes = {
+        doc_id: KnowledgeNode(
+            id=doc_id,
+            type="document",
+            title="Daily note",
+            snippet="Some content",
+            meta={"source": "vault", "path": "Daily Notes/2026-06-01.md"},
+        ).to_dict(),
+        task_id: KnowledgeNode(
+            id=task_id,
+            type="task",
+            title="Linked task",
+            snippet="Do the thing",
+        ).to_dict(),
+        parent_id: KnowledgeNode(
+            id=parent_id,
+            type="task",
+            title="Parent goal",
+            snippet="Big picture",
+        ).to_dict(),
+    }
+    edges = [
+        KnowledgeEdge(doc_id, task_id, "link").to_dict(),
+        KnowledgeEdge(task_id, parent_id, "parent").to_dict(),
+    ]
+    save_graph(owner, nodes, edges)
+
+    nb = get_neighbors(owner, doc_id)
+    assert nb["node"]["id"] == doc_id
+    assert any(row.get("node", {}).get("id") == task_id for row in nb["outgoing"])
+
+    nb2 = get_neighbors(owner, "vault:Daily Notes/2026-06-01.md")
+    assert nb2["node"]["id"] == doc_id
+
+
+def test_manual_link_add_remove_and_rebuild_merge(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    owner = "tester"
+    nodes = {
+        "task:a": KnowledgeNode(id="task:a", type="task", title="Task A", snippet="a").to_dict(),
+        "document:doc-1": KnowledgeNode(
+            id="document:doc-1",
+            type="document",
+            title="Lab notes",
+            snippet="methods",
+            meta={"source": "editor", "document_id": "doc-1"},
+        ).to_dict(),
+        "document:vault:notes/x.md": KnowledgeNode(
+            id="document:vault:notes/x.md",
+            type="document",
+            title="Vault note",
+            snippet="vault",
+            meta={"source": "vault", "path": "notes/x.md"},
+        ).to_dict(),
+    }
+    edges = [KnowledgeEdge("task:a", "task:b", "parent").to_dict()]
+    save_graph(owner, nodes, edges)
+
+    result = add_graph_link(owner, "task:a", "document:doc-1", kind="related")
+    assert result["ok"] is True
+    assert load_manual_edges(owner)
+    nb = get_neighbors(owner, "task:a")
+    assert any(row["node"]["id"] == "document:doc-1" for row in nb["outgoing"])
+
+    removed = remove_graph_link(owner, "task:a", "document:doc-1", kind="related")
+    assert removed["ok"] is True
+    nb2 = get_neighbors(owner, "task:a")
+    assert not any(row["node"]["id"] == "document:doc-1" for row in nb2["outgoing"])
+
+    add_graph_link(owner, "task:a", "document:doc-1", kind="link")
+    assert load_manual_edges(owner)
+    merged = load_edges(owner)
+    assert any(e["from"] == "task:a" and e["to"] == "document:doc-1" for e in merged)
+
+
+def test_document_filter_matches_library_only(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    owner = "tester"
+    nodes = {
+        "document:editor-1": KnowledgeNode(
+            id="document:editor-1",
+            type="document",
+            title="Editor doc",
+            snippet="body",
+            meta={"source": "editor", "document_id": "editor-1"},
+        ).to_dict(),
+        "document:vault:readme.md": KnowledgeNode(
+            id="document:vault:readme.md",
+            type="document",
+            title="Readme",
+            snippet="vault",
+            meta={"source": "vault", "path": "readme.md"},
+        ).to_dict(),
+    }
+    save_graph(owner, nodes, [])
+
+    assert _is_library_document(nodes["document:editor-1"]) is True
+    assert _is_library_document(nodes["document:vault:readme.md"]) is False
+
+    summary = list_graph_summary(owner, type_filter="document", limit=50)
+    ids = {n["id"] for n in summary["nodes"]}
+    assert "document:editor-1" in ids
+    assert "document:vault:readme.md" not in ids
+
+
+def test_suggest_graph_link_without_writing(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    owner = "tester"
+    nodes = {
+        "document:a": KnowledgeNode(
+            id="document:a",
+            type="document",
+            title="Methods",
+            snippet="protocol",
+            meta={"source": "editor", "document_id": "a"},
+        ).to_dict(),
+        "document:b": KnowledgeNode(
+            id="document:b",
+            type="document",
+            title="Results",
+            snippet="data",
+            meta={"source": "editor", "document_id": "b"},
+        ).to_dict(),
+    }
+    save_graph(owner, nodes, [])
+
+    suggestion = suggest_graph_link(
+        owner,
+        "document:a",
+        "document:b",
+        kind="related",
+        reason="Same experiment",
+    )
+    assert suggestion["ok"] is True
+    assert suggestion["action"] == "suggest_link"
+    assert not load_manual_edges(owner)
+
+    tool_out = execute_knowledge_tool(
+        {
+            "action": "suggest_link",
+            "from": "document:a",
+            "to": "document:b",
+            "reason": "Same experiment",
+        },
+        owner=owner,
+    )
+    assert tool_out["exit_code"] == 0
+    assert tool_out.get("action") == "suggest_link"

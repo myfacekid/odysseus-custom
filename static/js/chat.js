@@ -27,6 +27,14 @@ import fileHandlerModule from './fileHandler.js';
 import searchModule from './search.js';
 import documentModule from './document.js';
 import codeRunnerModule from './codeRunner.js';
+
+function _dispatchLinkSuggestion(data) {
+  if (!data?.from || !data?.to) return;
+  import('./knowledge.js').then((kg) => {
+    const handler = kg.handleLinkSuggestion || kg.default?.handleLinkSuggestion;
+    if (handler) handler(data);
+  }).catch(() => {});
+}
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
 import createResearchSynapse from './researchSynapse.js';
   const RESEARCH_TIMEOUT_MS = 360000;
@@ -2122,6 +2130,9 @@ import createResearchSynapse from './researchSynapse.js';
                 if (json.ui_event) {
                   chatStream.handleUIControl(json);
                 }
+                if (json.link_suggestion) {
+                  _dispatchLinkSuggestion(json.link_suggestion);
+                }
 
                 // Schedule a thinking spinner between tool rounds (short delay so
                 // agent_step in the same SSE chunk can cancel it before it shows)
@@ -2159,12 +2170,18 @@ import createResearchSynapse from './researchSynapse.js';
                 if (documentModule) {
                   documentModule.handleDocUpdate(json);
                 }
+                window.dispatchEvent(new CustomEvent('document-library-refresh'));
+                window.dispatchEvent(new CustomEvent('knowledge-graph-refresh'));
 
               } else if (json.type === 'doc_suggestions') {
                 if (_isBg) continue;
                 if (documentModule && documentModule.handleDocSuggestions) {
                   documentModule.handleDocSuggestions(json);
                 }
+
+              } else if (json.type === 'link_suggestion') {
+                if (_isBg) continue;
+                _dispatchLinkSuggestion(json);
 
               } else if (json.type === 'ui_control') {
                 if (_isBg) continue;

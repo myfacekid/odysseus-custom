@@ -172,6 +172,8 @@ def setup_one_thing_routes() -> APIRouter:
     @router.post("/tasks/{task_id}/toggle")
     def toggle_task_route(task_id: str, request: Request):
         owner = _owner(request)
+        from src.one_thing import enrich_task_item, list_tasks as _list_tasks
+
         db = SessionLocal()
         try:
             task = toggle_task(db, owner, task_id)
@@ -179,10 +181,12 @@ def setup_one_thing_routes() -> APIRouter:
                 raise HTTPException(404, "Task not found")
             archive_stale_completed_tasks(db, owner)
             task = get_task(db, owner, task_id) or task
+            all_tasks = _list_tasks(db, owner, include_done=True, include_archived=True)
+            payload = enrich_task_item(task, all_tasks)
         finally:
             db.close()
         after_task_change(owner)
-        return {"ok": True, "task": task.to_item()}
+        return {"ok": True, "task": payload}
 
     @router.delete("/tasks/{task_id}")
     def remove_task(task_id: str, request: Request):

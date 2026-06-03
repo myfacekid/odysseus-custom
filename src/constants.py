@@ -19,6 +19,10 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 FEATURES_FILE = os.path.join(DATA_DIR, "features.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
+# Obsidian / markdown vault integration (filesystem wikilinks, search_vault tool).
+# Disabled — documents and links use the in-app editor + knowledge graph instead.
+OBSIDIAN_INTEGRATION_ENABLED = False
+
 # API Configuration
 MAX_CONTEXT_MESSAGES = 90
 REQUEST_TIMEOUT = 20
