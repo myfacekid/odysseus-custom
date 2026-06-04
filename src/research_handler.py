@@ -558,6 +558,11 @@ class ResearchHandler:
                 "raw_report": entry.get("raw_report", ""),
                 "sources": sources,
                 "raw_findings": raw_findings,
+                "evidence_registry": (
+                    researcher.evidence_registry.to_dict()
+                    if researcher and getattr(researcher, "evidence_registry", None)
+                    else entry.get("evidence_registry")
+                ),
                 "stats": entry.get("stats"),
                 "category": entry.get("category") or "academic",
                 "include_preprints": entry.get("include_preprints", True),

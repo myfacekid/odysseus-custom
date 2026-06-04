@@ -43,6 +43,9 @@ def test_synthesis_uses_a_generous_timeout_not_60s():
     """The synthesis LLM call must get a budget consistent with the final report
     (180s), not the old 60s that timed out on slow local models (#1551)."""
     r = _researcher()
+    r.evidence_registry = __import__(
+        "src.research_evidence", fromlist=["EvidenceRegistry"]
+    ).EvidenceRegistry()
     seen = {}
 
     async def _fake_llm(messages, **kwargs):
@@ -58,14 +61,17 @@ def test_synthesis_uses_a_generous_timeout_not_60s():
 
 
 def test_fallback_report_preserves_findings():
-    """_fallback_report must surface the gathered findings (title + content),
-    not a 'nothing found' message."""
+    """_fallback_report must surface the gathered findings with registry citations."""
     r = _researcher()
+    r.evidence_registry = __import__(
+        "src.research_evidence", fromlist=["EvidenceRegistry"]
+    ).EvidenceRegistry()
     report = r._fallback_report("how does speaker diarization work", _FINDINGS)
     assert "speaker diarization" in report.lower()
     assert "Diarization basics" in report
     assert "x-vectors" in report
-    assert "https://ex.com/a" in report
+    assert "## References" in report
+    assert "[1]" in report
     # It must NOT be the give-up message.
     assert "No information could be gathered" not in report
 
@@ -74,6 +80,9 @@ def test_synthesis_failure_keeps_previous_report():
     """If synthesis raises, the previous report is preserved (not blanked) so the
     findings survive the round and the fallback can use them."""
     r = _researcher()
+    r.evidence_registry = __import__(
+        "src.research_evidence", fromlist=["EvidenceRegistry"]
+    ).EvidenceRegistry()
 
     async def _boom(messages, **kwargs):
         raise RuntimeError("502 after 3 attempts")

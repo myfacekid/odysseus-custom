@@ -15,6 +15,16 @@ from datetime import datetime
 from typing import Callable, Dict, List, Optional, Set
 
 from src.research_utils import strip_thinking, is_low_quality
+from src.research_evidence import EvidenceRegistry
+from src.research_web_search import (
+    annotate_search_results,
+    apply_academic_query_templates,
+    infer_search_kind,
+    research_web_search,
+    similar_paper_queries_from_findings,
+)
+from src.research_zotero import research_zotero_findings
+from src.research_knowledge import research_knowledge_findings
 
 from src.goal_based_extractor import EXTRACTOR_PROMPT
 
@@ -207,6 +217,7 @@ You are updating an evolving **academic literature synthesis**.
 {new_findings}
 
 Integrate the new findings into the synthesis. Requirements:
+- Use ONLY the citation numbers from the source registry below — do not invent new numbers
 - Ground every factual claim in the cited sources — do not invent statistics or citations
 - Use numbered inline citations like [1], [2] consistently (reuse numbers for the same source)
 - Note study design and evidence quality where relevant (RCT vs observational, review vs single study)
@@ -298,6 +309,7 @@ class DeepResearcher:
         category: Optional[str] = None,
         include_preprints: bool = True,
         include_zotero: bool = True,
+        include_knowledge: bool = True,
         owner: str = "",
     ):
         self.llm_endpoint = llm_endpoint
@@ -307,8 +319,10 @@ class DeepResearcher:
         self.category = ACADEMIC_CATEGORY
         self.include_preprints = bool(include_preprints)
         self.include_zotero = bool(include_zotero)
+        self.include_knowledge = bool(include_knowledge)
         self.owner = owner or ""
         self._zotero_keys_seen: Set[str] = set()
+        self._graph_nodes_seen: Set[str] = set()
         self.max_rounds = max_rounds
         self.max_time = max_time
         self.max_urls_per_round = max_urls_per_round
@@ -332,6 +346,7 @@ class DeepResearcher:
         self.findings: List[Dict] = []
         self.evolving_report: str = ""
         self.research_plan: str = ""
+        self.evidence_registry = EvidenceRegistry()
 
     def cancel(self):
         """Request cooperative cancellation of the research loop."""
@@ -358,6 +373,9 @@ class DeepResearcher:
         self._start_time = time.time()
         findings: List[Dict] = list(prior_findings) if prior_findings else []
         report = prior_report or ""
+        self.evidence_registry = EvidenceRegistry()
+        if findings:
+            self.evidence_registry.sync_findings(findings)
 
         # PLAN: Analyze the question and create a research strategy
         if not prior_report:
@@ -394,10 +412,34 @@ class DeepResearcher:
                     pass
             zotero_seed = await self._fetch_zotero_findings(question, limit=5, seed_library=True)
             if zotero_seed:
+                for item in zotero_seed:
+                    item["is_seed"] = True
+                    self.evidence_registry.register(item, is_seed=True)
                 findings.extend(zotero_seed)
                 logger.info(f"Zotero seed: {len(zotero_seed)} items from library")
                 self._emit(phase="reading", new_sources=len(zotero_seed),
                            total_sources=len(self.urls_fetched), source="zotero")
+
+        if self.include_knowledge and self.owner and not prior_report:
+            graph_seed = await self._fetch_knowledge_findings(
+                question,
+                seed_findings=findings,
+                limit=5,
+                seed_graph=True,
+            )
+            if graph_seed:
+                for item in graph_seed:
+                    if not item.get("is_seed"):
+                        item["is_seed"] = True
+                    self.evidence_registry.register(item, is_seed=True)
+                findings.extend(graph_seed)
+                logger.info(f"Links graph seed: {len(graph_seed)} items")
+                self._emit(
+                    phase="reading",
+                    new_sources=len(graph_seed),
+                    total_sources=len(self.urls_fetched),
+                    source="knowledge",
+                )
 
         for round_num in range(1, self.max_rounds + 1):
             self.round_count = round_num
@@ -413,6 +455,11 @@ class DeepResearcher:
 
             # THINK: generate queries
             queries = await self._generate_queries(question, report, round_num)
+            if round_num > 1 and findings:
+                for sq in similar_paper_queries_from_findings(findings, limit=2):
+                    if sq not in self.queries_used:
+                        queries.append(sq)
+                        self.queries_used.add(sq)
             if not queries:
                 logger.warning(f"Round {round_num}: no queries generated, stopping")
                 break
@@ -422,13 +469,24 @@ class DeepResearcher:
                        total_sources=len(self.urls_fetched))
 
             # SEARCH + EXTRACT
-            round_findings = await self._search_and_extract(queries, question)
+            round_findings = await self._search_and_extract(
+                queries, question, search_kind=infer_search_kind(round_num),
+            )
             if self.include_zotero and round_num > 1:
                 for q in queries[:2]:
                     zf = await self._fetch_zotero_findings(q, limit=2)
                     if zf:
                         round_findings.extend(zf)
+            if self.include_knowledge and round_num > 1:
+                for q in queries[:2]:
+                    kf = await self._fetch_knowledge_findings(
+                        q, seed_findings=findings, limit=2,
+                    )
+                    if kf:
+                        round_findings.extend(kf)
             if round_findings:
+                for item in round_findings:
+                    self.evidence_registry.register(item)
                 findings.extend(round_findings)
                 consecutive_empty_rounds = 0
                 logger.info(f"Round {round_num}: extracted {len(round_findings)} findings")
@@ -483,6 +541,9 @@ class DeepResearcher:
 
         self.evolving_report = report  # preserve pre-synthesis report
         final = await self._final_report(question, report)
+        final, repair_warnings = self.evidence_registry.validate_and_repair_report(final)
+        for msg in repair_warnings:
+            logger.warning("Report citation repair: %s", msg)
         elapsed = time.time() - self._start_time
         logger.info(
             f"Research complete: {self.round_count} rounds, "
@@ -565,8 +626,9 @@ class DeepResearcher:
         else:
             num_queries = 3
             round_instruction = (
-                "Follow-up round — target gaps in the synthesis: missing study types, conflicting claims, "
-                "recent literature, or specific populations not yet covered."
+                "Follow-up round — gap-filling: target missing study types, conflicting claims, "
+                "specific populations, or recent peer-reviewed literature not yet in the synthesis. "
+                "Prefer precise sub-questions over broad topic restatements."
             )
 
         prompt = current_date_context() + QUERY_GEN_PROMPT.format(
@@ -586,6 +648,13 @@ class DeepResearcher:
                 max_tokens=4096,
             )
             queries = self._parse_json_array(response)
+            search_kind = infer_search_kind(round_num)
+            queries = apply_academic_query_templates(
+                queries,
+                search_kind=search_kind,
+                question=question,
+                research_plan=self.research_plan or "",
+            )
             # Deduplicate
             new_queries = [q for q in queries if q not in self.queries_used]
             self.queries_used.update(new_queries)
@@ -600,12 +669,13 @@ class DeepResearcher:
     # SEARCH + EXTRACT
     # ------------------------------------------------------------------
     async def _search_and_extract(self, queries: List[str],
-                                  question: str) -> List[Dict]:
+                                  question: str,
+                                  search_kind: str = "discovery") -> List[Dict]:
         """Search each query and extract relevant info from top results."""
         all_findings: List[Dict] = []
 
         # Search all queries in parallel
-        search_tasks = [self._search(q) for q in queries]
+        search_tasks = [self._search(q, search_kind=search_kind) for q in queries]
         search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
         # Collect URLs to fetch from all search results
@@ -634,7 +704,17 @@ class DeepResearcher:
 
         async def _bounded_extract(result: Dict) -> Optional[Dict]:
             async with semaphore:
-                return await self._fetch_and_extract(result["url"], question, result.get("title", ""))
+                finding = await self._fetch_and_extract(
+                    result["url"], question, result.get("title", ""),
+                )
+                if finding and result:
+                    for key in (
+                        "search_query", "search_provider", "search_kind",
+                        "search_time_filter", "source_type",
+                    ):
+                        if result.get(key) and not finding.get(key):
+                            finding[key] = result[key]
+                return finding
 
         extract_tasks = [_bounded_extract(r) for r in urls_to_fetch]
         results_gathered = await asyncio.gather(*extract_tasks, return_exceptions=True)
@@ -654,11 +734,11 @@ class DeepResearcher:
         limit: int = 5,
         seed_library: bool = False,
     ) -> List[Dict]:
-        """Pull matching items from the user's Zotero library via the Web API."""
+        """Pull matching items from the user's Zotero library (catalog first)."""
         if not self.owner:
             return []
         try:
-            from src.zotero_client import fetch_zotero_findings, resolve_zotero_credentials
+            from src.zotero_client import resolve_zotero_credentials
             if not resolve_zotero_credentials(self.owner):
                 return []
             try:
@@ -669,16 +749,27 @@ class DeepResearcher:
             except Exception:
                 pass
 
-            findings = await asyncio.to_thread(
-                fetch_zotero_findings,
+            outcome = await asyncio.to_thread(
+                research_zotero_findings,
                 query,
                 self.owner,
-                limit,
-                True,
-                seed_library,
+                limit=limit,
+                extract_pdfs=True,
+                seed_library=seed_library,
+                pdf_max_chars=self.max_content_chars,
             )
+            if outcome.note:
+                logger.info("Zotero research: %s", outcome.note)
+                self._emit(
+                    phase="reading",
+                    source="zotero",
+                    zotero_source=outcome.source,
+                    catalog_synced=outcome.catalog_synced,
+                    message=outcome.note,
+                )
+
             unique = []
-            for f in findings:
+            for f in outcome.findings:
                 zkey = f.get("zotero_key") or f.get("url", "")
                 if zkey in self._zotero_keys_seen:
                     continue
@@ -692,56 +783,87 @@ class DeepResearcher:
             logger.warning(f"Zotero fetch failed: {e}")
             return []
 
-    async def _search(self, query: str) -> List[Dict]:
-        """Run a search query using the configured research search provider."""
+    async def _fetch_knowledge_findings(
+        self,
+        query: str,
+        limit: int = 5,
+        seed_findings: Optional[List[Dict]] = None,
+        seed_graph: bool = False,
+    ) -> List[Dict]:
+        """Pull matching items from the Links knowledge graph."""
+        if not self.owner:
+            return []
         try:
-            from src.search.providers import _get_search_settings
-            from src.search.core import _call_provider, _build_provider_chain
+            outcome = await asyncio.to_thread(
+                research_knowledge_findings,
+                query,
+                self.owner,
+                seed_findings=seed_findings or self.findings,
+                limit=limit,
+                seed_graph=seed_graph,
+                expand_hops=1,
+                content_max_chars=self.max_content_chars,
+            )
+            if outcome.note:
+                logger.info("Links graph research: %s", outcome.note)
+                self._emit(
+                    phase="reading",
+                    source="knowledge",
+                    graph_source=outcome.source,
+                    message=outcome.note,
+                )
 
-            settings = _get_search_settings()
-            provider = (self.search_provider_override or "").strip()
-            if not provider:
-                provider = (settings.get("research_search_provider") or "").strip()
-            if not provider:
-                provider = settings.get("search_provider", "searxng")
+            unique = []
+            for f in outcome.findings:
+                gid = (f.get("graph_node_id") or "").strip()
+                if gid in self._graph_nodes_seen:
+                    continue
+                self._graph_nodes_seen.add(gid)
+                zkey = (f.get("zotero_key") or f.get("paper_key") or "").strip()
+                if zkey:
+                    if zkey in self._zotero_keys_seen:
+                        continue
+                    self._zotero_keys_seen.add(zkey)
+                url = f.get("url", "")
+                if url and not url.startswith("links://"):
+                    self.urls_fetched.add(url)
+                unique.append(f)
+            return unique
+        except Exception as e:
+            logger.warning(f"Links graph fetch failed: {e}")
+            return []
 
-            if provider == "disabled":
-                logger.info("Search is disabled for research")
+    async def _search(self, query: str, search_kind: str = "discovery") -> List[Dict]:
+        """Run a search via the shared web_search provider layer (Phase 1a)."""
+        try:
+            outcome = await asyncio.to_thread(
+                research_web_search,
+                query,
+                search_kind=search_kind,
+                provider_override=self.search_provider_override,
+                count=10,
+            )
+            if outcome.error and not outcome.results:
+                self._last_search_error = outcome.error
+                logger.warning("Research search failed for %r: %s", query, outcome.error)
                 return []
 
-            # Try primary provider, then fallbacks
-            chain = _build_provider_chain(provider)
-            raised = False
-            for prov in chain:
-                try:
-                    results = await asyncio.to_thread(_call_provider, prov, query, 10)
-                    if results:
-                        results = filter_and_rank_academic_results(
-                            results, include_preprints=self.include_preprints,
-                        )
-                        logger.info(
-                            f"Research search: {prov} returned {len(results)} results "
-                            f"(preprints={'on' if self.include_preprints else 'off'})"
-                        )
-                        if prov not in self.providers_used:
-                            self.providers_used.append(prov)
-                        return results
-                except Exception as e:
-                    raised = True
-                    logger.warning(f"Research search: {prov} failed: {e}")
-                    self._last_search_error = f"{prov}: {e}"
-            # Every provider ran but none returned results. If none of them
-            # raised, record an actionable reason here — otherwise this empty
-            # path leaves `_last_search_error` unset and the caller surfaces a
-            # bare "unknown error" (issue #344). This is exactly the SearXNG
-            # case where the service is reachable but all its engines fail, so
-            # each provider returns [] without throwing.
-            if not raised:
-                self._last_search_error = (
-                    f"no results from search provider(s): "
-                    f"{', '.join(chain) if chain else provider}"
-                )
-            return []
+            if outcome.provider and outcome.provider not in self.providers_used:
+                self.providers_used.append(outcome.provider)
+
+            results = annotate_search_results(outcome.results, outcome)
+            results = filter_and_rank_academic_results(
+                results, include_preprints=self.include_preprints,
+            )
+            logger.info(
+                "Research search (%s/%s): %d results via %s (preprints=%s)",
+                search_kind,
+                query[:80],
+                len(results),
+                outcome.provider,
+                "on" if self.include_preprints else "off",
+            )
+            return results
         except Exception as e:
             logger.error(f"Search failed for '{query}': {e}")
             self._last_search_error = str(e)
@@ -787,6 +909,7 @@ class DeepResearcher:
                 parsed["url"] = url
                 parsed["title"] = title or page.get("title", "")
                 parsed["og_image"] = page.get("og_image", "")
+                parsed.setdefault("source_type", "web")
                 # Skip findings where the LLM says the page is useless
                 if is_low_quality(parsed.get("summary", "")):
                     logger.info(f"Skipping low-quality extraction from {url}")
@@ -797,6 +920,7 @@ class DeepResearcher:
                 "url": url,
                 "title": title or page.get("title", ""),
                 "og_image": page.get("og_image", ""),
+                "source_type": "web",
                 "rational": "LLM extraction (raw)",
                 "evidence": response[:3000],
                 "summary": response[:500],
@@ -810,18 +934,28 @@ class DeepResearcher:
     # ------------------------------------------------------------------
     async def _synthesize(self, question: str, findings: List[Dict],
                           current_report: str) -> str:
-        """LLM synthesizes all findings into an updated report."""
-        # Format findings for the prompt
-        window = findings[-self.synthesis_window:]
-        if len(findings) > self.synthesis_window:
-            logger.info(f"Synthesis using last {self.synthesis_window} of {len(findings)} findings")
-        findings_text = self._format_findings(window)
+        """LLM synthesizes findings into an updated report using the evidence registry."""
+        selected = self.evidence_registry.select_for_synthesis(
+            findings, self.synthesis_window,
+        )
+        if len(findings) > len(selected):
+            logger.info(
+                "Synthesis using %d of %d findings (%d seed + %d recent)",
+                len(selected),
+                len(findings),
+                sum(1 for f in selected if f.get("is_seed")),
+                sum(1 for f in selected if not f.get("is_seed")),
+            )
+        findings_text = self.evidence_registry.format_findings(selected)
+        registry_block = self.evidence_registry.format_registry_block(selected)
 
         prompt = SYNTHESIZE_PROMPT.format(
             question=question,
             report=current_report or "(First round — no report yet.)",
             new_findings=findings_text,
         )
+        if registry_block:
+            prompt += f"\n\n{registry_block}\n"
 
         try:
             return await self._llm(
@@ -880,6 +1014,9 @@ class DeepResearcher:
             report=report,
         )
         prompt += "\n\n" + ACADEMIC_REPORT_OVERRIDE
+        registry_block = self.evidence_registry.registry_prompt_block()
+        if registry_block:
+            prompt += f"\n\n{registry_block}\n"
 
         try:
             result = await self._llm(
@@ -912,12 +1049,14 @@ class DeepResearcher:
                     timeout=180,
                 )
                 if len(expanded.split()) > len(result.split()):
-                    return expanded
+                    result = expanded
 
+            result, _warnings = self.evidence_registry.validate_and_repair_report(result)
             return result
         except Exception as e:
             logger.error(f"Final report generation failed: {e}")
-            return report  # return the evolving report as-is
+            repaired, _warnings = self.evidence_registry.validate_and_repair_report(report)
+            return repaired  # return the evolving report as-is
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1022,51 +1161,13 @@ class DeepResearcher:
         return None
 
     def _format_findings(self, findings: List[Dict]) -> str:
-        """Format findings list into readable text for synthesis prompt."""
-        parts = []
-        for i, f in enumerate(findings, 1):
-            url = f.get("url", "unknown")
-            title = f.get("title", "")
-            summary = f.get("summary", "")
-            evidence = f.get("evidence", "")
-            authors = f.get("authors", "")
-            year = f.get("year", "")
-            doi = f.get("doi_or_id", "")
-            study_type = f.get("study_type", "")
-            peer = f.get("peer_review_status", "")
-            meta_bits = []
-            if authors:
-                meta_bits.append(f"Authors: {authors}")
-            if year:
-                meta_bits.append(f"Year: {year}")
-            if doi:
-                meta_bits.append(f"ID: {doi}")
-            if study_type:
-                meta_bits.append(f"Type: {study_type}")
-            if peer:
-                meta_bits.append(f"Status: {peer}")
-            meta = " | ".join(meta_bits)
-            content = summary if summary else (evidence[:1000] if evidence else "(no content)")
-            header = f"**Finding {i}** — [{title}]({url})"
-            if meta:
-                header += f"\n*{meta}*"
-            parts.append(f"{header}\n{content}")
-        return "\n\n".join(parts)
+        """Format findings list into readable text (legacy helper)."""
+        self.evidence_registry.sync_findings(findings)
+        return self.evidence_registry.format_findings(findings)
 
     def _fallback_report(self, question: str, findings: List[Dict]) -> str:
-        """Compile gathered findings into a basic report.
-
-        Used when the LLM synthesis step produced no report (e.g. it timed out)
-        but the search rounds did collect findings — so the user still gets the
-        material that was gathered instead of "No information could be gathered"
-        (#1551).
-        """
-        return (
-            f"# {question}\n\n"
-            "_Automatic synthesis did not complete, so this report lists the "
-            f"{len(findings)} finding(s) gathered during research._\n\n"
-            f"{self._format_findings(findings)}"
-        )
+        """Compile gathered findings into a structured academic fallback report."""
+        return self.evidence_registry.build_structured_fallback(question, findings)
 
     def get_stats(self) -> Dict:
         """Return research statistics."""
@@ -1076,6 +1177,7 @@ class DeepResearcher:
             "Rounds": self.round_count,
             "Queries": len(self.queries_used),
             "URLs": len(self.urls_fetched),
+            "Sources": len(self.evidence_registry),
             "Model": self.llm_model,
         }
         if self.providers_used:

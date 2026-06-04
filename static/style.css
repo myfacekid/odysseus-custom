@@ -14258,6 +14258,16 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   padding: 0;
   position: relative;
 }
+.doclib-type-filters { margin: 0 0 8px; }
+.doclib-section-header { margin-top: 8px; }
+.doclib-section-header:first-child { margin-top: 0; }
+.doclib-section-empty {
+  font-size: 11px;
+  opacity: 0.55;
+  padding: 8px 6px 12px;
+}
+.doclib-grid:has(.doclib-card-expanded) > .doclib-section-header,
+.doclib-grid:has(.doclib-card-expanded) > .doclib-section-empty { display: none; }
 
 /* Gallery grid domino-in cascade on open — same recipe as the document/email
    libraries. Applied to #gallery-grid in gallery.js on the first render after
@@ -29947,12 +29957,14 @@ body.notes-drag-mode .note-card-pin svg {
 }
 .notes-pane-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .note-card.note-card-sliding-out {
@@ -31200,6 +31212,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 .notes-select-trigger {
   position: relative;
@@ -31359,11 +31372,19 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 /* Label filter bar */
 .notes-labels-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
-  padding: 0 8px 0;
+  padding: 0 8px 2px;
   margin-top: -6px;
   margin-bottom: -2px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.notes-labels-bar .notes-label-chip {
+  flex-shrink: 0;
 }
 .notes-label-chip {
   background: transparent;
@@ -32146,6 +32167,10 @@ button.one-thing-date-day {
   border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 25%, var(--border));
   background: color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 5%, transparent);
+  max-height: min(48vh, 360px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 .one-thing-row-links {
   display: flex;
@@ -36150,6 +36175,7 @@ body.theme-frosted #sidebar,
 body.theme-frosted .modal-content,
 body.theme-frosted .doclib-modal-content,
 body.theme-frosted .gallery-modal-content,
+body.theme-frosted .knowledge-modal-content,
 body.theme-frosted .notes-pane,
 body.theme-frosted .research-pane,
 body.theme-frosted .calendar-pane,
@@ -36236,6 +36262,12 @@ body.theme-frosted .notes-pane .one-thing-add-links,
 body.theme-frosted .notes-pane .one-thing-row-links-panel,
 body.theme-frosted .notes-pane .one-thing-row-edit-panel,
 body.theme-frosted .notes-pane .one-thing-edit-links,
+body.theme-frosted .notes-pane .one-thing-row-actions,
+body.theme-frosted .notes-pane .one-thing-link-options,
+body.theme-frosted .knowledge-modal-body .kg-node-list,
+body.theme-frosted .knowledge-modal-body .kg-detail,
+body.theme-frosted .knowledge-modal-body .kg-add-link-results,
+body.theme-frosted .notes-pane .kg-add-link-results,
 body.theme-frosted #calendar-modal .cal-grid,
 body.theme-frosted #calendar-modal .cal-day-detail,
 body.theme-frosted #calendar-modal .cal-wk-wrap,
@@ -36262,10 +36294,17 @@ body.theme-frosted .one-thing-date-popover .cal-grid {
 body.theme-frosted .one-thing-date-popover .one-thing-date-day {
   background: color-mix(in srgb, var(--panel, var(--bg)) 12%, transparent) !important;
 }
+body.theme-frosted .kg-type-filter {
+  background: transparent !important;
+}
+body.theme-frosted .kg-type-filter.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+}
 /* Subtle inner light highlight + softer shadow on the heavier surfaces */
 body.theme-frosted .modal-content,
 body.theme-frosted .doclib-modal-content,
 body.theme-frosted .gallery-modal-content,
+body.theme-frosted .knowledge-modal-content,
 body.theme-frosted .notes-pane,
 body.theme-frosted .research-pane,
 body.theme-frosted .calendar-pane,
@@ -36564,6 +36603,9 @@ body.theme-frosted .modal {
   max-height: 88vh;
   display: flex;
   flex-direction: column;
+  /* Inner .kg-panels scroll — not the outer modal shell. */
+  overflow: hidden;
+  min-height: 0;
 }
 .knowledge-modal-body {
   display: flex;
@@ -36573,16 +36615,31 @@ body.theme-frosted .modal {
   flex: 1;
   overflow: hidden;
 }
+.knowledge-modal-body > .admin-toggle-sub {
+  flex-shrink: 0;
+}
 .kg-toolbar {
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .kg-search-input { flex: 1; min-width: 180px; }
 .kg-stats { font-size: 11px; opacity: 0.65; }
-.kg-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.kg-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
 .kg-type-filter {
+  flex-shrink: 0;
   font-size: 11px;
   padding: 4px 10px;
   border-radius: 999px;
@@ -36590,30 +36647,45 @@ body.theme-frosted .modal {
   background: transparent;
   color: var(--fg);
   cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.kg-type-filter:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 .kg-type-filter.active {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 600;
 }
 .kg-panels {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
-  max-height: min(52vh, 520px);
   flex: 1;
   overflow: hidden;
 }
 @media (max-width: 720px) {
-  .kg-panels { grid-template-columns: 1fr; }
+  .kg-panels {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 .kg-node-list, .kg-detail {
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   min-height: 0;
   max-height: 100%;
   background: color-mix(in srgb, var(--panel) 40%, transparent);
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 .kg-node-row, .kg-link-row {
   display: flex;
@@ -36817,7 +36889,16 @@ body.theme-frosted .modal {
   opacity: 0.55;
   padding: 8px 10px;
 }
-.one-thing-graph-links { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.one-thing-graph-links {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.one-thing-row-links-panel .one-thing-graph-links,
+.one-thing-row-edit-panel .one-thing-graph-links {
+  max-height: none;
+  overflow: visible;
+}
 
 /* Link suggestion prompt — themed card (replaces generic toast for graph links) */
 .kg-link-suggest-host {

@@ -20,7 +20,7 @@ class _ControlledResearcher(DeepResearcher):
         self.active = 0
         self.max_active = 0
 
-    async def _search(self, query):
+    async def _search(self, query, search_kind="discovery"):
         return [
             {"url": f"https://example.test/{query}/{i}", "title": f"{query}-{i}"}
             for i in range(4)

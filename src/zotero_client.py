@@ -1431,16 +1431,16 @@ def fetch_zotero_findings(
     seed_library: bool = False,
 ) -> List[dict]:
     """Search Zotero and return findings ready for the research pipeline."""
-    creds = resolve_zotero_credentials(owner)
-    if not creds:
-        return []
+    from src.research_zotero import research_zotero_findings
 
-    client = ZoteroClient(creds["api_key"], creds["user_id"])
-    items = client.search_items(query, limit=limit, seed_library=seed_library)
-    findings = findings_from_items(
-        client, creds["user_id"], items, extract_pdfs=extract_pdfs,
+    outcome = research_zotero_findings(
+        query,
+        owner,
+        limit=limit,
+        extract_pdfs=extract_pdfs,
+        seed_library=seed_library,
     )
-    return findings
+    return outcome.findings
 
 
 def sources_to_zotero_items(sources: List[dict]) -> List[dict]:

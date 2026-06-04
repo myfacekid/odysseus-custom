@@ -36,3 +36,26 @@ Configuration body.
         target = soup.find(id=target_id)
         assert target is not None
         assert target.name in {"h2", "h3"}
+
+
+def test_visual_report_renders_canonical_references_section():
+    """Visual report should render the canonical markdown References block."""
+    report = """## Key Findings
+
+Claim one [1]. Claim two [2].
+
+## References
+
+[1] Smith (2024). Alpha paper. https://ex.com/a
+[2] Jones (2023). Beta paper. https://ex.com/b
+"""
+    html = generate_visual_report(
+        "test question",
+        report,
+        sources=[],
+        stats={},
+        session_id="refs-test",
+    )
+    assert "Alpha paper" in html
+    assert "Beta paper" in html
+    assert "References" in html

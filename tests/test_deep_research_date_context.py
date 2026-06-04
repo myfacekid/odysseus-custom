@@ -33,6 +33,7 @@ def test_generate_queries_prompt_carries_the_current_year():
     r = DeepResearcher.__new__(DeepResearcher)
     r.research_plan = ""
     r.queries_used = set()
+    r.include_preprints = True
 
     seen = {}
 

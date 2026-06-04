@@ -21,6 +21,10 @@ the codebase, you are probably right to stay away.
   profiles for small, medium, and large local setups so people with different
   hardware can use Deep Research without guessing. Surface this either in Deep
   Research settings or as a Cookbook scan/dropdown suggestion.
+- **Deep Research overhaul (Links + Zotero + web):** See
+  [`docs/deep-research-roadmap.md`](docs/deep-research-roadmap.md) for the full
+  phased plan — evidence registry, unified tool context, seed papers / similar
+  work, and academic report quality.
 - Cookbook model scan/download ranking. Prioritize newer architectures and
   better hardware-fit models instead of scoring everything almost the same.
   Ranking should account for architecture age, quant format, VRAM/RAM fit,
