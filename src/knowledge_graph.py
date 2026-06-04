@@ -22,10 +22,10 @@ SCHEMA_VERSION = 1
 KNOWLEDGE_ROOT = Path(DATA_DIR) / "knowledge"
 DEBOUNCE_SEC = 0.45
 
-_NODE_TYPES = frozenset({"task", "document", "memory", "skill", "note"})
-_EDGE_KINDS = frozenset({"parent", "link", "wikilink", "related", "supports"})
+_NODE_TYPES = frozenset({"task", "document", "memory", "skill", "note", "paper", "collection"})
+_EDGE_KINDS = frozenset({"parent", "link", "wikilink", "related", "supports", "in_collection"})
 _MANUAL_EDGE_KINDS = frozenset({"link", "related", "supports"})
-_INFERRED_EDGE_KINDS = frozenset({"parent", "wikilink"})
+_INFERRED_EDGE_KINDS = frozenset({"parent", "wikilink", "in_collection"})
 
 _debounce_lock = threading.Lock()
 _debounce_timers: Dict[str, threading.Timer] = {}
@@ -595,6 +595,72 @@ def rebuild_owner_graph(owner: str) -> dict:
         except Exception as e:
             logger.debug(f"Vault note index skipped for {owner}: {e}")
 
+    # --- Zotero papers + collections (local metadata catalog) ---
+    try:
+        from src.zotero_catalog import load_catalog, load_collections
+
+        catalog = load_catalog(owner)
+        collections = load_collections(owner)
+        for col in collections:
+            ckey = (col.get("key") or "").strip()
+            if not ckey:
+                continue
+            cid = node_id("collection", ckey)
+            nodes[cid] = KnowledgeNode(
+                id=cid,
+                type="collection",
+                title=(col.get("path") or col.get("name") or "Collection").strip(),
+                snippet=_snippet(f"Zotero folder · {col.get('name') or ckey}"),
+                meta={
+                    "source": "zotero",
+                    "collection_key": ckey,
+                    "path": col.get("path") or "",
+                    "parent": col.get("parent") or "",
+                },
+            ).to_dict()
+
+        for row in catalog:
+            zkey = (row.get("zotero_key") or "").strip()
+            if not zkey:
+                continue
+            pid = node_id("paper", zkey)
+            authors = (row.get("authors") or "").strip()
+            year = (row.get("year") or "").strip()
+            col_paths = row.get("collection_paths") or []
+            byline_parts = [p for p in (authors, year) if p]
+            snippet_parts = []
+            if byline_parts:
+                snippet_parts.append(" · ".join(byline_parts))
+            if col_paths:
+                snippet_parts.append(", ".join(col_paths[:3]))
+            abstract = (row.get("abstract") or "").strip()
+            if abstract:
+                snippet_parts.append(_snippet(abstract, 120))
+            nodes[pid] = KnowledgeNode(
+                id=pid,
+                type="paper",
+                title=(row.get("title") or "Untitled").strip(),
+                snippet=_snippet(" · ".join(snippet_parts) or abstract or "Zotero paper"),
+                meta={
+                    "source": "zotero",
+                    "zotero_key": zkey,
+                    "authors": authors,
+                    "year": year,
+                    "doi": row.get("doi") or "",
+                    "item_type": row.get("item_type") or "",
+                    "collection_paths": col_paths,
+                    "collection_keys": row.get("collection_keys") or [],
+                    "has_pdf": bool(row.get("has_pdf")),
+                    "url": row.get("url") or "",
+                },
+            ).to_dict()
+            for ckey in row.get("collection_keys") or []:
+                cid = node_id("collection", ckey)
+                if cid in nodes:
+                    add_edge(pid, cid, "in_collection")
+    except Exception as e:
+        logger.debug(f"Zotero catalog index skipped for {owner}: {e}")
+
     manual = load_manual_edges(owner)
     all_edges = _merge_edge_lists(edges, manual)
     save_graph(owner, nodes, all_edges)
@@ -735,7 +801,13 @@ def get_neighbors(
     return {"node": node, "outgoing": outgoing, "incoming": incoming}
 
 
-def read_knowledge_content(owner: str, full_id: str, *, max_chars: int = 8000) -> Dict[str, Any]:
+def read_knowledge_content(
+    owner: str,
+    full_id: str,
+    *,
+    max_chars: int = 8000,
+    include_pdf: bool = True,
+) -> Dict[str, Any]:
     """Load full body for a node (from canonical store)."""
     ntype, rid = parse_node_id(full_id)
     fid = node_id(ntype, rid)
@@ -815,6 +887,71 @@ def read_knowledge_content(owner: str, full_id: str, *, max_chars: int = 8000) -
             read = read_vault_note(cfg, rid, max_chars=max_chars)
             body = read.get("output") or ""
             meta = {"source": "vault", "path": rid, "language": "markdown"}
+    elif ntype == "paper":
+        from src.zotero_catalog import load_catalog
+        from src.zotero_client import fetch_paper_pdf_text
+
+        row = next(
+            (r for r in load_catalog(owner) if (r.get("zotero_key") or "") == rid),
+            None,
+        )
+        if row:
+            parts = [
+                f"Title: {row.get('title') or 'Untitled'}",
+                f"Authors: {row.get('authors') or 'Unknown'}",
+                f"Year: {row.get('year') or 'n/a'}",
+                f"Type: {row.get('item_type') or 'unknown'}",
+                f"Zotero key: {rid}",
+            ]
+            if row.get("doi"):
+                parts.append(f"DOI: {row['doi']}")
+            if row.get("collection_paths"):
+                parts.append(f"Collections: {', '.join(row['collection_paths'])}")
+            if row.get("abstract"):
+                parts.extend(["", "Abstract:", row["abstract"]])
+
+            meta = {
+                "source": "zotero",
+                "zotero_key": rid,
+                "url": row.get("url") or "",
+                "has_pdf": bool(row.get("has_pdf")),
+            }
+
+            if include_pdf:
+                pdf_budget = min(max(max_chars, 12000), 50000)
+                pdf_text, pdf_note = fetch_paper_pdf_text(owner, rid, max_chars=pdf_budget)
+                if pdf_text:
+                    parts.extend(["", "--- PDF text (from your Zotero library) ---", "", pdf_text])
+                    meta["pdf_extracted"] = True
+                elif pdf_note:
+                    parts.extend(["", f"PDF status: {pdf_note}"])
+                    meta["pdf_extracted"] = False
+            else:
+                parts.extend([
+                    "",
+                    "PDF extraction skipped. Call search_knowledge read with include_pdf=true, "
+                    f"or search_zotero with zotero_key={rid!r} and include_pdf=true.",
+                ])
+
+            body = "\n".join(parts)
+    elif ntype == "collection":
+        from src.zotero_catalog import load_catalog, load_collections
+
+        col = next((c for c in load_collections(owner) if c.get("key") == rid), None)
+        papers = [
+            r for r in load_catalog(owner)
+            if rid in (r.get("collection_keys") or [])
+        ]
+        title = (col or {}).get("path") or node.get("title") or rid
+        lines = [f"Zotero collection: {title}", f"Papers ({len(papers)}):", ""]
+        for row in papers[:40]:
+            byline = row.get("authors") or "Unknown author"
+            yr = row.get("year") or ""
+            lines.append(f"- {row.get('title') or 'Untitled'} ({byline}{', ' + yr if yr else ''})")
+        if len(papers) > 40:
+            lines.append(f"… and {len(papers) - 40} more")
+        body = "\n".join(lines)
+        meta = {"source": "zotero", "collection_key": rid, "path": title}
 
     if not body:
         body = node.get("snippet") or ""
@@ -844,6 +981,10 @@ def _anchor_for(node: dict) -> str:
         return f"#memory-{rid}"
     if ntype == "skill":
         return f"#skill-{rid}"
+    if ntype == "paper":
+        return f"#paper-{rid}"
+    if ntype == "collection":
+        return f"#collection-{rid}"
     return ""
 
 
@@ -890,6 +1031,10 @@ def format_search_for_agent(result: dict, *, include_neighbors: bool = True) -> 
             extra += ")"
         link = f"[{title}]({anchor})" if anchor else title
         lines.append(f"{i}. {kind}: {link}{extra}")
+        if kind == "paper":
+            zkey = meta.get("zotero_key") or (n.get("id") or "").split(":", 1)[-1]
+            pdf_bit = "PDF attached — read action extracts full text" if meta.get("has_pdf") else "metadata only"
+            lines.append(f"   id: paper:{zkey} ({pdf_bit})")
         if snip:
             lines.append(f"   {snip}")
 
@@ -903,7 +1048,10 @@ def format_search_for_agent(result: dict, *, include_neighbors: bool = True) -> 
             lines.append(f"- {n.get('type')}: {link}")
 
     lines.append("")
-    lines.append("Use read_knowledge with id for full content.")
+    lines.append(
+        "For paper:… nodes, use read with that id — PDF text is extracted from Zotero automatically when attached. "
+        "Do not web_search the paper title to substitute."
+    )
     return "\n".join(lines)
 
 
@@ -941,7 +1089,12 @@ def execute_knowledge_tool(args: dict, owner: str = "") -> Dict[str, Any]:
             max_chars = int(args.get("max_chars", 8000))
         except (TypeError, ValueError):
             max_chars = 8000
-        out = read_knowledge_content(owner, nid, max_chars=max_chars)
+        include_pdf = args.get("include_pdf", True)
+        if isinstance(include_pdf, str):
+            include_pdf = include_pdf.lower() not in ("false", "0", "no")
+        out = read_knowledge_content(
+            owner, nid, max_chars=max_chars, include_pdf=bool(include_pdf),
+        )
         if out.get("exit_code") != 0:
             return out
         title = out.get("title") or nid

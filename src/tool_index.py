@@ -60,8 +60,8 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "bash": "Run shell commands on the server. Install packages, check files, git operations, curl, system info, process management, networking.",
     "python": "Execute Python code for computation, data processing, math, scripting, parsing, API calls. Not for writing code for the user.",
     "web_search": "Quick single web lookup for a fact, current event, or doc mid-task. NOT for the user's Zotero library — use search_zotero. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
-    "search_zotero": "Search the user's personal Zotero library — saved papers, citations, PDF excerpts. action=list_collections lists folder paths/keys; action=search with query and/or collection finds items (collection accepts path like 'Projects / ML' or a key). Use for 'my Zotero', 'my papers', 'saved sources', 'papers in folder X'. NOT web_search (public web) or trigger_research (new deep-research job).",
-    "search_knowledge": "Search the unified knowledge graph (tasks, documents, memories, skills) and follow conceptual links. Use suggest_link to propose connections for user approval; use link only when the user explicitly asked to connect items.",
+    "search_zotero": "Search the user's Zotero library. zotero_key or query paper:KEY fetches one paper; include_pdf=true extracts PDF text. Prefer search_knowledge read on paper:KEY for the same extraction. Do NOT web_search paper titles when the PDF is in the library.",
+    "search_knowledge": "Search the unified knowledge graph (tasks, documents, memories, skills, Zotero papers). read on paper:… auto-extracts Zotero PDF. Do NOT web_search to substitute for reading a saved paper.",
     "web_fetch": "Fetch and read the text content of a specific URL/website the user names (e.g. 'check example.com', 'open this link'). Use when you have a concrete URL; for open-ended lookups use web_search instead.",
     "read_file": "Read a file from disk and return its contents. View source code, config files, logs.",
     "write_file": "Write content to a file on disk. Create new files, save output, update configs.",
@@ -309,9 +309,11 @@ class ToolIndex:
                    "deep dive", "deep research", "find out about", "study up on",
                    "report on", "do research", "look up everything"}):
             {"trigger_research"},
-        frozenset({"zotero", "my zotero", "my library", "my papers", "saved papers",
+        frozenset({"zotero", "my zotero", "my papers", "saved papers",
                    "saved sources", "my citations", "zotero folder", "zotero collection",
-                   "in my library", "from zotero", "papers in folder", "papers in my"}):
+                   "from zotero", "papers in folder", "papers in my", "my reading list",
+                   "saved article", "saved articles", "journal article", "bibtex",
+                   "bibliography", "cite from my", "citations in my"}):
             {"search_zotero"},
         frozenset({"create a document", "create document", "new document", "write a document",
                    "make a document", "new file", "create a file", "write a file",

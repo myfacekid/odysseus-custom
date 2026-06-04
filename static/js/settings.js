@@ -1515,8 +1515,24 @@ async function initZoteroSettings() {
   var msg = el('set-zoteroMsg');
   var saveBtn = el('set-zoteroSave');
   var testBtn = el('set-zoteroTest');
+  var syncBtn = el('set-zoteroSync');
   var clearBtn = el('set-zoteroClear');
+  var catalogEl = el('set-zoteroCatalog');
   if (!uidInput || !saveBtn) return;
+
+  function renderCatalogStatus(catalog) {
+    if (!catalogEl) return;
+    if (!catalog || !catalog.synced) {
+      catalogEl.textContent = 'Local catalog: not synced — Save or Sync catalog after connecting.';
+      catalogEl.style.color = 'color-mix(in srgb, var(--fg) 55%, transparent)';
+      return;
+    }
+    var when = catalog.synced_at ? String(catalog.synced_at).replace('T', ' ').replace('+00:00', ' UTC') : '';
+    catalogEl.textContent = 'Local catalog: ' + (catalog.item_count || 0) + ' papers'
+      + (catalog.collection_count ? ', ' + catalog.collection_count + ' folders' : '')
+      + (when ? ' · synced ' + when : '');
+    catalogEl.style.color = 'var(--fg)';
+  }
 
   async function loadConfig() {
     try {
@@ -1526,6 +1542,7 @@ async function initZoteroSettings() {
       if (cfg.user_id) uidInput.value = cfg.user_id;
       if (cfg.api_key_masked) keyInput.placeholder = cfg.has_api_key ? ('Current: ' + cfg.api_key_masked) : 'API key';
       if (includeCb) includeCb.checked = cfg.include_in_research !== false;
+      renderCatalogStatus(cfg.catalog);
       if (cfg.configured) {
         msg.textContent = 'Connected as user ' + cfg.user_id;
         msg.style.color = 'var(--fg)';
@@ -1536,6 +1553,17 @@ async function initZoteroSettings() {
     } catch (e) { console.warn('Failed to load Zotero config', e); }
   }
   await loadConfig();
+
+  async function runSync(label) {
+    msg.textContent = label || 'Syncing catalog…';
+    msg.style.color = 'var(--fg)';
+    var res = await fetch('/api/zotero/sync', { method: 'POST', credentials: 'same-origin' });
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Sync failed');
+    renderCatalogStatus(data.catalog);
+    window.dispatchEvent(new CustomEvent('knowledge-graph-refresh'));
+    return data;
+  }
 
   saveBtn.addEventListener('click', async function() {
     msg.textContent = 'Saving…';
@@ -1554,7 +1582,8 @@ async function initZoteroSettings() {
       if (!res.ok) throw new Error(data.detail || 'Save failed');
       keyInput.value = '';
       keyInput.placeholder = data.api_key_masked ? ('Current: ' + data.api_key_masked) : 'API key';
-      msg.textContent = 'Saved';
+      renderCatalogStatus(data.catalog);
+      msg.textContent = (data.message || 'Saved');
       msg.style.color = 'var(--fg)';
     } catch (e) {
       msg.textContent = '✗ ' + (e.message || e);
@@ -1578,13 +1607,28 @@ async function initZoteroSettings() {
       });
       var data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Test failed');
+      renderCatalogStatus(data.catalog);
       var extra = '';
-      if (data.sample_titles && data.sample_titles.length) {
+      if (data.sync && data.sync.ok) {
+        extra = ' — catalog synced (' + (data.sync.items || 0) + ' items)';
+      } else if (data.sample_titles && data.sample_titles.length) {
         extra = ' — e.g. ' + data.sample_titles[0].slice(0, 48);
       } else if (data.info && data.info.total === 0) {
         extra = ' — library is empty; add items in Zotero and sync';
       }
       msg.textContent = '✓ ' + (data.message || 'Connected') + extra;
+      msg.style.color = 'var(--fg)';
+      window.dispatchEvent(new CustomEvent('knowledge-graph-refresh'));
+    } catch (e) {
+      msg.textContent = '✗ ' + (e.message || e);
+      msg.style.color = 'var(--red)';
+    }
+  });
+
+  syncBtn?.addEventListener('click', async function() {
+    try {
+      var data = await runSync('Syncing catalog…');
+      msg.textContent = '✓ Catalog synced — ' + (data.items || 0) + ' papers, ' + (data.collections || 0) + ' folders';
       msg.style.color = 'var(--fg)';
     } catch (e) {
       msg.textContent = '✗ ' + (e.message || e);
@@ -1599,6 +1643,7 @@ async function initZoteroSettings() {
       uidInput.value = '';
       keyInput.value = '';
       keyInput.placeholder = 'API key';
+      renderCatalogStatus(null);
       msg.textContent = 'Cleared';
       msg.style.color = 'var(--fg)';
     } catch (e) {

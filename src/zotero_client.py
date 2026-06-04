@@ -68,6 +68,116 @@ def _title_matches_query(title: str, query: str) -> bool:
     return hits >= max(1, min(2, len(tokens)))
 
 
+_BROAD_LIBRARY_QUERIES = frozenset({
+    "library", "libraries", "paper", "papers", "publication", "publications",
+    "article", "articles", "source", "sources", "citation", "citations",
+    "everything", "anything", "all", "items", "saved", "zotero", "collection",
+    "collections", "reading", "references", "reference", "my work",
+})
+
+
+def _is_broad_library_query(query: str) -> bool:
+    """True when the user is asking to browse the library, not keyword-search it."""
+    q = (query or "").strip().lower()
+    if not q:
+        return True
+    tokens = [t for t in re.split(r"\W+", q) if t]
+    if not tokens:
+        return True
+    if len(tokens) <= 3 and all(t in _BROAD_LIBRARY_QUERIES for t in tokens):
+        return True
+    return q in _BROAD_LIBRARY_QUERIES
+
+
+def _is_bibliographic_item(item: dict) -> bool:
+    itype = (item.get("data") or {}).get("itemType") or ""
+    return itype not in ("attachment", "note", "annotation")
+
+
+def _filter_bibliographic(items: List[dict], limit: int) -> List[dict]:
+    out: List[dict] = []
+    for item in items or []:
+        if not _is_bibliographic_item(item):
+            continue
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _item_display_title(item: dict) -> str:
+    data = item.get("data") or {}
+    title = (data.get("title") or "").strip()
+    if title:
+        return title
+    filename = (data.get("filename") or "").strip()
+    if filename:
+        return filename
+    url = (data.get("url") or "").strip()
+    if url:
+        return url[:200]
+    itype = (data.get("itemType") or "item").strip()
+    return f"Untitled ({itype})"
+
+
+def _normalize_searchable_item(item: dict) -> Optional[dict]:
+    """Make bibliographic entries and standalone PDFs/notes searchable."""
+    if not item:
+        return None
+    data = dict(item.get("data") or {})
+    itype = data.get("itemType") or ""
+    if _is_bibliographic_item(item):
+        return item
+    if itype == "attachment":
+        if not (_is_pdf_attachment(data) or (data.get("filename") or "").strip()):
+            return None
+        if not (data.get("title") or "").strip():
+            data = {**data, "title": _item_display_title(item)}
+        return {**item, "data": data}
+    if itype == "note":
+        note_text = (data.get("note") or "").strip()
+        if not note_text:
+            return None
+        first_line = note_text.split("\n", 1)[0].strip() or "Note"
+        data = {
+            **data,
+            "title": (data.get("title") or first_line)[:200],
+            "abstractNote": note_text[:2000],
+        }
+        return {**item, "data": data}
+    return None
+
+
+def _expand_searchable_items(items: List[dict], limit: int) -> List[dict]:
+    out: List[dict] = []
+    for item in items or []:
+        norm = _normalize_searchable_item(item)
+        if not norm:
+            continue
+        out.append(norm)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _summarize_top_level_items(items: List[dict], limit: int = 8) -> str:
+    if not items:
+        return "No top-level entries returned by the Zotero API."
+    lines = ["Top-level entries in your library:"]
+    for item in items[:limit]:
+        data = item.get("data") or {}
+        key = item.get("key") or "?"
+        itype = data.get("itemType") or "?"
+        lines.append(f"- [{itype}] {_item_display_title(item)} (key: {key})")
+    searchable = _expand_searchable_items(items, limit)
+    if items and not searchable:
+        lines.append(
+            "These look like attachments or notes without bibliographic metadata. "
+            "In Zotero, right-click a standalone PDF and choose “Create Parent Item”, then sync again."
+        )
+    return "\n".join(lines)
+
+
 def mask_api_key(key: str) -> str:
     key = (key or "").strip()
     if len(key) <= 4:
@@ -122,7 +232,7 @@ class ZoteroClient:
         """Verify credentials and return basic library info."""
         try:
             with httpx.Client(timeout=20, headers=self._headers) as client:
-                r = client.get(self._url("/items/top"), params={"limit": 1})
+                r = client.get(self._url("/items/top"), params={"limit": 25})
                 if r.status_code == 403:
                     return False, "Invalid API key or insufficient permissions", None
                 if r.status_code == 404:
@@ -133,17 +243,55 @@ class ZoteroClient:
                     total = int(total_hdr) if total_hdr is not None else None
                 except (TypeError, ValueError):
                     total = None
-                items = r.json()
-                sample = len(items) if isinstance(items, list) else 0
-                if total is not None:
-                    msg = f"Connected — {total} item{'s' if total != 1 else ''} in library"
-                elif sample:
-                    msg = f"Connected — library reachable ({sample}+ items)"
+                tops = r.json()
+                tops = tops if isinstance(tops, list) else []
+                searchable = _expand_searchable_items(tops, 25)
+                if searchable:
+                    n = len(searchable)
+                    msg = f"Connected — {n} searchable item{'s' if n != 1 else ''} in library"
+                elif tops:
+                    types: Dict[str, int] = {}
+                    for item in tops:
+                        t = (item.get("data") or {}).get("itemType") or "item"
+                        types[t] = types.get(t, 0) + 1
+                    type_bits = ", ".join(f"{count} {name}" for name, count in sorted(types.items()))
+                    msg = (
+                        f"Connected — {total or len(tops)} top-level "
+                        f"entr{'y' if (total or len(tops)) == 1 else 'ies'} ({type_bits}); "
+                        "no bibliographic papers indexed yet"
+                    )
+                elif total:
+                    msg = f"Connected — {total} top-level entr{'y' if total == 1 else 'ies'} in library"
                 else:
                     msg = "Connected — library is empty (add items in Zotero and sync to cloud)"
-                return True, msg, {"total": total, "sample": sample}
+                return True, msg, {
+                    "total": total,
+                    "top_level": len(tops),
+                    "searchable": len(searchable),
+                }
         except httpx.HTTPError as e:
             return False, f"Connection failed: {e}", None
+
+    def list_recent_items(self, limit: int = 50, start: int = 0) -> List[dict]:
+        """List recent library entries, including standalone attachments."""
+        limit = min(max(limit, 1), 100)
+        start = max(start, 0)
+        params: List[Tuple[str, str]] = [
+            ("limit", str(limit)),
+            ("start", str(start)),
+            ("sort", "dateAdded"),
+            ("direction", "desc"),
+        ]
+        try:
+            with httpx.Client(timeout=25, headers=self._headers) as client:
+                r = client.get(self._url("/items"), params=params)
+                r.raise_for_status()
+                raw = r.json()
+                items = raw if isinstance(raw, list) else []
+                return _expand_searchable_items(items, limit)
+        except httpx.HTTPError as e:
+            logger.warning(f"Zotero list_recent_items failed: {e}")
+            return []
 
     def list_top_items(self, limit: int = 25) -> List[dict]:
         """List top-level library items (useful for small libraries)."""
@@ -157,6 +305,30 @@ class ZoteroClient:
             logger.warning(f"Zotero list_top_items failed: {e}")
             return []
 
+    def list_bibliographic_items(self, limit: int = 50, start: int = 0) -> List[dict]:
+        """List bibliographic items anywhere in the library (not just top-level)."""
+        limit = min(max(limit, 1), 100)
+        start = max(start, 0)
+        params: List[Tuple[str, str]] = [
+            ("limit", str(limit)),
+            ("start", str(start)),
+            ("itemType", "-attachment"),
+            ("itemType", "-note"),
+            ("itemType", "-annotation"),
+            ("sort", "dateAdded"),
+            ("direction", "desc"),
+        ]
+        try:
+            with httpx.Client(timeout=25, headers=self._headers) as client:
+                r = client.get(self._url("/items"), params=params)
+                r.raise_for_status()
+                raw = r.json()
+                items = raw if isinstance(raw, list) else []
+                return _filter_bibliographic(items, limit)
+        except httpx.HTTPError as e:
+            logger.warning(f"Zotero list_bibliographic_items failed: {e}")
+            return []
+
     def search_items(
         self,
         query: str,
@@ -167,16 +339,24 @@ class ZoteroClient:
     ) -> List[dict]:
         """Search the user's library (excludes attachments).
 
-        seed_library: when True and nothing matches the query, return top-level
-        items from small libraries so research can seed from the whole collection.
+        seed_library: when True and nothing matches the query, return recent
+        bibliographic items from small libraries so a single saved paper still
+        surfaces even if the Zotero API search misses it.
         """
         q = (query or "").strip()
         limit = min(max(limit, 1), 25)
+        start = max(start, 0)
         items: List[dict] = []
         search_q = _extract_search_terms(q) if q else ""
 
         if search_q:
-            params = {"q": search_q, "limit": limit, "qmode": "everything", "start": max(start, 0)}
+            params = {
+                "q": search_q,
+                "limit": limit,
+                "qmode": "everything",
+                "start": start,
+                "itemType": "-attachment",
+            }
             try:
                 with httpx.Client(timeout=12, headers=self._headers) as client:
                     r = client.get(self._url("/items"), params=params)
@@ -185,30 +365,56 @@ class ZoteroClient:
                     items = raw if isinstance(raw, list) else []
             except httpx.HTTPError as e:
                 logger.warning(f"Zotero search failed for {search_q!r}: {e}")
+            if not items:
+                # titleCreatorYear often finds items the full-text index missed.
+                try:
+                    with httpx.Client(timeout=12, headers=self._headers) as client:
+                        r = client.get(
+                            self._url("/items"),
+                            params={**params, "qmode": "titleCreatorYear"},
+                        )
+                        r.raise_for_status()
+                        raw = r.json()
+                        items = raw if isinstance(raw, list) else []
+                except httpx.HTTPError as e:
+                    logger.warning(f"Zotero title search failed for {search_q!r}: {e}")
 
-        tops = self.list_top_items(max(limit * 3, 25)) if (not items or seed_library) else []
+        browse_pool: List[dict] = []
+        if not items or seed_library or q:
+            browse_pool = self.list_recent_items(limit=max(limit * 4, 50), start=0)
+            if not browse_pool:
+                browse_pool = _expand_searchable_items(
+                    self.list_top_items(max(limit * 3, 25)),
+                    max(limit * 4, 50),
+                )
 
-        # Local title match against top-level items (handles API misses/timeouts).
-        if not items and q and tops:
-            for item in tops:
-                title = (item.get("data") or {}).get("title") or ""
+        # Local title match against recent items (handles API misses
+        # and items stored only inside collections).
+        if not items and q and browse_pool:
+            for item in browse_pool:
+                title = _item_display_title(item)
                 if _title_matches_query(title, q):
                     items.append(item)
 
-        # Small library seed: include everything when the user asked to use their library.
-        if not items and seed_library and tops:
-            items = tops
+        # Small-library seed / broad browse requests.
+        if not items and browse_pool and _is_broad_library_query(q):
+            items = browse_pool
+        elif not items and seed_library and browse_pool:
+            if len(browse_pool) <= max(limit, 12):
+                items = browse_pool
 
-        if not items and not q and tops:
-            items = tops
+        if not items and not q and browse_pool:
+            items = browse_pool
 
-        filtered = []
-        for item in items:
-            itype = (item.get("data") or {}).get("itemType") or ""
-            if itype in ("attachment", "note", "annotation"):
-                continue
-            filtered.append(item)
-        return filtered[:limit]
+        if not items and not q:
+            items = self.list_recent_items(limit=max(limit * 3, 25), start=start)
+            if not items:
+                items = _expand_searchable_items(
+                    self.list_top_items(max(limit * 3, 25)),
+                    limit,
+                )
+
+        return _expand_searchable_items(items, limit)[:limit]
 
     def list_collections(self) -> List[dict]:
         """Return all collections with human-readable paths."""
@@ -281,20 +487,47 @@ class ZoteroClient:
     ) -> List[dict]:
         """Search or list items in one collection (direct members only)."""
         limit = min(max(limit, 1), 100)
-        params: Dict[str, Any] = {"limit": limit, "start": max(start, 0)}
+        start = max(start, 0)
         search_q = _extract_search_terms(query) if (query or "").strip() else ""
-        if search_q:
-            params["q"] = search_q
-            params["qmode"] = "everything"
-        try:
-            with httpx.Client(timeout=20, headers=self._headers) as client:
-                r = client.get(self._url(f"/collections/{collection_key}/items"), params=params)
-                r.raise_for_status()
-                items = r.json()
-                return items if isinstance(items, list) else []
-        except httpx.HTTPError as e:
-            logger.warning(f"Zotero get_collection_items failed for {collection_key}: {e}")
-            return []
+
+        def _fetch(q_param: str = "", qmode: str = "everything") -> List[dict]:
+            params: Dict[str, Any] = {
+                "limit": limit,
+                "start": start,
+            }
+            if q_param:
+                params["q"] = q_param
+                params["qmode"] = qmode
+                params["itemType"] = "-attachment"
+            try:
+                with httpx.Client(timeout=20, headers=self._headers) as client:
+                    r = client.get(
+                        self._url(f"/collections/{collection_key}/items"),
+                        params=params,
+                    )
+                    r.raise_for_status()
+                    items = r.json()
+                    raw = items if isinstance(items, list) else []
+                    if q_param:
+                        return _filter_bibliographic(raw, limit)
+                    return _expand_searchable_items(raw, limit)
+            except httpx.HTTPError as e:
+                logger.warning(f"Zotero get_collection_items failed for {collection_key}: {e}")
+                return []
+
+        items = _fetch(search_q) if search_q else _fetch()
+        if not items and search_q:
+            items = _fetch(search_q, qmode="titleCreatorYear")
+        if not items and search_q:
+            pool = _fetch()
+            for item in pool:
+                if _title_matches_query(_item_display_title(item), query):
+                    items.append(item)
+                    if len(items) >= limit:
+                        break
+        if not items and _is_broad_library_query(query):
+            items = _fetch()
+        return items[:limit]
 
     def search_scoped(
         self,
@@ -302,6 +535,8 @@ class ZoteroClient:
         limit: int = 10,
         start: int = 0,
         collection_keys: Optional[List[str]] = None,
+        *,
+        seed_library: bool = False,
     ) -> List[dict]:
         """Search library-wide or within one/more collections (incl. subfolders)."""
         limit = min(max(limit, 1), 25)
@@ -309,7 +544,9 @@ class ZoteroClient:
         need = start + limit
 
         if not collection_keys:
-            return self.search_items(query, limit=need, start=start)[:limit]
+            return self.search_items(
+                query, limit=need, start=start, seed_library=seed_library,
+            )[:limit]
 
         seen: set = set()
         merged: List[dict] = []
@@ -320,15 +557,25 @@ class ZoteroClient:
                 key = item.get("key") or (item.get("data") or {}).get("key")
                 if not key or key in seen:
                     continue
-                itype = (item.get("data") or {}).get("itemType") or ""
-                if itype in ("attachment", "note", "annotation"):
-                    continue
                 seen.add(key)
                 merged.append(item)
                 if len(merged) >= need:
                     break
             if len(merged) >= need:
                 break
+        if not merged and seed_library and collection_keys:
+            for ck in collection_keys:
+                batch = self.get_collection_items(ck, "", limit=per_col, start=0)
+                for item in batch:
+                    key = item.get("key") or (item.get("data") or {}).get("key")
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(item)
+                    if len(merged) >= need:
+                        break
+                if len(merged) >= need:
+                    break
         return merged[start:start + limit]
 
     def get_item(self, item_key: str) -> Optional[dict]:
@@ -365,21 +612,42 @@ class ZoteroClient:
         Tries Zotero's /file endpoint first (stored files). For linked PDFs
         (imported_url), falls back to fetching the attachment URL directly.
         """
-        data = b""
-        try:
-            with httpx.Client(timeout=60, headers=self._headers, follow_redirects=True) as client:
-                r = client.get(self._url(f"/items/{attachment_key}/file"))
-                if r.status_code == 200 and r.content.startswith(b"%PDF"):
-                    data = r.content
-        except Exception as e:
-            logger.warning(f"Zotero PDF download failed: {e}")
+        meta = self.get_item(attachment_key)
+        adata = (meta or {}).get("data") or {}
+        fallback_url = (fallback_url or adata.get("url") or "").strip()
+        link_mode = (adata.get("linkMode") or "").strip()
 
-        if not data and (fallback_url or "").strip():
+        if link_mode == "linked_file":
+            logger.info(
+                f"Zotero attachment {attachment_key} is linked_file (local path only) — "
+                "cloud API cannot fetch the file; sync the PDF to Zotero Cloud or use imported_file."
+            )
+            return ""
+
+        data = b""
+        if link_mode in ("imported_file", "imported_url", "linked_url", ""):
             try:
-                with httpx.Client(timeout=60, follow_redirects=True) as client:
+                with httpx.Client(timeout=60, headers=self._headers, follow_redirects=True) as client:
+                    r = client.get(self._url(f"/items/{attachment_key}/file"))
+                    if r.status_code == 200 and r.content:
+                        ctype = (r.headers.get("content-type") or "").lower()
+                        if r.content.startswith(b"%PDF") or "pdf" in ctype:
+                            data = r.content
+            except Exception as e:
+                logger.warning(f"Zotero PDF download failed: {e}")
+
+        if not data and fallback_url:
+            try:
+                headers = {
+                    "User-Agent": "Nobody/1.0 (Zotero research integration; +https://github.com/)",
+                    "Accept": "application/pdf,*/*",
+                }
+                with httpx.Client(timeout=60, follow_redirects=True, headers=headers) as client:
                     r = client.get(fallback_url.strip())
-                    if r.status_code == 200 and r.content.startswith(b"%PDF"):
-                        data = r.content
+                    if r.status_code == 200 and r.content:
+                        ctype = (r.headers.get("content-type") or "").lower()
+                        if r.content.startswith(b"%PDF") or "pdf" in ctype:
+                            data = r.content
             except Exception as e:
                 logger.warning(f"Zotero linked PDF fetch failed: {e}")
 
@@ -437,14 +705,192 @@ def _extract_pdf_text(data: bytes, max_chars: int = 15000) -> str:
     return text
 
 
+def _url_looks_like_pdf(url: str) -> bool:
+    u = (url or "").strip().lower().split("?")[0].split("#")[0]
+    if not u:
+        return False
+    if u.endswith(".pdf") or u.endswith("/pdf"):
+        return True
+    if "/pdf/" in u or "arxiv.org/pdf" in u:
+        return True
+    return False
+
+
 def _is_pdf_attachment(cdata: dict) -> bool:
-    if (cdata.get("contentType") or "").lower() == "application/pdf":
+    if (cdata.get("itemType") or "") != "attachment":
+        return False
+    ct = (cdata.get("contentType") or "").lower()
+    if ct in ("application/pdf", "application/x-pdf", "application/vnd.pdf"):
         return True
-    filename = (cdata.get("filename") or "").lower()
-    if "pdf" in filename and cdata.get("itemType") == "attachment":
+    if "pdf" in ct:
         return True
-    url = (cdata.get("url") or "").lower()
-    return url.endswith(".pdf")
+    for field in ("filename", "path"):
+        val = (cdata.get(field) or "").lower()
+        if val.endswith(".pdf") or (val and "pdf" in val):
+            return True
+    if _url_looks_like_pdf(cdata.get("url") or ""):
+        return True
+    link_mode = (cdata.get("linkMode") or "").strip()
+    title = (cdata.get("title") or "").strip()
+    if link_mode in ("imported_file", "linked_file", "imported_url", "linked_url"):
+        if _generic_pdf_title(title):
+            return True
+        if (cdata.get("filename") or cdata.get("path") or "").strip():
+            return link_mode in ("imported_file", "linked_file") and bool(
+                (cdata.get("filename") or cdata.get("path") or "").lower().endswith(".pdf")
+                or _generic_pdf_title(title)
+            )
+    return False
+
+
+def _attachment_parent_key(data: dict) -> str:
+    return (data.get("parentItem") or "").strip()
+
+
+def _generic_pdf_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    return t in ("full text pdf", "full text", "pdf", "article pdf", "manuscript pdf")
+
+
+def _pdf_attachment_rank(item: dict) -> tuple:
+    """Prefer stored files over linked URLs when picking a child PDF."""
+    data = item.get("data") or {}
+    mode = (data.get("linkMode") or "").strip()
+    mode_rank = {
+        "imported_file": 0,
+        "imported_url": 1,
+        "linked_url": 2,
+        "linked_file": 3,
+    }.get(mode, 9)
+    title = (data.get("title") or "").lower()
+    generic = 1 if _generic_pdf_title(title) else 0
+    return (mode_rank, generic, title)
+
+
+def _pick_best_pdf_attachment(attachments: List[dict]) -> Optional[dict]:
+    pdfs = [a for a in attachments or [] if _is_pdf_attachment((a.get("data") or {}))]
+    if not pdfs:
+        return None
+    return min(pdfs, key=_pdf_attachment_rank)
+
+
+def list_pdf_attachments_by_parent(client: "ZoteroClient", *, max_attachments: int = 20000) -> Dict[str, List[dict]]:
+    """Fetch all PDF attachments and index them by parentItem key."""
+    pdfs_by_parent: Dict[str, List[dict]] = {}
+    start = 0
+    page = 100
+    seen = 0
+
+    while seen < max_attachments:
+        try:
+            params = [
+                ("limit", str(page)),
+                ("start", str(start)),
+                ("itemType", "attachment"),
+                ("sort", "dateModified"),
+                ("direction", "desc"),
+            ]
+            with httpx.Client(timeout=30, headers=client._headers) as http:
+                r = http.get(client._url("/items"), params=params)
+                r.raise_for_status()
+                batch = r.json()
+        except httpx.HTTPError as e:
+            logger.warning(f"Zotero attachment scan failed at start={start}: {e}")
+            break
+
+        if not isinstance(batch, list) or not batch:
+            break
+
+        for item in batch:
+            data = item.get("data") or {}
+            if not _is_pdf_attachment(data):
+                continue
+            parent = _attachment_parent_key(data)
+            if not parent:
+                continue
+            pdfs_by_parent.setdefault(parent, []).append(item)
+            seen += 1
+            if seen >= max_attachments:
+                break
+
+        if len(batch) < page:
+            break
+        start += page
+
+    return pdfs_by_parent
+
+
+def enrich_pdf_attachments_from_children(
+    client: "ZoteroClient",
+    bibliographic: List[dict],
+    pdfs_by_parent: Dict[str, List[dict]],
+) -> None:
+    """Fill gaps where the flat attachment scan missed child PDFs."""
+    for item in bibliographic or []:
+        key = (item.get("key") or (item.get("data") or {}).get("key") or "").strip()
+        if not key or pdfs_by_parent.get(key):
+            continue
+        for child in client.get_children(key):
+            cdata = child.get("data") or {}
+            if not _is_pdf_attachment(cdata):
+                continue
+            pdfs_by_parent.setdefault(key, []).append(child)
+
+
+def _pdf_attachment_keys_for_item(
+    client: "ZoteroClient",
+    item_key: str,
+    full_item: Optional[dict] = None,
+    *,
+    catalog_row: Optional[dict] = None,
+) -> List[Tuple[str, str]]:
+    """Return [(attachment_key, fallback_url), ...] to try for PDF text extraction."""
+    attachment_items: List[dict] = []
+    seen: set[str] = set()
+
+    def add_item(att: dict) -> None:
+        key = (att.get("key") or (att.get("data") or {}).get("key") or "").strip()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        attachment_items.append(att)
+
+    if catalog_row and catalog_row.get("pdf_attachment_key"):
+        add_item({"key": catalog_row["pdf_attachment_key"], "data": {}})
+
+    full = full_item or client.get_item(item_key) or {}
+    full_data = full.get("data") or {}
+    if _is_pdf_attachment(full_data):
+        add_item(full)
+
+    for child in client.get_children(item_key):
+        cdata = child.get("data") or {}
+        if _is_pdf_attachment(cdata):
+            add_item(child)
+
+    attachment_items.sort(key=_pdf_attachment_rank)
+    out: List[Tuple[str, str]] = []
+    for att in attachment_items:
+        cdata = att.get("data") or {}
+        key = att.get("key") or cdata.get("key") or ""
+        out.append((key, (cdata.get("url") or "").strip()))
+    return out
+
+
+def _extract_pdf_text_for_item(
+    client: "ZoteroClient",
+    item_key: str,
+    full_item: Optional[dict] = None,
+    *,
+    catalog_row: Optional[dict] = None,
+) -> str:
+    for ck, fallback_url in _pdf_attachment_keys_for_item(
+        client, item_key, full_item, catalog_row=catalog_row,
+    ):
+        text = client.download_attachment_pdf(ck, fallback_url=fallback_url)
+        if text:
+            return text
+    return ""
 
 
 def _format_authors(creators: List[dict]) -> str:
@@ -468,6 +914,8 @@ def _item_type_label(item_type: str) -> str:
         "book": "book",
         "bookSection": "book chapter",
         "thesis": "thesis",
+        "attachment": "pdf attachment",
+        "note": "note",
     }
     return mapping.get(item_type or "", item_type or "unknown")
 
@@ -484,7 +932,7 @@ def zotero_item_to_finding(item: dict, user_id: str, pdf_text: str = "") -> dict
     """Convert a Zotero API item into a research finding dict."""
     data = item.get("data") or {}
     key = item.get("key") or data.get("key") or ""
-    title = data.get("title") or "Untitled"
+    title = _item_display_title(item)
     authors = _format_authors(data.get("creators") or [])
     year_match = re.search(r"\d{4}", str(data.get("date") or ""))
     year = year_match.group(0) if year_match else ""
@@ -580,6 +1028,10 @@ def format_zotero_search_context(findings: List[dict]) -> Tuple[str, List[dict]]
         if url or title:
             sources.append({"url": url, "title": title, "source": "zotero"})
 
+    parts.append(
+        "\n(Preview from your message — call search_zotero for folder listing, "
+        "pagination, or a refined library search.)"
+    )
     return "\n".join(parts), sources
 
 
@@ -596,7 +1048,7 @@ def search_zotero_for_chat(query: str, owner: str = "", limit: int = 5) -> Tuple
         owner=owner,
         limit=limit,
         extract_pdfs=True,
-        seed_library=False,
+        seed_library=True,
     )
     return format_zotero_search_context(findings)
 
@@ -660,28 +1112,96 @@ def findings_from_items(
     items: List[dict],
     *,
     extract_pdfs: bool = True,
+    catalog_rows: Optional[List[dict]] = None,
 ) -> List[dict]:
+    catalog_by_key = {
+        (row.get("zotero_key") or ""): row
+        for row in (catalog_rows or [])
+        if row.get("zotero_key")
+    }
     findings: List[dict] = []
     for item in items or []:
         key = item.get("key") or (item.get("data") or {}).get("key")
         if not key:
             continue
         full = client.get_item(key) or item
+        full_data = full.get("data") or {}
+        catalog_row = catalog_by_key.get(key)
+
+        # Child PDF attachments should not surface as their own papers.
+        if _is_pdf_attachment(full_data) and _attachment_parent_key(full_data):
+            parent_key = _attachment_parent_key(full_data)
+            parent = client.get_item(parent_key)
+            if parent:
+                full = parent
+                key = parent_key
+                catalog_row = catalog_by_key.get(key) or catalog_row
+
         pdf_text = ""
         if extract_pdfs:
-            for child in client.get_children(key):
-                cdata = child.get("data") or {}
-                if not _is_pdf_attachment(cdata):
-                    continue
-                ck = child.get("key") or cdata.get("key")
-                if ck:
-                    pdf_text = client.download_attachment_pdf(
-                        ck, fallback_url=cdata.get("url") or "",
-                    )
-                    if pdf_text:
-                        break
+            pdf_text = _extract_pdf_text_for_item(
+                client, key, full, catalog_row=catalog_row,
+            )
         findings.append(zotero_item_to_finding(full, user_id, pdf_text=pdf_text))
     return findings
+
+
+def fetch_paper_pdf_text(
+    owner: str,
+    zotero_key: str,
+    *,
+    max_chars: int = 15000,
+) -> Tuple[str, str]:
+    """Extract PDF text for a catalog paper. Returns (text, error_or_note)."""
+    key = (zotero_key or "").strip()
+    if not key:
+        return "", "No Zotero item key provided."
+
+    creds = resolve_zotero_credentials(owner)
+    if not creds:
+        return "", "Zotero is not configured for this account."
+
+    from src.zotero_catalog import load_catalog
+
+    row = next(
+        (r for r in load_catalog(owner) if (r.get("zotero_key") or "") == key),
+        None,
+    )
+    client = ZoteroClient(creds["api_key"], creds["user_id"])
+    item = client.get_item(key)
+    if not item:
+        return "", f"Paper {key} not found via the Zotero API (sync Zotero to cloud)."
+
+    pdf_text = _extract_pdf_text_for_item(client, key, item, catalog_row=row)
+    if pdf_text:
+        if len(pdf_text) > max_chars:
+            pdf_text = pdf_text[:max_chars] + "\n… [PDF truncated]"
+        return pdf_text, ""
+
+    if row and row.get("has_pdf"):
+        return "", (
+            "A PDF is attached but text could not be downloaded. "
+            "In Zotero use “Store Copy of File” and sync to Zotero Cloud. "
+            "Do not substitute web_search unless the user explicitly asks for outside sources."
+        )
+    return "", "No PDF attached to this paper in Zotero."
+
+
+def _resolve_zotero_key(query: str, owner: str) -> str:
+    """Map paper:KEY, bare 8-char keys, or catalog titles to a Zotero item key."""
+    q = (query or "").strip()
+    if not q:
+        return ""
+    if q.lower().startswith("paper:"):
+        return q.split(":", 1)[1].strip()
+    if re.fullmatch(r"[A-Za-z0-9]{8}", q):
+        from src.zotero_catalog import load_catalog
+
+        for row in load_catalog(owner):
+            if (row.get("zotero_key") or "").upper() == q.upper():
+                return row["zotero_key"]
+        return q
+    return ""
 
 
 def execute_search_zotero_tool(args: dict, owner: str = "") -> Dict[str, Any]:
@@ -703,6 +1223,11 @@ def execute_search_zotero_tool(args: dict, owner: str = "") -> Dict[str, Any]:
     action = (args.get("action") or "search").strip().lower()
 
     if action in ("list_collections", "list_folders", "collections", "folders"):
+        from src.zotero_catalog import format_collections_text, load_collections
+
+        cached = format_collections_text(owner)
+        if cached:
+            return {"output": cached, "exit_code": 0}
         cols = client.list_collections()
         if not cols:
             return {"output": "No collections found in your Zotero library.", "exit_code": 0}
@@ -712,10 +1237,32 @@ def execute_search_zotero_tool(args: dict, owner: str = "") -> Dict[str, Any]:
         ]
         for col in sorted(cols, key=lambda c: (c.get("path") or "").lower()):
             lines.append(f"- {col.get('path')}  (key: {col.get('key')})")
+        lines.append("")
+        lines.append("Tip: Sync library in Settings → Search → Zotero to cache metadata for Links and faster search.")
         return {"output": "\n".join(lines), "exit_code": 0}
+
+    if action in ("sync_catalog", "sync"):
+        from src.zotero_catalog import sync_zotero_catalog
+
+        result = sync_zotero_catalog(owner)
+        if not result.get("ok"):
+            return {"output": result.get("error") or "Sync failed", "exit_code": 1}
+        return {
+            "output": (
+                f"Synced Zotero catalog — {result['items']} items, "
+                f"{result['collections']} collections. "
+                "Papers are indexed in Links (Papers tab). "
+                "Use search_knowledge with types=[\"paper\"] to browse the graph."
+            ),
+            "exit_code": 0,
+        }
 
     query = (args.get("query") or args.get("q") or "").strip()
     collection = (args.get("collection") or args.get("folder") or "").strip()
+    zotero_key = (
+        (args.get("zotero_key") or args.get("item_key") or args.get("key") or "").strip()
+        or _resolve_zotero_key(query, owner)
+    )
     try:
         limit = int(args.get("limit", 10))
     except (TypeError, ValueError):
@@ -731,38 +1278,139 @@ def execute_search_zotero_tool(args: dict, owner: str = "") -> Dict[str, Any]:
     limit = min(max(limit, 1), 25)
     start = max(start, 0)
 
-    if not query and not collection:
-        return {
-            "output": (
-                "Provide a search `query` and/or a `collection` folder. "
-                "Use action=list_collections to list folders."
-            ),
-            "exit_code": 1,
-        }
+    from src.zotero_catalog import load_catalog, search_catalog, catalog_row_to_item
 
-    collections = client.list_collections()
-    collection_keys = None
+    items: List[dict] = []
+    catalog_hits: List[dict] = []
     scope_label = "entire library"
-    if collection:
-        root_key, err = resolve_collection_match(collection, collections)
-        if err:
-            return {"output": err, "exit_code": 1}
-        if not root_key:
-            return {"output": f"Could not resolve collection {collection!r}.", "exit_code": 1}
-        collection_keys = client.collection_subtree_keys(root_key, collections)
-        scope_label = next((c["path"] for c in collections if c["key"] == root_key), collection)
-        scope_label += " (including subfolders)"
 
-    items = client.search_scoped(
-        query=query,
-        limit=limit,
-        start=start,
-        collection_keys=collection_keys,
-    )
+    if zotero_key:
+        row = next(
+            (r for r in load_catalog(owner) if (r.get("zotero_key") or "").upper() == zotero_key.upper()),
+            None,
+        )
+        if row:
+            catalog_hits = [row]
+            items = [catalog_row_to_item(row)]
+        else:
+            item = client.get_item(zotero_key)
+            if not item:
+                return {
+                    "output": f"No Zotero item with key {zotero_key!r}. Sync catalog or check the key from paper:… in Links.",
+                    "exit_code": 1,
+                }
+            items = [item]
+        scope_label = f"paper:{zotero_key}"
+    elif load_catalog(owner):
+        catalog_hits = search_catalog(owner, query, collection=collection, limit=limit + start)
+        if start:
+            catalog_hits = catalog_hits[start:start + limit]
+        else:
+            catalog_hits = catalog_hits[:limit]
+
+        if catalog_hits:
+            items = [catalog_row_to_item(row) for row in catalog_hits]
+            if collection:
+                scope_label = collection + " (local catalog)"
+            elif query:
+                scope_label = "local catalog"
+            else:
+                scope_label = "recent library items (local catalog)"
+        elif not query and not collection:
+            items = client.list_recent_items(limit=limit, start=start)
+            if not items:
+                items = _expand_searchable_items(client.list_top_items(limit), limit)
+            scope_label = "recent library items"
+        else:
+            collections = client.list_collections()
+            collection_keys = None
+            scope_label = "entire library"
+            if collection:
+                root_key, err = resolve_collection_match(collection, collections)
+                if err:
+                    return {"output": err, "exit_code": 1}
+                if not root_key:
+                    return {"output": f"Could not resolve collection {collection!r}.", "exit_code": 1}
+                collection_keys = client.collection_subtree_keys(root_key, collections)
+                scope_label = next((c["path"] for c in collections if c["key"] == root_key), collection)
+                scope_label += " (including subfolders)"
+
+            items = client.search_scoped(
+                query=query,
+                limit=limit,
+                start=start,
+                collection_keys=collection_keys,
+                seed_library=False,
+            )
+            if not items and query:
+                items = client.search_scoped(
+                    query=query,
+                    limit=limit,
+                    start=start,
+                    collection_keys=collection_keys,
+                    seed_library=True,
+                )
+    elif not query and not collection:
+        items = client.list_recent_items(limit=limit, start=start)
+        if not items:
+            items = _expand_searchable_items(client.list_top_items(limit), limit)
+        scope_label = "recent library items"
+    else:
+        collections = client.list_collections()
+        collection_keys = None
+        if collection:
+            root_key, err = resolve_collection_match(collection, collections)
+            if err:
+                return {"output": err, "exit_code": 1}
+            if not root_key:
+                return {"output": f"Could not resolve collection {collection!r}.", "exit_code": 1}
+            collection_keys = client.collection_subtree_keys(root_key, collections)
+            scope_label = next((c["path"] for c in collections if c["key"] == root_key), collection)
+            scope_label += " (including subfolders)"
+
+        items = client.search_scoped(
+            query=query,
+            limit=limit,
+            start=start,
+            collection_keys=collection_keys,
+            seed_library=False,
+        )
+        if not items and query:
+            items = client.search_scoped(
+                query=query,
+                limit=limit,
+                start=start,
+                collection_keys=collection_keys,
+                seed_library=True,
+            )
+
     findings = findings_from_items(
         client, creds["user_id"], items, extract_pdfs=bool(include_pdf),
+        catalog_rows=catalog_hits if catalog_hits else None,
     )
     body, sources = format_zotero_search_context(findings)
+    if not findings:
+        ok, conn_msg, _info = client.test_connection()
+        hint = (
+            f"\n\nZotero connection: {conn_msg}."
+            if ok else f"\n\nZotero connection issue: {conn_msg}."
+        )
+        if not load_catalog(owner):
+            hint += " Sync your library in Settings → Search → Zotero (Sync catalog) for faster search and Links indexing."
+        tops = client.list_top_items(10)
+        if tops:
+            hint += "\n\n" + _summarize_top_level_items(tops, limit=8)
+        else:
+            hint += (
+                " If items exist locally but not here, open Zotero and sync to Zotero Cloud."
+                " Try action=list_collections or search with an empty query to browse recent items."
+            )
+        body = body.rstrip() + hint
+    elif include_pdf and not any((f.get("evidence") or "").strip() for f in findings):
+        body = body.rstrip() + (
+            "\n\n(PDF text could not be extracted. The file may be linked locally only — "
+            "in Zotero use “Store Copy of File” and sync to cloud, then retry with include_pdf=true.)"
+        )
     header = f"Zotero search — scope: {scope_label}"
     if query:
         header += f" | query: {query}"
@@ -789,28 +1437,9 @@ def fetch_zotero_findings(
 
     client = ZoteroClient(creds["api_key"], creds["user_id"])
     items = client.search_items(query, limit=limit, seed_library=seed_library)
-    findings: List[dict] = []
-
-    for item in items:
-        key = item.get("key") or (item.get("data") or {}).get("key")
-        if not key:
-            continue
-        full = client.get_item(key) or item
-        pdf_text = ""
-        if extract_pdfs:
-            for child in client.get_children(key):
-                cdata = child.get("data") or {}
-                if not _is_pdf_attachment(cdata):
-                    continue
-                ck = child.get("key") or cdata.get("key")
-                if ck:
-                    pdf_text = client.download_attachment_pdf(
-                        ck, fallback_url=cdata.get("url") or "",
-                    )
-                    if pdf_text:
-                        break
-        findings.append(zotero_item_to_finding(full, creds["user_id"], pdf_text=pdf_text))
-
+    findings = findings_from_items(
+        client, creds["user_id"], items, extract_pdfs=extract_pdfs,
+    )
     return findings
 
 

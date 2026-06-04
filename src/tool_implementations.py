@@ -3836,7 +3836,7 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
                 None,
                 lambda: execute_knowledge_tool(args, owner=owner or ""),
             ),
-            timeout=45,
+            timeout=120,
         )
     except asyncio.TimeoutError:
         return {"error": "search_knowledge timed out", "exit_code": 1}

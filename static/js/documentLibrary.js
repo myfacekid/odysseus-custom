@@ -83,6 +83,35 @@ let _libraryImportMode = false;
 let _libScrollBound = false;   // infinite-scroll listener attached once
 let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
+function _isZoteroPaper(doc) {
+  return doc?.source === 'zotero' || (typeof doc?.id === 'string' && doc.id.startsWith('zotero:'));
+}
+
+const _PAPER_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.55;flex-shrink:0;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>';
+
+function _libraryPaperKey(doc) {
+  return doc?.zotero_key || String(doc?.id || '').replace(/^zotero:/, '');
+}
+
+function _libraryOpenPaperUrl(doc) {
+  if (doc?.url) window.open(doc.url, '_blank', 'noopener,noreferrer');
+  else if (uiModule) uiModule.showToast('No URL for this paper', 3000);
+}
+
+async function _libraryOpenPaperInLinks(doc) {
+  const key = _libraryPaperKey(doc);
+  if (!key) return;
+  try {
+    const mod = await import('./knowledge.js');
+    const openModal = mod.openKnowledgeModal || mod.default?.openKnowledgeModal;
+    if (openModal) openModal();
+    const open = mod.openKnowledgeNode || mod.default?.openKnowledgeNode;
+    if (open) await open(`paper:${key}`);
+  } catch (e) {
+    if (uiModule) uiModule.showError('Failed to open paper in Links');
+  }
+}
+
 // ---- Library animation helpers ----
 
   /** Collapse an expanded card */
@@ -388,7 +417,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     for (const [lang, count] of sorted) {
       const chip = document.createElement('button');
       chip.className = 'memory-cat-chip' + (_libraryActiveLanguage === lang ? ' active' : '');
-      chip.textContent = `${lang} (${count})`;
+      chip.textContent = `${lang === 'paper' ? 'papers' : lang} (${count})`;
       chip.addEventListener('click', () => {
         _libraryActiveLanguage = lang;
         libraryFetch(false);
@@ -490,6 +519,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
   }
 
   function libraryCreateCard(doc) {
+    const isPaper = _isZoteroPaper(doc);
     const card = document.createElement('div');
     card.className = 'doclib-card memory-item';
     card.dataset.docId = doc.id;
@@ -527,15 +557,17 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     // markdown/csv/python/html/etc.). Falls back to the generic document icon
     // when the language has no dedicated glyph.
     const _GEN_DOC_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.4;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
-    const _langSvg = doc.language && doc.language !== 'text'
+    const _langSvg = !isPaper && doc.language && doc.language !== 'text'
       ? langIcon(doc.language, 12, { style: 'vertical-align:-2px;margin-right:4px;opacity:0.55;flex-shrink:0;color:currentColor;' })
       : '';
-    titleEl.innerHTML = (_langSvg || _GEN_DOC_ICON) + _hlSearch(doc.title || 'Untitled');
+    titleEl.innerHTML = (isPaper ? _PAPER_ICON : (_langSvg || _GEN_DOC_ICON)) + _hlSearch(doc.title || 'Untitled');
     titleRow.appendChild(titleEl);
-    const verBadge = document.createElement('span');
-    verBadge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:8px;background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);flex-shrink:0;';
-    verBadge.textContent = 'v' + (doc.version_count || 1);
-    titleRow.appendChild(verBadge);
+    if (!isPaper) {
+      const verBadge = document.createElement('span');
+      verBadge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:8px;background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);flex-shrink:0;';
+      verBadge.textContent = 'v' + (doc.version_count || 1);
+      titleRow.appendChild(verBadge);
+    }
     // Chevron pushed to the right end of the title row — collapsed
     // shows nothing, expanded reveals a downward chevron so the user
     // sees the card is open and can tap to close it.
@@ -552,10 +584,17 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     meta.style.cssText = 'font-size:10px;opacity:0.55;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;';
     const _esc = (s) => uiModule.esc(String(s || ''));
     const pieces = [];
-    if (doc.session_name) pieces.push(`<span>${_esc(doc.session_name)}</span>`);
-    if (doc.language && doc.language !== 'text') {
-      const ic = langIcon(doc.language, 11, { style: 'vertical-align:-2px;flex-shrink:0;opacity:0.65;color:currentColor;' });
-      pieces.push(`<span style="display:inline-flex;align-items:center;gap:3px;">${ic}${_esc(doc.language)}</span>`);
+    if (isPaper) {
+      pieces.push('<span>Zotero</span>');
+      if (doc.authors) pieces.push(`<span>${_esc(doc.authors)}</span>`);
+      if (doc.year) pieces.push(`<span>${_esc(doc.year)}</span>`);
+      if (doc.has_pdf) pieces.push('<span>PDF</span>');
+    } else {
+      if (doc.session_name) pieces.push(`<span>${_esc(doc.session_name)}</span>`);
+      if (doc.language && doc.language !== 'text') {
+        const ic = langIcon(doc.language, 11, { style: 'vertical-align:-2px;flex-shrink:0;opacity:0.65;color:currentColor;' });
+        pieces.push(`<span style="display:inline-flex;align-items:center;gap:3px;">${ic}${_esc(doc.language)}</span>`);
+      }
     }
     pieces.push(`<span>${_esc(libraryRelativeTime(doc.updated_at))}</span>`);
     meta.innerHTML = pieces.join('<span style="opacity:0.5;">\u00b7</span>');
@@ -586,8 +625,13 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       // Cancel. Heavier actions (Archive, Delete, Export) live in bulk mode.
       if (window.innerWidth <= 768) {
         const items = [];
-        if (doc.session_id) items.push({ label: 'Open', action: () => libraryOpenInSession(doc) });
-        items.push({ label: 'Clone', action: () => libraryImportDocument(doc) });
+        if (isPaper) {
+          items.push({ label: 'Open in Zotero', action: () => _libraryOpenPaperUrl(doc) });
+          items.push({ label: 'View in Links', action: () => { void _libraryOpenPaperInLinks(doc); } });
+        } else {
+          if (doc.session_id) items.push({ label: 'Open', action: () => libraryOpenInSession(doc) });
+          items.push({ label: 'Clone', action: () => libraryImportDocument(doc) });
+        }
         _showLibDropdown(menuBtn, items, { onSelect: () => {
           libraryEnterSelectMode();
           _librarySelectedIds.add(doc.id);
@@ -654,8 +698,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const openItem = document.createElement('button');
     openItem.className = 'dropdown-item-compact';
     openItem.style.cssText = 'background:none;border:none;width:100%;';
-    openItem.innerHTML = _di(_openIco) + '<span>Open</span>';
-    if (doc.session_id) {
+    openItem.innerHTML = _di(_openIco) + `<span>${isPaper ? 'Open in Zotero' : 'Open'}</span>`;
+    if (isPaper) {
+      openItem.title = 'Open paper in Zotero';
+      openItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); _libraryOpenPaperUrl(doc); });
+    } else if (doc.session_id) {
       openItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); libraryOpenInSession(doc); });
     } else {
       // Orphaned doc (closed / session detached) is still openable in the editor
@@ -665,6 +712,14 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     }
     dropdown.appendChild(openItem);
 
+    if (isPaper) {
+      const linksItem = document.createElement('button');
+      linksItem.className = 'dropdown-item-compact';
+      linksItem.style.cssText = 'background:none;border:none;width:100%;';
+      linksItem.innerHTML = _di(_openIco) + '<span>View in Links</span>';
+      linksItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); void _libraryOpenPaperInLinks(doc); });
+      dropdown.appendChild(linksItem);
+    } else {
     // Clone
     const _cloneIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
     const cloneItem = document.createElement('button');
@@ -731,6 +786,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     deleteItem.innerHTML = _di(_deleteIco) + '<span>Delete</span>';
     deleteItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); libraryDeleteSingle(doc.id, card); });
     dropdown.appendChild(deleteItem);
+    }
 
     menuWrap.appendChild(dropdown);
     actionsWrap.appendChild(menuWrap);
@@ -774,8 +830,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
     const openBtn = document.createElement('button');
     openBtn.className = 'doclib-card-text-btn doclib-card-action-btn';
-    openBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M5 12h14M13 5l7 7-7 7"/></svg>Open';
-    if (doc.session_id) {
+    openBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M5 12h14M13 5l7 7-7 7"/></svg>' + (isPaper ? 'Open in Zotero' : 'Open');
+    if (isPaper) {
+      openBtn.title = 'Open paper in Zotero';
+      openBtn.addEventListener('click', (e) => { e.stopPropagation(); _libraryOpenPaperUrl(doc); });
+    } else if (doc.session_id) {
       openBtn.title = 'Open in original session';
       openBtn.addEventListener('click', (e) => { e.stopPropagation(); libraryOpenInSession(doc); });
     } else {
@@ -819,16 +878,28 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     leftGroup.className = 'doclib-action-group';
     const btnRow = document.createElement('div');
     btnRow.className = 'doclib-action-btn-row';
+    if (isPaper) {
+      const linksBtn = document.createElement('button');
+      linksBtn.className = 'doclib-card-text-btn doclib-card-action-btn';
+      linksBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>Links';
+      linksBtn.title = 'Open in Links';
+      linksBtn.addEventListener('click', (e) => { e.stopPropagation(); void _libraryOpenPaperInLinks(doc); });
+      btnRow.appendChild(linksBtn);
+      btnRow.appendChild(openBtn);
+    } else {
     // Export lives in the ⋮ menu — keep the footer uncrowded with Clone + Open.
     btnRow.appendChild(cloneBtn);
     btnRow.appendChild(openBtn);
+    }
     leftGroup.appendChild(btnRow);
+    if (!isPaper) {
     // Delete furthest LEFT, then Archive; Open/Clone group on the RIGHT.
     // Nudge the Delete/Archive pair 8px left for alignment.
     deleteBtn.style.cssText += ';position:relative;left:-8px;';
     archiveBtn.style.cssText += ';position:relative;left:-8px;';
     expandedActions.appendChild(deleteBtn);
     expandedActions.appendChild(archiveBtn);
+    }
     expandedActions.appendChild(leftGroup);
 
     preview.appendChild(expandedActions);
@@ -900,6 +971,28 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const existingPre = preview.querySelector('pre');
 
     try {
+      if (_isZoteroPaper(doc)) {
+        const key = _libraryPaperKey(doc);
+        const res = await fetch(`${API_BASE}/api/knowledge/content?id=${encodeURIComponent('paper:' + key)}`);
+        if (!res.ok) throw new Error('Failed');
+        const full = await res.json();
+        const content = full.body || full.output || full.content || '';
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.textContent = content;
+        pre.appendChild(code);
+        if (existingPre) existingPre.remove();
+        if (preview.querySelector('.doclib-card-pdf-frame')) preview.querySelector('.doclib-card-pdf-frame').remove();
+        pre.style.opacity = '0';
+        preview.insertBefore(pre, preview.firstChild);
+        if (actionsBar && !preview.contains(actionsBar)) preview.appendChild(actionsBar);
+        requestAnimationFrame(() => {
+          pre.style.transition = 'opacity 0.15s ease';
+          pre.style.opacity = '1';
+        });
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/document/${doc.id}`);
       if (!res.ok) throw new Error('Failed');
       const full = await res.json();
@@ -1158,6 +1251,10 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
   }
 
   async function libraryDeleteSingle(docId, card) {
+    if (_isZoteroPaper({ id: docId })) {
+      if (uiModule) uiModule.showToast('Zotero papers are managed in Zotero', 3000);
+      return;
+    }
     if (uiModule && uiModule.styledConfirm) {
       const ok = await uiModule.styledConfirm('Delete this document?', { confirmText: 'Delete', danger: true });
       if (!ok) return;
@@ -1187,7 +1284,12 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 
   async function libraryBulkDelete() {
     if (_librarySelectedIds.size === 0) return;
-    const count = _librarySelectedIds.size;
+    const ids = [..._librarySelectedIds].filter(id => !_isZoteroPaper({ id }));
+    if (ids.length === 0) {
+      if (uiModule) uiModule.showToast('Zotero papers cannot be deleted here', 3000);
+      return;
+    }
+    const count = ids.length;
     if (uiModule && uiModule.styledConfirm) {
       const ok = await uiModule.styledConfirm(
         `Delete ${count} document${count !== 1 ? 's' : ''}?`,
@@ -1201,7 +1303,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     let deleted = 0;
     let failed = 0;
     const deletedIds = [];
-    for (const id of _librarySelectedIds) {
+    for (const id of ids) {
       try {
         const res = await fetch(`${API_BASE}/api/document/${id}`, { method: 'DELETE', credentials: 'same-origin' });
         if (res.ok) {
@@ -1233,7 +1335,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
   async function libraryBulkArchive() {
     if (_librarySelectedIds.size === 0) return;
     const toArchived = !_libraryArchivedView;
-    const ids = [..._librarySelectedIds];
+    const ids = [..._librarySelectedIds].filter(id => !_isZoteroPaper({ id }));
+    if (ids.length === 0) {
+      if (uiModule) uiModule.showToast('Zotero papers cannot be archived here', 3000);
+      return;
+    }
     let done = 0, failed = 0;
     for (const id of ids) {
       try {
@@ -1255,7 +1361,11 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
   // (subsequent calls in the loop see the now-resolved session).
   async function libraryBulkClone() {
     if (_librarySelectedIds.size === 0) return;
-    const ids = [..._librarySelectedIds];
+    const ids = [..._librarySelectedIds].filter(id => !_isZoteroPaper({ id }));
+    if (ids.length === 0) {
+      if (uiModule) uiModule.showToast('Zotero papers cannot be cloned here', 3000);
+      return;
+    }
     let done = 0, failed = 0;
     for (const id of ids) {
       const doc = _libraryDocs.find(d => d.id === id);

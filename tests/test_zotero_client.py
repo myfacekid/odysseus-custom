@@ -10,6 +10,9 @@ from src.zotero_client import (
     _title_matches_query,
     _extract_pdf_text,
     _is_pdf_attachment,
+    _normalize_searchable_item,
+    _expand_searchable_items,
+    _summarize_top_level_items,
     fetch_zotero_findings,
     resolve_collection_match,
     ZoteroClient,
@@ -87,7 +90,28 @@ def test_is_pdf_attachment():
         "linkMode": "imported_url",
         "filename": "paper.pdf",
     })
+    assert _is_pdf_attachment({
+        "itemType": "attachment",
+        "linkMode": "imported_file",
+        "title": "Full Text PDF",
+    })
+    assert _is_pdf_attachment({
+        "itemType": "attachment",
+        "linkMode": "imported_url",
+        "url": "https://arxiv.org/pdf/1706.03762",
+    })
+    assert _is_pdf_attachment({
+        "itemType": "attachment",
+        "linkMode": "linked_file",
+        "path": "/home/user/papers/study.PDF",
+    })
     assert not _is_pdf_attachment({"itemType": "note", "contentType": "text/html"})
+    assert not _is_pdf_attachment({
+        "itemType": "attachment",
+        "linkMode": "imported_url",
+        "contentType": "text/html",
+        "title": "Snapshot",
+    })
 
 
 def test_extract_pdf_text_from_bytes():
@@ -117,6 +141,13 @@ def test_format_zotero_search_context_empty():
     text, sources = format_zotero_search_context([])
     assert "No matching items" in text
     assert sources == []
+
+
+def test_is_broad_library_query():
+    from src.zotero_client import _is_broad_library_query
+    assert _is_broad_library_query("my publications")
+    assert _is_broad_library_query("")
+    assert not _is_broad_library_query("transformer attention mechanisms")
 
 
 def test_fetch_zotero_findings_seed_library(monkeypatch):
@@ -202,3 +233,151 @@ def test_resolve_collection_match_missing():
     key, err = resolve_collection_match("Nonexistent", cols)
     assert key is None
     assert err and "No collection matching" in err
+
+
+def test_expand_searchable_items_includes_standalone_pdf():
+    attachment = {
+        "key": "ATT1",
+        "data": {
+            "itemType": "attachment",
+            "contentType": "application/pdf",
+            "filename": "my-paper.pdf",
+        },
+    }
+    note = {
+        "key": "NOTE1",
+        "data": {"itemType": "note", "note": "Reading list for thesis"},
+    }
+    expanded = _expand_searchable_items([attachment, note], limit=5)
+    assert len(expanded) == 2
+    assert expanded[0]["data"]["title"] == "my-paper.pdf"
+    assert "Reading list" in expanded[1]["data"]["title"]
+
+
+def test_normalize_searchable_item_skips_non_pdf_attachment():
+    html = {
+        "key": "HTML1",
+        "data": {"itemType": "attachment", "contentType": "text/html", "filename": "page.html"},
+    }
+    assert _normalize_searchable_item(html) is None
+
+
+def test_summarize_top_level_items_attachment_hint():
+    attachment = {
+        "key": "ATT1",
+        "data": {
+            "itemType": "attachment",
+            "contentType": "application/pdf",
+            "filename": "paper.pdf",
+        },
+    }
+    summary = _summarize_top_level_items([attachment], limit=5)
+    assert "[attachment]" in summary
+    assert "paper.pdf" in summary
+    assert "Create Parent Item" in summary
+
+
+def test_findings_from_items_extracts_pdf_from_standalone_attachment(monkeypatch):
+    from src.zotero_client import findings_from_items
+
+    attachment = {
+        "key": "ATT1",
+        "data": {
+            "itemType": "attachment",
+            "contentType": "application/pdf",
+            "filename": "paper.pdf",
+            "title": "paper.pdf",
+        },
+    }
+
+    class FakeClient:
+        def get_item(self, key):
+            return attachment
+
+        def get_children(self, key):
+            return []
+
+        def download_attachment_pdf(self, key, fallback_url=""):
+            return "extracted pdf text"
+
+    findings = findings_from_items(FakeClient(), "1", [attachment], extract_pdfs=True)
+    assert len(findings) == 1
+    assert findings[0]["title"] == "paper.pdf"
+    assert "extracted pdf text" in findings[0]["evidence"]
+
+
+def test_findings_from_items_resolves_child_pdf_to_parent(monkeypatch):
+    from src.zotero_client import findings_from_items
+
+    parent = {
+        "key": "PARENT",
+        "data": {
+            "key": "PARENT",
+            "itemType": "journalArticle",
+            "title": "Attention Is All You Need",
+            "creators": [{"lastName": "Vaswani"}],
+        },
+    }
+    child = {
+        "key": "PDF1",
+        "data": {
+            "key": "PDF1",
+            "itemType": "attachment",
+            "contentType": "application/pdf",
+            "title": "Full Text PDF",
+            "parentItem": "PARENT",
+            "url": "https://example.test/paper.pdf",
+        },
+    }
+
+    class FakeClient:
+        def get_item(self, key):
+            if key == "PARENT":
+                return parent
+            return child
+
+        def get_children(self, key):
+            return [child] if key == "PARENT" else []
+
+        def download_attachment_pdf(self, key, fallback_url=""):
+            assert key == "PDF1"
+            return "pdf body text"
+
+    findings = findings_from_items(FakeClient(), "1", [child], extract_pdfs=True)
+    assert len(findings) == 1
+    assert findings[0]["title"] == "Attention Is All You Need"
+    assert "pdf body text" in findings[0]["evidence"]
+
+
+def test_findings_from_items_uses_catalog_pdf_key(monkeypatch):
+    from src.zotero_client import findings_from_items
+
+    parent = {
+        "key": "PARENT",
+        "data": {
+            "key": "PARENT",
+            "itemType": "journalArticle",
+            "title": "Sample Paper",
+        },
+    }
+    catalog_rows = [{
+        "zotero_key": "PARENT",
+        "title": "Sample Paper",
+        "pdf_attachment_key": "PDF1",
+    }]
+
+    class FakeClient:
+        def get_item(self, key):
+            return parent
+
+        def get_children(self, key):
+            return []
+
+        def download_attachment_pdf(self, key, fallback_url=""):
+            assert key == "PDF1"
+            return "from catalog key"
+
+    findings = findings_from_items(
+        FakeClient(), "1", [parent], extract_pdfs=True, catalog_rows=catalog_rows,
+    )
+    assert "from catalog key" in findings[0]["evidence"]

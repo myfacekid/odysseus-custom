@@ -30,6 +30,36 @@ def _aggregate_language_facets(lang_rows):
     return out
 
 
+def _library_item_from_document(doc, session_name) -> Dict[str, Any]:
+    return {
+        "id": doc.id,
+        "session_id": doc.session_id,
+        "session_name": session_name,
+        "title": doc.title,
+        "language": doc.language or "text",
+        "preview": (doc.current_content or "")[:500],
+        "version_count": doc.version_count,
+        "created_at": (doc.created_at.isoformat() + "Z") if doc.created_at else None,
+        "updated_at": (doc.updated_at.isoformat() + "Z") if doc.updated_at else None,
+    }
+
+
+def _library_sort_key(item: Dict[str, Any], sort: str):
+    if sort == "alpha":
+        return ((item.get("title") or "").lower(), item.get("id") or "")
+    if sort == "oldest":
+        return (item.get("created_at") or "", item.get("id") or "")
+    if sort == "edits":
+        return (-(item.get("version_count") or 0), item.get("updated_at") or "", item.get("id") or "")
+    # recent (default)
+    return (item.get("updated_at") or "", item.get("id") or "")
+
+
+def _sort_library_items(items: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
+    reverse = sort in ("recent", "edits")
+    return sorted(items, key=lambda item: _library_sort_key(item, sort), reverse=reverse)
+
+
 
 from routes.document_helpers import (
     DocumentCreate, DocumentUpdate, DocumentPatch,
@@ -274,6 +304,15 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             lang_rows = lang_q.group_by(Document.language).all()
             languages = _aggregate_language_facets(lang_rows)
 
+            paper_items: List[Dict[str, Any]] = []
+            include_papers = (not archived) and user and (not language or language == "paper")
+            if include_papers:
+                from src.zotero_catalog import library_items_from_catalog
+
+                all_papers = library_items_from_catalog(user, search="")
+                languages["paper"] = languages.get("paper", 0) + len(all_papers)
+                paper_items = library_items_from_catalog(user, search=search or "") if search else all_papers
+
             # Session count (owner-filtered)
             sc_q = (
                 db.query(func.count(func.distinct(Document.session_id)))
@@ -283,61 +322,61 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             sc_q = _owner_session_filter(sc_q, user)
             session_count = sc_q.scalar()
 
-            # Base query
-            q = (
-                db.query(Document, DbSession.name)
-                .outerjoin(DbSession, Document.session_id == DbSession.id)
-                .filter(Document.is_active == True).filter(_arch_cond)
-            )
-            q = _owner_session_filter(q, user)
+            documents: List[Dict[str, Any]] = []
+            total = 0
 
-            # Search filter — split on whitespace and require EACH term to
-            # match (title OR content). A single `%foo bar%` LIKE only matched
-            # the exact adjacent phrase, so any multi-word query with a space
-            # silently returned nothing. Per-term AND makes "machine learning"
-            # match docs containing both words regardless of position/order.
-            if search:
-                for tok in search.split():
-                    term = f"%{tok}%"
-                    q = q.filter(
-                        Document.title.ilike(term) | Document.current_content.ilike(term)
-                    )
+            if language == "paper":
+                sorted_papers = _sort_library_items(paper_items, sort)
+                total = len(sorted_papers)
+                documents = sorted_papers[offset:offset + limit]
+            else:
+                # Base query
+                q = (
+                    db.query(Document, DbSession.name)
+                    .outerjoin(DbSession, Document.session_id == DbSession.id)
+                    .filter(Document.is_active == True).filter(_arch_cond)
+                )
+                q = _owner_session_filter(q, user)
 
-            # Language filter
-            if language:
-                if language == "text":
-                    q = q.filter((Document.language == None) | (Document.language == "text"))
+                # Search filter — split on whitespace and require EACH term to
+                # match (title OR content). A single `%foo bar%` LIKE only matched
+                # the exact adjacent phrase, so any multi-word query with a space
+                # silently returned nothing. Per-term AND makes "machine learning"
+                # match docs containing both words regardless of position/order.
+                if search:
+                    for tok in search.split():
+                        term = f"%{tok}%"
+                        q = q.filter(
+                            Document.title.ilike(term) | Document.current_content.ilike(term)
+                        )
+
+                # Language filter
+                if language:
+                    if language == "text":
+                        q = q.filter((Document.language == None) | (Document.language == "text"))
+                    else:
+                        q = q.filter(Document.language == language)
+
+                if include_papers and paper_items:
+                    rows = q.all()
+                    doc_items = [_library_item_from_document(doc, session_name) for doc, session_name in rows]
+                    merged = _sort_library_items(doc_items + paper_items, sort)
+                    total = len(merged)
+                    documents = merged[offset:offset + limit]
                 else:
-                    q = q.filter(Document.language == language)
+                    total = q.count()
 
-            # Total before pagination
-            total = q.count()
+                    if sort == "oldest":
+                        q = q.order_by(Document.created_at.asc())
+                    elif sort == "edits":
+                        q = q.order_by(Document.version_count.desc())
+                    elif sort == "alpha":
+                        q = q.order_by(Document.title.asc())
+                    else:  # recent
+                        q = q.order_by(Document.updated_at.desc())
 
-            # Sorting
-            if sort == "oldest":
-                q = q.order_by(Document.created_at.asc())
-            elif sort == "edits":
-                q = q.order_by(Document.version_count.desc())
-            elif sort == "alpha":
-                q = q.order_by(Document.title.asc())
-            else:  # recent
-                q = q.order_by(Document.updated_at.desc())
-
-            rows = q.offset(offset).limit(limit).all()
-
-            documents = []
-            for doc, session_name in rows:
-                documents.append({
-                    "id": doc.id,
-                    "session_id": doc.session_id,
-                    "session_name": session_name,
-                    "title": doc.title,
-                    "language": doc.language or "text",
-                    "preview": (doc.current_content or "")[:500],
-                    "version_count": doc.version_count,
-                    "created_at": (doc.created_at.isoformat() + "Z") if doc.created_at else None,
-                    "updated_at": (doc.updated_at.isoformat() + "Z") if doc.updated_at else None,
-                })
+                    rows = q.offset(offset).limit(limit).all()
+                    documents = [_library_item_from_document(doc, session_name) for doc, session_name in rows]
 
             return {
                 "documents": documents,

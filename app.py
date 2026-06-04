@@ -810,9 +810,12 @@ async def runtime_info() -> Dict[str, object]:
         or os.getenv("OLLAMA_URL")
         or ("http://host.docker.internal:11434/v1" if in_docker else "http://127.0.0.1:11434/v1")
     )
+    from src.constants import OBSIDIAN_INTEGRATION_ENABLED
+
     return {
         "in_docker": in_docker,
         "ollama_base_url": ollama_url,
+        "obsidian_enabled": OBSIDIAN_INTEGRATION_ENABLED,
     }
 
 # ========= LIFECYCLE =========

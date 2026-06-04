@@ -16,6 +16,7 @@ from src.zotero_client import (
     resolve_zotero_credentials,
     sources_to_zotero_items,
 )
+from src.zotero_catalog import catalog_stats, clear_zotero_catalog, sync_zotero_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +60,14 @@ def setup_zotero_routes() -> APIRouter:
         owner = _owner(request)
         cfg = _load_user_zotero(owner)
         has_key = bool((cfg.get("api_key") or "").strip())
+        stats = catalog_stats(owner)
         return {
             "configured": has_key and bool((cfg.get("user_id") or "").strip()),
             "user_id": (cfg.get("user_id") or "").strip(),
             "api_key_masked": mask_api_key(cfg.get("api_key") or ""),
             "has_api_key": has_key,
             "include_in_research": cfg.get("include_in_research", True),
+            "catalog": stats,
         }
 
     @router.post("/config")
@@ -84,17 +87,32 @@ def setup_zotero_routes() -> APIRouter:
             raise HTTPException(400, "User ID is required")
         cfg["include_in_research"] = bool(body.include_in_research)
         _save_user_zotero(owner, cfg)
+        sync_note = ""
+        try:
+            result = sync_zotero_catalog(owner)
+            if result.get("ok"):
+                sync_note = f" Catalog synced ({result.get('items', 0)} items)."
+        except Exception as e:
+            logger.warning(f"Zotero catalog sync after save failed: {e}")
         return {
             "ok": True,
             "user_id": cfg["user_id"],
             "api_key_masked": mask_api_key(cfg.get("api_key") or ""),
             "include_in_research": cfg["include_in_research"],
+            "message": f"Saved.{sync_note}",
+            "catalog": catalog_stats(owner),
         }
 
     @router.post("/config/clear")
     async def clear_config(request: Request):
         owner = _owner(request)
         _save_user_zotero(owner, {})
+        clear_zotero_catalog(owner)
+        try:
+            from src.knowledge_sync import after_zotero_sync
+            after_zotero_sync(owner)
+        except Exception:
+            pass
         return {"ok": True}
 
     @router.post("/test")
@@ -118,6 +136,7 @@ def setup_zotero_routes() -> APIRouter:
         ok, message, info = client.test_connection()
         if not ok:
             raise HTTPException(400, message)
+        sync_result = sync_zotero_catalog(owner)
         items = client.search_items("", limit=3, seed_library=True)
         sample_titles = [
             (i.get("data") or {}).get("title") or "Untitled"
@@ -129,6 +148,33 @@ def setup_zotero_routes() -> APIRouter:
             "library_sample": len(items),
             "sample_titles": sample_titles,
             "info": info,
+            "catalog": catalog_stats(owner),
+            "sync": sync_result,
+        }
+
+    @router.get("/catalog")
+    async def get_catalog_status(request: Request):
+        owner = _owner(request)
+        creds = resolve_zotero_credentials(owner)
+        if not creds:
+            raise HTTPException(400, "Zotero not configured")
+        return {"ok": True, "catalog": catalog_stats(owner)}
+
+    @router.post("/sync")
+    async def sync_catalog(request: Request):
+        owner = _owner(request)
+        creds = resolve_zotero_credentials(owner)
+        if not creds:
+            raise HTTPException(400, "Zotero not configured — save credentials first")
+        result = sync_zotero_catalog(owner)
+        if not result.get("ok"):
+            raise HTTPException(400, result.get("error") or "Sync failed")
+        return {
+            "ok": True,
+            "items": result.get("items", 0),
+            "collections": result.get("collections", 0),
+            "synced_at": result.get("synced_at"),
+            "catalog": catalog_stats(owner),
         }
 
     @router.get("/items")

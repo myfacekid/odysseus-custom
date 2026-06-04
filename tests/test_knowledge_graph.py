@@ -269,3 +269,53 @@ def test_suggest_graph_link_without_writing(tmp_path, monkeypatch):
     )
     assert tool_out["exit_code"] == 0
     assert tool_out.get("action") == "suggest_link"
+
+
+def test_paper_nodes_indexed_from_catalog(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    monkeypatch.setattr("src.zotero_catalog.ZOTERO_ROOT", tmp_path / "zotero")
+    owner = "tester"
+    zdir = tmp_path / "zotero" / "users" / owner
+    zdir.mkdir(parents=True)
+    (zdir / "catalog.jsonl").write_text(
+        json.dumps({
+            "zotero_key": "PAPER1",
+            "title": "Attention Is All You Need",
+            "authors": "Vaswani",
+            "year": "2017",
+            "abstract": "Transformers.",
+            "collection_keys": ["COL1"],
+            "collection_paths": ["Reading"],
+            "item_type": "journalArticle",
+            "doi": "",
+            "url": "https://example.test/paper",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    (zdir / "collections.json").write_text(
+        json.dumps([{"key": "COL1", "path": "Reading", "name": "Reading", "parent": ""}]),
+        encoding="utf-8",
+    )
+
+    with patch("src.knowledge_graph.OBSIDIAN_INTEGRATION_ENABLED", False):
+        stats = rebuild_owner_graph(owner)
+
+    assert stats["ok"] is True
+    summary = list_graph_summary(owner, type_filter="paper", limit=50)
+    ids = {n["id"] for n in summary["nodes"]}
+    assert "paper:PAPER1" in ids
+
+    content = execute_knowledge_tool({"action": "read", "id": "paper:PAPER1"}, owner=owner)
+    assert content["exit_code"] == 0
+    assert "Attention Is All You Need" in content["output"]
+
+    with patch(
+        "src.zotero_client.fetch_paper_pdf_text",
+        return_value=("Full paper body from PDF.", ""),
+    ):
+        content_pdf = execute_knowledge_tool(
+            {"action": "read", "id": "paper:PAPER1", "include_pdf": True},
+            owner=owner,
+        )
+    assert "Full paper body from PDF." in content_pdf["output"]
+    assert "PDF text (from your Zotero library)" in content_pdf["output"]

@@ -1700,6 +1700,7 @@ function initializeEventListeners() {
     updatePlusDot();
   }
   function _syncVaultIndicator(active) {
+    if (window._obsidianEnabled !== true) active = false;
     const indicator = el('vault-indicator-btn');
     const overflow = el('overflow-vault-btn');
     const chk = el('vault-toggle');
@@ -2175,6 +2176,7 @@ function initializeEventListeners() {
   const vaultIndicatorBtn = el('vault-indicator-btn');
   if (overflowVaultBtn) {
     overflowVaultBtn.addEventListener('click', () => {
+      if (window._obsidianEnabled !== true) return;
       const chk = el('vault-toggle');
       const isActive = chk ? !chk.checked : true;
       _syncVaultIndicator(isActive);
@@ -2429,7 +2431,7 @@ function initializeEventListeners() {
   };
 
   // Keys hidden by default on first run (no localStorage yet)
-  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn']);
+  const UI_VIS_DEFAULT_OFF = new Set(['models-section', 'rag-toggle-btn', 'vault-toggle-btn']);
 
   // Keys that need admin to toggle off (reserved for future use)
   const UI_VIS_ADMIN_ONLY = new Set([]);
@@ -2464,6 +2466,23 @@ function initializeEventListeners() {
     applyTextEmojis(state['text-emojis'] !== false);
     // Hide thinking sections toggle (show-thinking: checked=show, unchecked=hide)
     document.body.classList.toggle('hide-thinking', state['show-thinking'] === false);
+    _applyObsidianVaultVisibility(state);
+  }
+
+  function _applyObsidianVaultVisibility(state) {
+    const enabled = window._obsidianEnabled === true;
+    document.querySelectorAll('#overflow-vault-btn, #vault-indicator-btn').forEach(el => {
+      if (!enabled) {
+        el.style.display = 'none';
+        el.hidden = true;
+        return;
+      }
+      const visible = 'vault-toggle-btn' in state
+        ? state['vault-toggle-btn'] !== false
+        : !UI_VIS_DEFAULT_OFF.has('vault-toggle-btn');
+      el.style.display = visible ? '' : 'none';
+      el.hidden = !visible;
+    });
   }
 
   // Rearrange toggles in session/model sort dropdowns
@@ -2695,8 +2714,15 @@ function initializeEventListeners() {
   window.UI_VIS_DEFAULT_OFF = UI_VIS_DEFAULT_OFF;
 
   (function initUIVisibility() {
-    // Apply saved visibility on load
+    window._obsidianEnabled = false;
     applyUIVis(loadUIVis());
+    fetch('/api/runtime', { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : {})
+      .then(data => {
+        window._obsidianEnabled = data.obsidian_enabled === true;
+        applyUIVis(loadUIVis());
+      })
+      .catch(() => applyUIVis(loadUIVis()));
 
     // Generic draggable for all .modal elements
     const _sharedDragModalIds = new Set(['settings-modal']);

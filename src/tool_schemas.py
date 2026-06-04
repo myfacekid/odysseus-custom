@@ -68,16 +68,20 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_zotero",
-            "description": "Search the user's personal Zotero library (saved papers, citations, PDF excerpts). Use when they mention Zotero, 'my library', 'my papers', saved sources, or a Zotero folder/collection. NOT for general web lookups (web_search) or deep multi-source research jobs (trigger_research). If the folder name is ambiguous, call action=list_collections first.",
+            "description": "Search the user's personal Zotero library (saved papers, citations, PDF excerpts). Uses a local metadata catalog when synced (Settings → Zotero → Sync catalog). For browsing linked papers in folders, prefer search_knowledge with types=[\"paper\"]. NOT for general web lookups (web_search) or deep multi-source research jobs (trigger_research). If the folder name is ambiguous, call action=list_collections first.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["search", "list_collections"],
-                        "description": "search (default) finds items; list_collections lists folder paths and keys.",
+                        "enum": ["search", "list_collections", "sync"],
+                        "description": "search (default) finds items; list_collections lists folder paths and keys; sync refreshes the local metadata catalog.",
                     },
                     "query": {"type": "string", "description": "Search terms (optional when browsing a collection)"},
+                    "zotero_key": {
+                        "type": "string",
+                        "description": "Exact Zotero item key (from paper:KEY in Links). Preferred over title search when reading a specific paper.",
+                    },
                     "collection": {
                         "type": "string",
                         "description": "Zotero folder: full path like 'Projects / ML' or collection key from list_collections. Includes subfolders.",
@@ -161,7 +165,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_knowledge",
-            "description": "Search the unified knowledge graph: todos, documents, memories, skills — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use read action for full bodies. Use suggest_link (not link) when proposing connections the user should confirm.",
+            "description": "Search the unified knowledge graph: todos, documents, memories, skills, Zotero papers — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use types=[\"paper\"] for saved Zotero items. Use read action for full bodies. Use suggest_link (not link) when proposing connections the user should confirm.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -171,7 +175,7 @@ FUNCTION_TOOL_SCHEMAS = [
                         "description": "search=compact hits; read=full body; neighbors=linked nodes; suggest_link=propose link for user approval; link/unlink=explicit edges (link only when user asked); rebuild=re-index graph",
                     },
                     "query": {"type": "string", "description": "Search terms"},
-                    "id": {"type": "string", "description": "Node id for read/neighbors (e.g. task:uuid, document:id)"},
+                    "id": {"type": "string", "description": "Node id for read/neighbors (e.g. task:uuid, paper:zotero_key, document:id)"},
                     "from": {"type": "string", "description": "Source node id for suggest_link/link/unlink"},
                     "to": {"type": "string", "description": "Target node id for suggest_link/link/unlink"},
                     "reason": {"type": "string", "description": "Brief reason shown to the user when suggesting a link"},
@@ -183,9 +187,13 @@ FUNCTION_TOOL_SCHEMAS = [
                     "types": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Filter: task, document, memory, skill, note",
+                        "description": "Filter: task, document, memory, skill, paper, collection, note",
                     },
                     "limit": {"type": "integer", "description": "Max hits (default 12)"},
+                    "include_pdf": {
+                        "type": "boolean",
+                        "description": "For read on paper:… nodes, extract Zotero PDF text (default true)",
+                    },
                     "expand_hops": {"type": "integer", "description": "Include 1-hop linked neighbors (default 1)"},
                     "max_chars": {"type": "integer", "description": "Max chars for read action"},
                 },

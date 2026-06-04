@@ -13,6 +13,8 @@ const TYPE_LABELS = {
   document: 'Document',
   memory: 'Memory',
   skill: 'Skill',
+  paper: 'Paper',
+  collection: 'Collection',
   note: 'Document', // legacy index rows
 };
 
@@ -42,8 +44,19 @@ function _nodeTitle(node) {
 }
 
 function _nodeMeta(node) {
-  if (node?.meta?.source === 'vault' && node.meta.path) {
-    return node.meta.path;
+  const meta = node?.meta || {};
+  if (meta.source === 'vault' && meta.path) {
+    return meta.path;
+  }
+  if (node?.type === 'paper') {
+    const bits = [];
+    if (meta.authors) bits.push(meta.authors);
+    if (meta.year) bits.push(meta.year);
+    if (meta.collection_paths?.length) bits.push(meta.collection_paths.slice(0, 2).join(', '));
+    return bits.join(' · ');
+  }
+  if (node?.type === 'collection' && meta.path) {
+    return meta.path;
   }
   return '';
 }
@@ -274,6 +287,20 @@ async function _showDetail(nodeId) {
       metaHtml = `<div class="kg-meta">Library document</div>`;
     } else if (meta.source === 'vault' && meta.path) {
       metaHtml = `<div class="kg-meta">${esc(meta.path)}</div>`;
+    } else if (node.type === 'paper') {
+      const bits = [];
+      if (meta.authors) bits.push(meta.authors);
+      if (meta.year) bits.push(`(${meta.year})`);
+      if (meta.doi) bits.push(meta.doi);
+      if (meta.collection_paths?.length) {
+        bits.push(`in ${meta.collection_paths.slice(0, 2).join(', ')}`);
+      }
+      if (bits.length) metaHtml = `<div class="kg-meta">${esc(bits.join(' · '))}</div>`;
+      if (meta.has_pdf) {
+        metaHtml += '<div class="kg-meta">PDF attached — read via search_knowledge on this paper id extracts full text</div>';
+      }
+    } else if (node.type === 'collection') {
+      metaHtml = `<div class="kg-meta">Zotero folder${meta.path ? ` · ${esc(meta.path)}` : ''}</div>`;
     }
     const linked = new Set();
     for (const row of [...(nb.outgoing || []), ...(nb.incoming || [])]) {
@@ -329,7 +356,10 @@ async function _renderList({ query = '', type = _activeType } = {}) {
       stats.textContent = `${nodes.length} shown · ${edgeCount} links indexed`;
     }
     if (!nodes.length) {
-      list.innerHTML = '<div class="kg-empty">No links yet — add todos, documents, or memories, then Rebuild.</div>';
+      const emptyHint = _activeType === 'paper'
+        ? 'No papers indexed — connect Zotero in Settings → Search, then Sync catalog.'
+        : 'No links yet — add todos, documents, or memories, then Rebuild.';
+      list.innerHTML = `<div class="kg-empty">${esc(emptyHint)}</div>`;
       const detail = document.getElementById('kg-detail');
       if (detail) detail.innerHTML = '';
       return;
@@ -553,6 +583,40 @@ async function openKnowledgeNode(nodeId) {
     const mod = await import('./skills.js');
     const open = mod.openSkill || mod.default?.openSkill;
     if (open) open(raw);
+    return;
+  }
+  if (effective === 'paper') {
+    let url = _selectedNodeMeta?.url;
+    if (!url) {
+      try {
+        const nb = await _fetchNeighbors(nodeId);
+        url = nb.node?.meta?.url;
+      } catch { /* ignore */ }
+    }
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    uiModule.showToast?.('No URL for this paper', 3000);
+    return;
+  }
+  if (effective === 'collection') {
+    _activeType = 'paper';
+    document.querySelectorAll('.kg-type-filter').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.type === 'paper');
+    });
+    let path = _selectedNodeMeta?.path || '';
+    if (!path) {
+      try {
+        const nb = await _fetchNeighbors(nodeId);
+        path = nb.node?.meta?.path || '';
+      } catch { /* ignore */ }
+    }
+    const search = document.getElementById('kg-search-input');
+    const q = path.split('/').pop()?.trim() || path;
+    if (search && q) search.value = q;
+    await _renderList({ query: search?.value || '', type: 'paper' });
+    return;
   }
 }
 

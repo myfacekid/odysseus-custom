@@ -443,7 +443,7 @@
         <button class="close-btn" id="close-knowledge-modal" aria-label="Close links browser">✖</button>
       </div>
       <div class="modal-body knowledge-modal-body">
-        <p class="admin-toggle-sub" style="margin:0 0 10px">Browse conceptual connections across todos, documents, memories, and skills. Vault markdown is indexed as documents. Stored as portable JSON under <code>data/knowledge/</code>.</p>
+        <p class="admin-toggle-sub" style="margin:0 0 10px">Browse conceptual connections across todos, documents, memories, skills, and Zotero papers. Sync your library in Settings → Search → Zotero. Stored as portable JSON under <code>data/knowledge/</code> and <code>data/zotero/</code>.</p>
         <div class="kg-toolbar">
           <input type="search" id="kg-search-input" class="settings-input kg-search-input" placeholder="Search the graph…" autocomplete="off">
           <button type="button" class="admin-btn-sm" id="kg-rebuild-btn">Rebuild</button>
@@ -453,6 +453,7 @@
           <button type="button" class="kg-type-filter active" data-type="">All</button>
           <button type="button" class="kg-type-filter" data-type="task">Tasks</button>
           <button type="button" class="kg-type-filter" data-type="document">Documents</button>
+          <button type="button" class="kg-type-filter" data-type="paper">Papers</button>
           <button type="button" class="kg-type-filter" data-type="memory">Memories</button>
           <button type="button" class="kg-type-filter" data-type="skill">Skills</button>
         </div>
@@ -1689,7 +1690,7 @@
           </div>
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Zotero Library</h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">Connect your Zotero cloud library for academic research. Works from any device — desktop server or laptop — as long as your library syncs to Zotero Cloud. Get your API key at <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noopener">zotero.org/settings/keys</a> (enable library read; add write for export).</div>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Connect your Zotero cloud library for academic research. Sync builds a local metadata catalog for Links (Papers tab) and faster search — no PDF indexing. Get your API key at <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noopener">zotero.org/settings/keys</a> (enable library read; add write for export).</div>
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">User ID</label>
@@ -1705,12 +1706,14 @@
                   <span>Include library in deep research runs</span>
                 </label>
               </div>
-              <div class="settings-row" style="margin-top:4px;gap:8px;align-items:center;">
+              <div class="settings-row" style="margin-top:4px;gap:8px;align-items:center;flex-wrap:wrap;">
                 <button type="button" class="admin-btn-sm" id="set-zoteroSave">Save</button>
                 <button type="button" class="admin-btn-sm" id="set-zoteroTest" style="opacity:0.7">Test</button>
+                <button type="button" class="admin-btn-sm" id="set-zoteroSync" style="opacity:0.7">Sync catalog</button>
                 <button type="button" class="admin-btn-sm" id="set-zoteroClear" style="opacity:0.7">Clear</button>
                 <span id="set-zoteroMsg" style="font-size:11px"></span>
               </div>
+              <div id="set-zoteroCatalog" class="admin-toggle-sub" style="margin-top:6px"></div>
             </div>
           </div>
           <div class="admin-card" hidden style="display:none" id="settings-obsidian-vault-card">

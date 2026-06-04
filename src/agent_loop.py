@@ -117,11 +117,12 @@ _API_AGENT_RULES = """\
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
 - "Create/add/write a note" / quick reminders / "remind me at 3pm" → use `manage_notes`. For **One Thing** horizons (this week / ~3 months / this year with priority + due date) → use `manage_notes` with `action=list_one_thing|add_one_thing|toggle_one_thing`. Horizons: `focus`=this week, `build`=~3 months, `aim`=this year. Priorities: `critical`, `elevated`, `steady`. Do NOT store notes in `manage_memory`.
 - New documents, articles, files, or long-form content for the Library → `create_document` (appears in Documents library + Links). NOT `write_file` or markdown-on-disk tools.
-- Cross-entity context ("what connects to X", tasks + docs + memories together) → call `search_knowledge` (search/read/neighbors). Prefer over calling manage_documents + manage_memory + list_tasks separately.
-- When two graph items clearly relate (documents, tasks, memories, skills) → call `search_knowledge` with `action=suggest_link` and a brief `reason`. The user gets a notification to link or dismiss — do NOT call `link` unless they explicitly asked to connect them. Use graph ids like `document:<uuid>` from create_document results or search_knowledge hits.
+- Cross-entity context ("what connects to X", tasks + docs + memories + papers together) → call `search_knowledge` (search/read/neighbors). Prefer over calling manage_documents + manage_memory + list_tasks separately. Use `types: ["paper"]` for synced Zotero items (Links → Papers tab).
+- **Reading a saved paper** (user asks to read/summarize/analyze a library paper, or you have a `paper:<zotero_key>` id) → call `search_knowledge` with `action=read` and that id. This **automatically extracts the Zotero PDF** when one is attached. Do **NOT** `web_search` the paper title, DOI, or rely on world knowledge to substitute — the user's saved copy is the source of truth. Only use `web_search` for that paper if PDF extraction explicitly failed **and** the user asks for outside sources.
+- When two graph items clearly relate (documents, tasks, memories, skills, papers) → call `search_knowledge` with `action=suggest_link` and a brief `reason`. The user gets a notification to link or dismiss — do NOT call `link` unless they explicitly asked to connect them. Use graph ids like `document:<uuid>`, `paper:<zotero_key>`, or `task:<uuid>` from search_knowledge hits.
 - "Disable/turn off/enable/turn on <tool>" (shell, search, research, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, search→web, deepresearch→research, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
 - "Research X" / "do research on X" / "look into Y" / "deep dive on Z" → call `trigger_research` with `topic`. This starts a live job that appears in the Deep Research sidebar (streams progress + final report). **Do NOT use `web_search` for these** — saw the agent do a plain web_search for "do research on X" when the user wanted the deep-research job. "research X" is a deep-research request, not a quick lookup. (web_search is only for a single quick fact mid-task.) Do NOT POST /api/research/start via app_api either — blocked. After starting, tell the user it's running in the Deep Research sidebar. Only if the user explicitly wants it inline/quick should you fall back to web_search.
-- "My Zotero library" / "my papers" / "saved sources" / "papers in folder X" / "what do I have on Y in Zotero" → call `search_zotero`. If the user names a folder and you're unsure of the exact path, call `search_zotero` with `action=list_collections` first, then search with `collection` set to the matching path or key. NOT web_search (that's the public web) and NOT trigger_research (that's a new deep-research job).
+- "My Zotero library" / "my papers" / "read this paper" / saved sources → `search_knowledge` `action=read` with `paper:<key>` (auto PDF). Alternate: `search_zotero` with `zotero_key` (or query `paper:KEY`) and `include_pdf=true`. Do **NOT** `web_search` to read papers in the user's library. NOT trigger_research for a single saved paper.
 - "Open/show <panel>" (documents, library, gallery, sessions, brain/memories, skills, settings, notes, cookbook) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open cookbook" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add.
 - You are running INSIDE Odysseus — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
@@ -199,7 +200,7 @@ List Zotero folders (returns paths like `Projects / ML` plus collection keys).
 ```search_zotero
 {"query": "transformer attention", "collection": "Projects / ML", "limit": 10}
 ```
-Search the user's personal Zotero library — saved papers, citations, and PDF excerpts. Use when they mention Zotero, "my library", "my papers", saved sources, or a folder name. `collection` accepts the full folder path or key from list_collections (includes subfolders). Use `start` for pagination. NOT for general web lookups (`web_search`) or starting a new deep-research job (`trigger_research`).""",
+Search the user's personal Zotero library — saved papers, citations, and PDF excerpts. Pass `zotero_key` (or query `paper:KEY` / bare 8-char key) to fetch a specific paper. `include_pdf=true` (default) extracts PDF text. For reading a known graph paper, prefer `search_knowledge` `action=read` on `paper:<key>` (same PDF extraction). Do **NOT** `web_search` paper titles when the PDF is in the user's library. NOT trigger_research.""",
 
     "search_vault": """\
 ```search_vault
@@ -259,9 +260,14 @@ Insert a wikilink from one note to another — builds the knowledge graph. NOT m
 Unified knowledge graph search — todos, documents, memories, skills. Returns compact snippets + linked neighbors. Prefer this for cross-entity context.
 
 ```search_knowledge
+{"action": "read", "id": "paper:98XWP3CH", "max_chars": 20000}
+```
+Load full content for one graph node. For `paper:…` ids, **automatically extracts the Zotero PDF** when attached (metadata-only catalog is not the final answer). Do not web_search the title afterward.
+
+```search_knowledge
 {"action": "read", "id": "document:abc123", "max_chars": 4000}
 ```
-Load full content for one graph node after search.
+Load full content for a library document or other node types.
 
 ```search_knowledge
 {"action": "neighbors", "id": "task:uuid-here"}
@@ -1437,6 +1443,20 @@ async def stream_agent_loop(
     # or what keywords were in the latest user message.
     if _relevant_tools is not None and active_document is not None:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
+
+    # Zotero Library toggle — the composer pre-injects preview hits, but the
+    # model still needs search_zotero for list_collections, folder-scoped
+    # search, pagination, and follow-up queries. Tool RAG often omits it
+    # unless the user literally says "Zotero".
+    try:
+        from src.zotero_client import get_zotero_search_request
+        if get_zotero_search_request().enabled:
+            if _relevant_tools is None:
+                _relevant_tools = set()
+            _relevant_tools.add("search_zotero")
+            logger.info("[tool-rag] Zotero toggle on — including search_zotero")
+    except Exception:
+        pass
 
     prep_timings["tool_selection"] = time.time() - _t1
 

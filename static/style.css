@@ -36667,6 +36667,9 @@ body.theme-frosted .modal {
   opacity: 0.75;
   flex-shrink: 0;
 }
+.kg-type-paper {
+  color: var(--accent-primary, #6b8cff);
+}
 .kg-node-title {
   font-size: 13px;
   font-weight: 600;

@@ -19,5 +19,9 @@ def after_skill_change(owner: str) -> None:
     schedule_rebuild(owner)
 
 
+def after_zotero_sync(owner: str) -> None:
+    schedule_rebuild(owner)
+
+
 def force_rebuild(owner: str) -> dict:
     return rebuild_owner_graph(owner)
