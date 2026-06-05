@@ -7,7 +7,7 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -321,6 +321,9 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         extraction_concurrency: Optional[int] = Field(default=None, ge=1, le=12)
         include_preprints: bool = True
         include_zotero: bool = True
+        seed_papers: List[str] = Field(default_factory=list)
+        mode: str = Field(default="literature_review")
+        report_length: str = Field(default="standard")
         category: Optional[str] = None  # ignored — always academic
 
     @router.post("/api/research/start")
@@ -413,6 +416,19 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
 
         # max_rounds=0 → "Auto", let AI decide; pass 20 as the safety cap.
         effective_max_rounds = body.max_rounds if body.max_rounds > 0 else 20
+        mode = (body.mode or "literature_review").strip().lower()
+        allowed_modes = {"literature_review", "similar_papers", "gap_analysis", "compare"}
+        if mode not in allowed_modes:
+            raise HTTPException(400, f"mode must be one of: {', '.join(sorted(allowed_modes))}")
+        report_length = (body.report_length or "standard").strip().lower()
+        if report_length not in ("standard", "extended"):
+            raise HTTPException(400, "report_length must be standard or extended")
+        seed_papers = [s.strip() for s in (body.seed_papers or []) if (s or "").strip()]
+        if mode == "compare" and len(seed_papers) < 2:
+            raise HTTPException(400, "Compare mode requires at least 2 seed papers")
+        if seed_papers and not (body.query or "").strip():
+            body.query = "Literature synthesis from selected seed papers."
+
         research_handler.start_research(
             session_id=session_id,
             query=body.query,
@@ -428,8 +444,63 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             include_preprints=body.include_preprints,
             include_zotero=body.include_zotero,
             owner=user,
+            seed_papers=seed_papers,
+            research_mode=mode,
+            report_length=report_length,
         )
-        return {"session_id": session_id, "status": "running", "query": body.query}
+        return {
+            "session_id": session_id,
+            "status": "running",
+            "query": body.query,
+            "mode": mode,
+            "seed_papers": seed_papers,
+        }
+
+    @router.get("/api/research/papers")
+    async def research_papers(
+        request: Request,
+        search: str = Query("", max_length=200),
+        limit: int = Query(30, ge=1, le=100),
+    ):
+        """Browse synced catalog papers for the seed-paper picker."""
+        from src.auth_helpers import require_privilege
+        from src.zotero_catalog import library_items_from_catalog, search_catalog
+
+        user = require_privilege(request, "can_use_research")
+        if user == "internal-tool":
+            tool_owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            if tool_owner and tool_owner not in {"internal-tool", "api", "demo", "system"}:
+                user = tool_owner
+        q = (search or "").strip()
+        if q:
+            rows = search_catalog(user, q, limit=limit)
+            papers = [
+                {
+                    "zotero_key": r.get("zotero_key"),
+                    "title": r.get("title") or "Untitled",
+                    "authors": r.get("authors") or "",
+                    "year": r.get("year") or "",
+                    "doi": r.get("doi") or "",
+                    "has_pdf": bool(r.get("has_pdf")),
+                    "collection_paths": r.get("collection_paths") or [],
+                }
+                for r in rows
+            ]
+        else:
+            items = library_items_from_catalog(user, search="")
+            papers = [
+                {
+                    "zotero_key": p.get("zotero_key") or p.get("id", "").replace("paper:", ""),
+                    "title": p.get("title") or "Untitled",
+                    "authors": p.get("authors") or "",
+                    "year": p.get("year") or "",
+                    "doi": p.get("doi") or "",
+                    "has_pdf": bool(p.get("has_pdf")),
+                    "collection_paths": p.get("collection_paths") or [],
+                }
+                for p in items[:limit]
+            ]
+        return {"papers": papers, "total": len(papers)}
 
     @router.get("/api/research/stream/{session_id}")
     async def research_stream(session_id: str, request: Request):

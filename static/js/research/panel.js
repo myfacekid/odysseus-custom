@@ -47,10 +47,170 @@ const _COLLAPSE_KEY = 'odysseus-research-settings-collapsed';
 
 try { _settingsCollapsed = localStorage.getItem(_COLLAPSE_KEY) === '1'; } catch {}
 
+const _SEEDS_KEY = 'odysseus-research-seeds';
+const _TAB_KEY = 'odysseus-research-compose-tab';
+/** @type {'topic'|'papers'} */
+let _activeComposeTab = 'topic';
+/** @type {Array<{zotero_key:string,title:string,authors?:string,year?:string,has_pdf?:boolean,doi?:string}>} */
+let _seedPapers = [];
+
+function _loadSeedsFromStorage() {
+  try {
+    const raw = localStorage.getItem(_SEEDS_KEY);
+    _seedPapers = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(_seedPapers)) _seedPapers = [];
+  } catch { _seedPapers = []; }
+}
+
+function _saveSeedsToStorage() {
+  try { localStorage.setItem(_SEEDS_KEY, JSON.stringify(_seedPapers)); } catch {}
+}
+
+function _renderSeedChips() {
+  const host = document.getElementById('research-seed-chips');
+  if (!host) return;
+  if (!_seedPapers.length) {
+    host.innerHTML = '<div class="research-seed-empty">Add seed papers from your library or paste Zotero keys / DOIs.</div>';
+    return;
+  }
+  host.innerHTML = _seedPapers.map((p, idx) => {
+    const meta = [p.authors, p.year].filter(Boolean).join(' · ');
+    const pdf = p.has_pdf ? 'PDF' : 'no PDF';
+    return `<div class="research-seed-chip" data-idx="${idx}">
+      <div class="research-seed-chip-title">${_esc(p.title || p.zotero_key || 'Paper')}</div>
+      <div class="research-seed-chip-meta">${_esc(meta)} · ${pdf}</div>
+      <button type="button" class="research-seed-chip-remove" data-idx="${idx}" title="Remove">×</button>
+    </div>`;
+  }).join('');
+  host.querySelectorAll('.research-seed-chip-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = parseInt(btn.getAttribute('data-idx') || '-1', 10);
+      if (i >= 0) { _seedPapers.splice(i, 1); _saveSeedsToStorage(); _renderSeedChips(); }
+    });
+  });
+}
+
+function _addSeedPaper(paper) {
+  const key = (paper.zotero_key || paper.key || '').trim().toUpperCase();
+  const doi = (paper.doi || '').trim();
+  const id = key || doi;
+  if (!id) return false;
+  if (_seedPapers.some(s => (s.zotero_key || '').toUpperCase() === key || (doi && s.doi === doi))) return false;
+  _seedPapers.push({
+    zotero_key: key || id,
+    title: paper.title || key || doi,
+    authors: paper.authors || '',
+    year: paper.year || '',
+    has_pdf: !!paper.has_pdf,
+    doi: doi || '',
+  });
+  _saveSeedsToStorage();
+  _renderSeedChips();
+  return true;
+}
+
+async function _toggleSeedPicker() {
+  const picker = document.getElementById('research-seed-picker');
+  if (!picker) return;
+  const open = picker.style.display !== 'none';
+  if (open) { picker.style.display = 'none'; return; }
+  picker.style.display = 'block';
+  picker.innerHTML = '<div class="research-seed-picker-loading">Loading papers…</div>';
+  try {
+    const res = await fetch(`${_apiBase}/api/research/papers?limit=40`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('Failed to load papers');
+    const data = await res.json();
+    const papers = data.papers || [];
+    if (!papers.length) {
+      picker.innerHTML = '<div class="research-seed-picker-empty">No synced papers — sync Zotero catalog in Settings.</div>';
+      return;
+    }
+    picker.innerHTML = `<input type="search" class="research-seed-picker-search" placeholder="Filter papers…">
+      <div class="research-seed-picker-list">${papers.map(p => `
+        <button type="button" class="research-seed-picker-item" data-key="${_esc(p.zotero_key)}"
+          data-title="${_esc(p.title)}" data-authors="${_esc(p.authors)}" data-year="${_esc(p.year)}"
+          data-doi="${_esc(p.doi)}" data-pdf="${p.has_pdf ? '1' : '0'}">
+          <span class="research-seed-picker-title">${_esc(p.title)}</span>
+          <span class="research-seed-picker-meta">${_esc([p.authors, p.year].filter(Boolean).join(' · '))}${p.has_pdf ? ' · PDF' : ''}</span>
+        </button>`).join('')}</div>`;
+    const searchEl = picker.querySelector('.research-seed-picker-search');
+    const listEl = picker.querySelector('.research-seed-picker-list');
+    searchEl?.addEventListener('input', () => {
+      const q = (searchEl.value || '').toLowerCase();
+      listEl?.querySelectorAll('.research-seed-picker-item').forEach(el => {
+        const txt = el.textContent?.toLowerCase() || '';
+        el.style.display = !q || txt.includes(q) ? '' : 'none';
+      });
+    });
+    picker.querySelectorAll('.research-seed-picker-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _addSeedPaper({
+          zotero_key: btn.getAttribute('data-key'),
+          title: btn.getAttribute('data-title'),
+          authors: btn.getAttribute('data-authors'),
+          year: btn.getAttribute('data-year'),
+          doi: btn.getAttribute('data-doi'),
+          has_pdf: btn.getAttribute('data-pdf') === '1',
+        });
+      });
+    });
+  } catch (e) {
+    picker.innerHTML = `<div class="research-seed-picker-empty">${_esc(e.message || 'Could not load papers')}</div>`;
+  }
+}
+
+function _parseSeedInput(raw) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  if (/^10\.\d/i.test(s)) return { doi: s, zotero_key: s, title: `DOI ${s}` };
+  const key = s.replace(/^paper:/i, '').trim().toUpperCase();
+  if (/^[A-Z0-9]{8}$/.test(key)) return { zotero_key: key, title: key };
+  return { zotero_key: s, title: s };
+}
+
+function _seedRefsForApi() {
+  return _seedPapers.map(p => p.zotero_key || p.doi).filter(Boolean);
+}
+
+function _getActiveComposeTab() {
+  return _activeComposeTab === 'papers' ? 'papers' : 'topic';
+}
+
+function _switchComposeTab(tab) {
+  const next = tab === 'papers' ? 'papers' : 'topic';
+  _activeComposeTab = next;
+  try { localStorage.setItem(_TAB_KEY, next); } catch {}
+
+  document.querySelectorAll('.research-compose-tab').forEach(btn => {
+    const active = btn.getAttribute('data-tab') === next;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  const topicPane = document.getElementById('research-pane-topic');
+  const papersPane = document.getElementById('research-pane-papers');
+  if (topicPane) topicPane.hidden = next !== 'topic';
+  if (papersPane) papersPane.hidden = next !== 'papers';
+
+  const hint = document.getElementById('research-tab-hint');
+  const queryEl = document.getElementById('research-query');
+  if (hint) {
+    hint.textContent = next === 'papers'
+      ? 'Pick seed papers, then optionally add a question to steer the synthesis.'
+      : 'Ask a research question — searches the web, reviews, and your library when seeding is on.';
+  }
+  if (queryEl) {
+    queryEl.placeholder = next === 'papers'
+      ? 'Optional — e.g. focus on mechanisms, clinical outcomes, or methods…'
+      : 'e.g. What is the evidence for intermittent fasting on cardiovascular outcomes in adults? Include RCTs and systematic reviews.';
+  }
+}
+
 function _saveSettingsToStorage() {
   try {
     const preprintsEl = document.getElementById('research-include-preprints');
     const zoteroEl = document.getElementById('research-include-zotero');
+    const modeEl = document.getElementById('research-mode');
+    const lengthEl = document.getElementById('research-report-length');
     localStorage.setItem(_SETTINGS_KEY, JSON.stringify({
       max_rounds: document.getElementById('research-rounds')?.value || '0',
       search_provider: document.getElementById('research-search-provider')?.value || '',
@@ -58,6 +218,9 @@ function _saveSettingsToStorage() {
       model: document.getElementById('research-model')?.value || '',
       include_preprints: preprintsEl ? !!preprintsEl.checked : true,
       include_zotero: zoteroEl ? !!zoteroEl.checked : true,
+      mode: modeEl?.value || 'literature_review',
+      report_length: lengthEl?.value || 'standard',
+      compose_tab: _getActiveComposeTab(),
     }));
   } catch {}
 }
@@ -356,14 +519,49 @@ function _buildPanelHTML() {
           <span>Scholarly literature synthesis — searches papers, reviews, and primary sources</span>
         </p>
         <div id="research-no-past-hint" class="memory-desc doclib-desc" style="display:none;margin-top:-2px;font-size:11px;opacity:0.7;">All past research found in <button type="button" class="research-library-link">Library, Research</button></div>
+        <div class="research-compose-tabs" role="tablist" aria-label="Research type">
+          <button type="button" class="research-compose-tab active" data-tab="topic" role="tab" aria-selected="true">Topic</button>
+          <button type="button" class="research-compose-tab" data-tab="papers" role="tab" aria-selected="false">From papers</button>
+        </div>
+        <p id="research-tab-hint" class="research-tab-hint">Ask a research question — searches the web, reviews, and your library when seeding is on.</p>
         <textarea id="research-query" class="research-query" placeholder="e.g. What is the evidence for intermittent fasting on cardiovascular outcomes in adults? Include RCTs and systematic reviews." rows="4"></textarea>
+        <div id="research-pane-topic" class="research-compose-pane">
+          <label class="research-preprint-toggle research-library-seed-toggle" id="research-library-seed-row" title="When on, recent papers from your synced Zotero catalog are loaded as seeds before searching the web">
+            <input type="checkbox" id="research-include-zotero" checked>
+            <span>Seed from my library</span>
+          </label>
+          <label class="research-setting research-length-inline">
+            <span class="research-setting-label">Report length</span>
+            <select id="research-report-length">
+              <option value="standard">Standard (~1200 words)</option>
+              <option value="extended">Extended (3000+ words)</option>
+            </select>
+          </label>
+        </div>
+        <div id="research-pane-papers" class="research-compose-pane" hidden>
+          <label class="research-setting research-mode-setting">
+            <span class="research-setting-label">Mode</span>
+            <select id="research-mode">
+              <option value="literature_review">Literature review</option>
+              <option value="similar_papers">Similar papers</option>
+              <option value="gap_analysis">Gap analysis</option>
+              <option value="compare">Compare (2+ papers)</option>
+            </select>
+          </label>
+          <div class="research-seeds-block research-seeds-block--compact">
+            <div class="research-seeds-label">Seed papers</div>
+            <div id="research-seed-chips" class="research-seed-chips"></div>
+            <div class="research-seed-actions">
+              <button type="button" id="research-seed-browse" class="research-seed-browse-btn">Browse library</button>
+              <input type="text" id="research-seed-input" class="research-seed-input" placeholder="Zotero key or DOI…">
+              <button type="button" id="research-seed-add" class="research-seed-add-btn">Add</button>
+            </div>
+            <div id="research-seed-picker" class="research-seed-picker" style="display:none"></div>
+          </div>
+        </div>
         <label class="research-preprint-toggle" id="research-preprint-row" title="When off, preprint servers (arXiv, bioRxiv, medRxiv) are excluded from search results">
           <input type="checkbox" id="research-include-preprints" checked>
           <span>Include preprints (arXiv, bioRxiv, medRxiv)</span>
-        </label>
-        <label class="research-preprint-toggle" id="research-zotero-row" title="Search your Zotero cloud library and extract PDFs when configured in Settings → Search">
-          <input type="checkbox" id="research-include-zotero" checked>
-          <span>Include my Zotero library</span>
         </label>
         <button id="research-settings-toggle" class="research-settings-toggle${chevronCls}">
           Settings<span class="research-settings-chevron">${_chevronIcon}</span>
@@ -429,6 +627,28 @@ function _wireEvents(pane) {
   });
   pane.querySelector('#research-start-btn').addEventListener('click', _handleStart);
   pane.querySelector('#research-add-btn').addEventListener('click', _handleAdd);
+  pane.querySelectorAll('.research-compose-tab').forEach(btn => {
+    btn.addEventListener('click', () => _switchComposeTab(btn.getAttribute('data-tab')));
+  });
+  try {
+    const savedTab = localStorage.getItem(_TAB_KEY);
+    if (savedTab === 'papers' || savedTab === 'topic') _activeComposeTab = savedTab;
+  } catch {}
+  _switchComposeTab(_activeComposeTab);
+  pane.querySelector('#research-seed-browse')?.addEventListener('click', _toggleSeedPicker);
+  pane.querySelector('#research-seed-add')?.addEventListener('click', () => {
+    const inp = document.getElementById('research-seed-input');
+    const parsed = _parseSeedInput(inp?.value || '');
+    if (parsed && _addSeedPaper(parsed)) inp.value = '';
+  });
+  pane.querySelector('#research-seed-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      document.getElementById('research-seed-add')?.click();
+    }
+  });
+  _loadSeedsFromStorage();
+  _renderSeedChips();
 
   pane.querySelector('#research-settings-toggle').addEventListener('click', () => {
     const body = document.getElementById('research-settings-body');
@@ -456,15 +676,23 @@ function _wireEvents(pane) {
 
 function _readSettings() {
   const preprintsEl = document.getElementById('research-include-preprints');
-  const zoteroEl = document.getElementById('research-include-zotero');
+  const librarySeedEl = document.getElementById('research-include-zotero');
+  const tab = _getActiveComposeTab();
+  const seeds = tab === 'papers' ? _seedRefsForApi() : [];
   const settings = {
     max_rounds: parseInt(document.getElementById('research-rounds')?.value || '0', 10),
     search_provider: document.getElementById('research-search-provider')?.value || undefined,
     endpoint_id: document.getElementById('research-endpoint')?.value || undefined,
     model: document.getElementById('research-model')?.value || undefined,
     include_preprints: preprintsEl ? !!preprintsEl.checked : true,
-    include_zotero: zoteroEl ? !!zoteroEl.checked : true,
+    include_zotero: tab === 'topic' ? !!(librarySeedEl && librarySeedEl.checked) : true,
+    mode: tab === 'papers'
+      ? (document.getElementById('research-mode')?.value || 'literature_review')
+      : 'literature_review',
+    report_length: document.getElementById('research-report-length')?.value || 'standard',
+    compose_tab: tab,
   };
+  if (seeds.length) settings.seed_papers = seeds;
   const epSel = document.getElementById('research-endpoint');
   if (epSel && epSel.value) {
     const opt = epSel.options[epSel.selectedIndex];
@@ -479,9 +707,16 @@ function _readSettings() {
 function _handleAdd() {
   const queryEl = document.getElementById('research-query');
   const query = (queryEl?.value || '').trim();
-  if (!query) { queryEl?.focus(); return; }
+  const tab = _getActiveComposeTab();
+  const seeds = _seedRefsForApi();
+  if (tab === 'topic' && !query) { queryEl?.focus(); return; }
+  if (tab === 'papers' && !seeds.length && !query) {
+    document.getElementById('research-seed-input')?.focus();
+    return;
+  }
   _saveSettingsToStorage();
-  jobs.addToQueue(query, _readSettings());
+  const label = query || (tab === 'papers' ? 'Literature synthesis from seed papers' : '');
+  jobs.addToQueue(label, _readSettings());
   queryEl.value = '';
   queryEl.focus();
 }
@@ -500,6 +735,12 @@ function _editJob(job) {
   if (preprintsEl && s.include_preprints !== undefined) preprintsEl.checked = !!s.include_preprints;
   const zoteroEl = document.getElementById('research-include-zotero');
   if (zoteroEl && s.include_zotero !== undefined) zoteroEl.checked = !!s.include_zotero;
+  if (s.compose_tab) _switchComposeTab(s.compose_tab);
+  else if ((s.seed_papers || []).length) _switchComposeTab('papers');
+  const modeEl = document.getElementById('research-mode');
+  if (modeEl && s.mode) modeEl.value = s.mode;
+  const lengthEl = document.getElementById('research-report-length');
+  if (lengthEl && s.report_length) lengthEl.value = s.report_length;
   const roundsEl = document.getElementById('research-rounds');
   if (roundsEl && s.max_rounds) roundsEl.value = s.max_rounds;
   const spEl = document.getElementById('research-search-provider');
@@ -518,16 +759,30 @@ async function _handleStart() {
   const queryEl = document.getElementById('research-query');
   const startBtn = document.getElementById('research-start-btn');
   const query = (queryEl?.value || '').trim();
+  const tab = _getActiveComposeTab();
+  const seeds = _seedRefsForApi();
+  const mode = document.getElementById('research-mode')?.value || 'literature_review';
+  if (tab === 'papers' && mode === 'compare' && seeds.length < 2) {
+    if (typeof uiModule !== 'undefined' && uiModule?.showError) {
+      uiModule.showError('Compare mode requires at least 2 seed papers.');
+    }
+    return;
+  }
+  if (tab === 'topic' && !query) {
+    const queued = jobs.getJobs().filter(j => j.status === 'queued').length;
+    if (!queued) { queryEl?.focus(); return; }
+  }
+  if (tab === 'papers' && !seeds.length && !query) {
+    const queued = jobs.getJobs().filter(j => j.status === 'queued').length;
+    if (!queued) { document.getElementById('research-seed-input')?.focus(); return; }
+  }
 
-  // "Start All" mode: more than one job queued → let the user pick parallel
-  // vs sequential before launching. Queue any freshly-typed query first so
-  // it joins the batch, then open the picker anchored to this button.
   const queuedCount = jobs.getJobs().filter(j => j.status === 'queued').length;
   if (queuedCount > 1) {
-    if (query) { _saveSettingsToStorage(); jobs.addToQueue(query, _readSettings()); queryEl.value = ''; }
+    const canQueue = (tab === 'topic' && query) || (tab === 'papers' && (seeds.length || query));
+    if (canQueue) { _saveSettingsToStorage(); jobs.addToQueue(query || 'Literature synthesis from seed papers', _readSettings()); queryEl.value = ''; }
     if (window.innerWidth <= 768) _dismissKeyboard(queryEl);
-    const total = jobs.getJobs().filter(j => j.status === 'queued').length;
-    _promptParallelOrSequential(total, startBtn);
+    _promptParallelOrSequential(jobs.getJobs().filter(j => j.status === 'queued').length, startBtn);
     return;
   }
 
@@ -561,20 +816,24 @@ async function _handleStart() {
   setTimeout(() => _setBusy(false), 1500);
 
   const _mobile = window.innerWidth <= 768;
-  if (!query) {
+  const canLaunchForm = (tab === 'topic' && query) || (tab === 'papers' && (seeds.length || query));
+  if (canLaunchForm) {
+    _saveSettingsToStorage();
+    const settings = _readSettings();
+    const label = query || 'Literature synthesis from seed papers';
+    queryEl.value = '';
+    if (_mobile) _dismissKeyboard(queryEl); else queryEl.focus();
+    jobs.startJob(label, settings).catch(() => {
+      if (typeof uiModule !== 'undefined' && uiModule?.showError) uiModule.showError('Failed to start research');
+      queryEl.value = query;
+    });
+    return;
+  }
+  if (queuedCount >= 1) {
     jobs.startAllQueued();
     if (_mobile) _dismissKeyboard(queryEl);
     return;
   }
-  _saveSettingsToStorage();
-  const settings = _readSettings();
-  queryEl.value = '';
-  // Mobile: drop the keyboard after sending; desktop: keep focus for fast follow-ups.
-  if (_mobile) _dismissKeyboard(queryEl); else queryEl.focus();
-  jobs.startJob(query, settings).catch((e) => {
-    if (typeof uiModule !== 'undefined' && uiModule?.showError) uiModule.showError('Failed to start research');
-    queryEl.value = query; // restore so user can retry
-  });
 }
 
 function _restoreSavedSettings() {
@@ -587,6 +846,13 @@ function _restoreSavedSettings() {
   const zoteroEl = document.getElementById('research-include-zotero');
   if (zoteroEl && saved.include_zotero !== undefined) {
     zoteroEl.checked = !!saved.include_zotero;
+  }
+  const modeEl = document.getElementById('research-mode');
+  if (modeEl && saved.mode) modeEl.value = saved.mode;
+  const lengthEl = document.getElementById('research-report-length');
+  if (lengthEl && saved.report_length) lengthEl.value = saved.report_length;
+  if (saved.compose_tab === 'papers' || saved.compose_tab === 'topic') {
+    _switchComposeTab(saved.compose_tab);
   }
   // Rounds intentionally defaults to "Auto" on every open — don't restore.
   // Users can pick a specific cap each time if needed.

@@ -214,11 +214,11 @@ Record choices here when made:
 
 | # | Question | Decision |
 |---|----------|----------|
-| 1 | Similar-paper sources: web only first, or OpenAlex/Semantic Scholar early? | _TBD_ |
-| 2 | Report length default: 1200 vs 3000+ words? | _TBD_ |
-| 3 | Preprints: default include vs peer-review-only for “professional academic”? | _TBD_ |
-| 4 | Seed papers: optional add-on vs first-class panel mode? | _TBD_ |
-| 5 | Phase 4 agent model: worth complexity vs improved IterResearch loop? | _TBD_ |
+| 1 | Similar-paper sources: web only first, or OpenAlex/Semantic Scholar early? | **OpenAlex + Semantic Scholar early** |
+| 2 | Report length default: 1200 vs 3000+ words? | **User toggle** (Standard ~1200 / Extended 3000+) |
+| 3 | Preprints: default include vs peer-review-only for “professional academic”? | **Keep toggle; include on by default** |
+| 4 | Seed papers: optional add-on vs first-class panel mode? | **First-class panel mode** |
+| 5 | Phase 4 agent model: worth complexity vs improved IterResearch loop? | **Improve IterResearch loop** (defer agent-shaped Phase 4) |
 
 ---
 

@@ -35272,6 +35272,58 @@ body.research-panel-view #research-divider { display:none; }
   margin-top: 6px;
 }
 .research-query:focus { outline:none; border-color:var(--accent-primary, var(--red)); }
+.research-compose-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+.research-compose-tab {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.research-compose-tab:hover {
+  border-color: var(--accent-primary, var(--red));
+  color: var(--fg);
+}
+.research-compose-tab.active {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 12%, var(--bg));
+  border-color: var(--accent-primary, var(--red));
+  color: var(--fg);
+}
+.research-tab-hint {
+  font-size: 11px;
+  opacity: 0.72;
+  margin: 0 0 6px;
+  line-height: 1.35;
+}
+.research-compose-pane {
+  margin-top: 8px;
+}
+.research-compose-pane[hidden] {
+  display: none !important;
+}
+.research-library-seed-toggle {
+  margin-top: 4px;
+}
+.research-length-inline {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+  max-width: 220px;
+}
+.research-seeds-block--compact {
+  margin-top: 0;
+  padding: 8px;
+}
 .research-settings-row {
   display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
   padding: 8px 10px;
@@ -35327,6 +35379,153 @@ body.research-panel-view #research-divider { display:none; }
   width: 14px;
   height: 14px;
   cursor: pointer;
+}
+.research-seeds-block {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 2%, transparent);
+}
+.research-seeds-header {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.research-mode-setting,
+.research-length-setting {
+  flex: 1;
+  min-width: 140px;
+}
+.research-seeds-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.55;
+  margin-bottom: 6px;
+}
+.research-seed-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+.research-seed-empty {
+  font-size: 11px;
+  opacity: 0.65;
+  padding: 4px 0;
+}
+.research-seed-chip {
+  position: relative;
+  padding: 6px 28px 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.research-seed-chip-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.research-seed-chip-meta {
+  font-size: 10px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+.research-seed-chip-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+.research-seed-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.research-seed-browse-btn,
+.research-seed-add-btn {
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+.research-seed-input {
+  flex: 1;
+  min-width: 120px;
+  font-size: 11px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.research-seed-picker {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  max-height: 220px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.research-seed-picker-search {
+  margin: 8px;
+  padding: 5px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--fg);
+}
+.research-seed-picker-list {
+  overflow-y: auto;
+  max-height: 170px;
+}
+.research-seed-picker-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.research-seed-picker-item:hover {
+  background: color-mix(in srgb, var(--accent-primary, var(--red)) 8%, transparent);
+}
+.research-seed-picker-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+.research-seed-picker-meta {
+  display: block;
+  font-size: 10px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+.research-seed-picker-loading,
+.research-seed-picker-empty {
+  padding: 10px;
+  font-size: 11px;
+  opacity: 0.75;
 }
 .research-category-row {
   display:flex; gap:4px; margin-top:8px; flex-wrap:wrap;

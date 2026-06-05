@@ -229,6 +229,9 @@ class ResearchHandler:
         include_preprints: bool = True,
         include_zotero: bool = True,
         owner: str = "",
+        seed_papers: list = None,
+        research_mode: str = "literature_review",
+        report_length: str = "standard",
     ) -> dict:
         """Start research as a background task. Returns task info dict.
 
@@ -274,6 +277,9 @@ class ResearchHandler:
             "category": "academic",
             "include_preprints": bool(include_preprints),
             "include_zotero": bool(include_zotero),
+            "seed_papers": list(seed_papers or []),
+            "research_mode": research_mode or "literature_review",
+            "report_length": report_length or "standard",
             # SECURITY: track ownership so all reads / saves can filter by user.
             "owner": owner or "",
         }
@@ -314,6 +320,9 @@ class ResearchHandler:
                         include_preprints=include_preprints,
                         include_zotero=include_zotero,
                         owner=owner,
+                        seed_papers=seed_papers,
+                        research_mode=research_mode,
+                        report_length=report_length,
                     ),
                     timeout=hard_timeout,
                 )
@@ -566,6 +575,9 @@ class ResearchHandler:
                 "stats": entry.get("stats"),
                 "category": entry.get("category") or "academic",
                 "include_preprints": entry.get("include_preprints", True),
+                "seed_papers": entry.get("seed_papers") or [],
+                "research_mode": entry.get("research_mode") or "literature_review",
+                "report_length": entry.get("report_length") or "standard",
                 "started_at": entry["started_at"],
                 "completed_at": time.time(),
                 # SECURITY: stamp owner so route handlers can filter by user.
@@ -692,6 +704,9 @@ class ResearchHandler:
         include_preprints: bool = True,
         include_zotero: bool = True,
         owner: str = "",
+        seed_papers: list = None,
+        research_mode: str = "literature_review",
+        report_length: str = "standard",
     ) -> str:
         """
         Run iterative deep research using the LLM-in-the-loop DeepResearcher.
@@ -727,6 +742,8 @@ class ResearchHandler:
 
             from src.settings import get_setting
             _max_report_tokens = int(get_setting("research_max_tokens", 16384))
+            if report_length == "extended":
+                _max_report_tokens = max(_max_report_tokens, 24576)
             _extraction_timeout = _bounded_int(
                 extraction_timeout if extraction_timeout is not None else get_setting("research_extraction_timeout_seconds", 90),
                 default=90,
@@ -756,6 +773,9 @@ class ResearchHandler:
                 include_preprints=include_preprints,
                 include_zotero=include_zotero,
                 owner=owner or (_task_entry.get("owner") if _task_entry else ""),
+                seed_papers=seed_papers or (_task_entry.get("seed_papers") if _task_entry else None),
+                research_mode=research_mode or (_task_entry.get("research_mode") if _task_entry else "literature_review"),
+                report_length=report_length or (_task_entry.get("report_length") if _task_entry else "standard"),
             )
             if _task_entry is not None:
                 _task_entry["researcher"] = researcher

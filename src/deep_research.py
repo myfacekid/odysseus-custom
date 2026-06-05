@@ -258,7 +258,7 @@ Write a rigorous **academic literature synthesis** answering this research quest
 {report}
 
 Requirements:
-- Write at MINIMUM 1200 words — thorough but scientifically precise, not promotional
+- Write at MINIMUM {min_words} words — thorough but scientifically precise, not promotional
 - Structure with clear ## headings: Executive Summary, Background, Key Findings, Conflicting Evidence, \
 Limitations of the Evidence, Limitations of This Report, Conclusion, References
 - Use numbered inline citations [1], [2], etc. for every substantive claim
@@ -277,6 +277,37 @@ IMPORTANT — this is exclusively an ACADEMIC research report:
 - Never cite a source not present in the collected evidence
 - The References section must match every [N] citation in the body
 """
+
+RESEARCH_MODES = frozenset({
+    "literature_review",
+    "similar_papers",
+    "gap_analysis",
+    "compare",
+})
+
+MODE_PLAN_CONTEXT = {
+    "literature_review": (
+        "Mode: literature review — synthesize the user's seed papers (if any) with related "
+        "peer-reviewed work and reviews."
+    ),
+    "similar_papers": (
+        "Mode: similar papers — prioritize finding, reading, and summarizing work related to "
+        "the seed papers; de-emphasize generic background."
+    ),
+    "gap_analysis": (
+        "Mode: gap analysis — identify what the seed papers do NOT cover; search for missing "
+        "populations, methods, outcomes, and contradictory evidence."
+    ),
+    "compare": (
+        "Mode: compare — contrast methods, findings, limitations, and conclusions across "
+        "two or more seed papers explicitly."
+    ),
+}
+
+REPORT_LENGTH_SPECS = {
+    "standard": {"min_words": 1200, "expand_threshold": 400},
+    "extended": {"min_words": 3000, "expand_threshold": 1200},
+}
 
 # ---------------------------------------------------------------------------
 # DeepResearcher
@@ -311,6 +342,9 @@ class DeepResearcher:
         include_zotero: bool = True,
         include_knowledge: bool = True,
         owner: str = "",
+        seed_papers: Optional[List[str]] = None,
+        research_mode: str = "literature_review",
+        report_length: str = "standard",
     ):
         self.llm_endpoint = llm_endpoint
         self.llm_model = llm_model
@@ -321,6 +355,13 @@ class DeepResearcher:
         self.include_zotero = bool(include_zotero)
         self.include_knowledge = bool(include_knowledge)
         self.owner = owner or ""
+        self.seed_papers = [s.strip() for s in (seed_papers or []) if (s or "").strip()]
+        self.research_mode = (
+            research_mode if research_mode in RESEARCH_MODES else "literature_review"
+        )
+        self.report_length = (
+            report_length if report_length in REPORT_LENGTH_SPECS else "standard"
+        )
         self._zotero_keys_seen: Set[str] = set()
         self._graph_nodes_seen: Set[str] = set()
         self.max_rounds = max_rounds
@@ -377,6 +418,46 @@ class DeepResearcher:
         if findings:
             self.evidence_registry.sync_findings(findings)
 
+        if prior_urls:
+            self.urls_fetched.update(prior_urls)
+        self.findings = findings
+        consecutive_empty_rounds = 0
+
+        # User-provided seed papers (Phase 2) — load before planning when present.
+        if self.seed_papers and not prior_report:
+            if self.research_mode == "compare" and len(self.seed_papers) < 2:
+                logger.warning("Compare mode requires at least 2 seed papers")
+            user_seeds = await self._load_user_seed_papers()
+            if user_seeds:
+                for item in user_seeds:
+                    item["is_seed"] = True
+                    self.evidence_registry.register(item, is_seed=True)
+                    zkey = (item.get("zotero_key") or item.get("paper_key") or "").strip()
+                    if zkey:
+                        self._zotero_keys_seen.add(zkey)
+                findings.extend(user_seeds)
+                self.findings = findings
+                logger.info("User seed papers: %d item(s)", len(user_seeds))
+                self._emit(
+                    phase="reading",
+                    new_sources=len(user_seeds),
+                    total_sources=len(self.urls_fetched),
+                    source="seed_papers",
+                )
+                if self.research_mode in ("literature_review", "similar_papers", "gap_analysis", "compare"):
+                    similar = await self._fetch_similar_paper_findings(user_seeds)
+                    if similar:
+                        for item in similar:
+                            self.evidence_registry.register(item)
+                        findings.extend(similar)
+                        self.findings = findings
+                        self._emit(
+                            phase="reading",
+                            new_sources=len(similar),
+                            total_sources=len(self.urls_fetched),
+                            source="similar_papers",
+                        )
+
         # PLAN: Analyze the question and create a research strategy
         if not prior_report:
             self._emit(phase="planning")
@@ -388,13 +469,8 @@ class DeepResearcher:
             self.research_plan = await self._create_plan(question)
             logger.info(f"Continuation plan: {self.research_plan[:200]}")
 
-        if prior_urls:
-            self.urls_fetched.update(prior_urls)
-        self.findings = findings  # expose for handler
-        consecutive_empty_rounds = 0
-
-        # Seed from the user's Zotero library (cloud API — works on any host).
-        if self.include_zotero and not prior_report:
+        # Seed from the user's Zotero library — skip when explicit seeds were provided.
+        if self.include_zotero and not prior_report and not self.seed_papers:
             if not self.owner:
                 logger.info("Zotero skipped: no research owner")
             else:
@@ -575,7 +651,21 @@ class DeepResearcher:
     # ------------------------------------------------------------------
     async def _create_plan(self, question: str) -> str:
         """LLM analyzes the question and creates a research plan."""
+        mode_ctx = MODE_PLAN_CONTEXT.get(getattr(self, "research_mode", "literature_review"), "")
+        seed_ctx = ""
+        if getattr(self, "seed_papers", None):
+            titles = [
+                (f.get("title") or f.get("paper_key") or "").strip()
+                for f in getattr(self, "findings", []) or []
+                if f.get("is_seed")
+            ][:8]
+            if titles:
+                seed_ctx = "Seed papers: " + "; ".join(t for t in titles if t)
         prompt = current_date_context() + RESEARCH_PLAN_PROMPT.format(question=question)
+        if mode_ctx:
+            prompt += f"\n\n{mode_ctx}"
+        if seed_ctx:
+            prompt += f"\n\n{seed_ctx}"
         try:
             response = await self._llm(
                 [{"role": "user", "content": prompt}],
@@ -618,11 +708,28 @@ class DeepResearcher:
 
         if round_num == 1:
             num_queries = 4
-            round_instruction = (
-                "First round — generate diverse scholarly queries covering definitions, mechanisms, "
-                "empirical evidence, and systematic reviews. Include at least one query targeting "
-                "PubMed or Google Scholar patterns."
-            )
+            mode = getattr(self, "research_mode", "literature_review")
+            if mode == "similar_papers":
+                round_instruction = (
+                    "First round — generate similarity-focused queries: cited-by patterns, "
+                    "related work, title/author variants, DOI lookups, and 'papers like' phrasing."
+                )
+            elif mode == "gap_analysis":
+                round_instruction = (
+                    "First round — search for evidence the seed papers likely miss: "
+                    "alternative methods, populations, outcomes, and contradictory findings."
+                )
+            elif mode == "compare":
+                round_instruction = (
+                    "First round — search for external benchmarks and independent replications "
+                    "relevant to comparing the seed papers' methods and conclusions."
+                )
+            else:
+                round_instruction = (
+                    "First round — generate diverse scholarly queries covering definitions, mechanisms, "
+                    "empirical evidence, and systematic reviews. Include at least one query targeting "
+                    "PubMed or Google Scholar patterns."
+                )
         else:
             num_queries = 3
             round_instruction = (
@@ -640,6 +747,9 @@ class DeepResearcher:
             round_instruction=round_instruction,
             source_policy=source_policy,
         )
+        mode_ctx = MODE_PLAN_CONTEXT.get(getattr(self, "research_mode", "literature_review"), "")
+        if mode_ctx:
+            prompt += f"\n\n{mode_ctx}"
 
         try:
             response = await self._llm(
@@ -833,6 +943,76 @@ class DeepResearcher:
             logger.warning(f"Links graph fetch failed: {e}")
             return []
 
+    async def _load_user_seed_papers(self) -> List[Dict]:
+        """Load user-selected seed papers from the local catalog."""
+        if not self.owner or not self.seed_papers:
+            return []
+        try:
+            from src.research_seeds import seed_findings_from_refs
+
+            outcome = await asyncio.to_thread(
+                seed_findings_from_refs,
+                self.owner,
+                self.seed_papers,
+                extract_pdfs=True,
+                pdf_max_chars=self.max_content_chars,
+            )
+            if outcome.note:
+                logger.info("Seed papers: %s", outcome.note)
+                self._emit(
+                    phase="reading",
+                    source="seed_papers",
+                    message=outcome.note,
+                )
+            unique = []
+            for f in outcome.findings:
+                zkey = (f.get("zotero_key") or f.get("paper_key") or "").strip()
+                if zkey and zkey in self._zotero_keys_seen:
+                    continue
+                if zkey:
+                    self._zotero_keys_seen.add(zkey)
+                url = f.get("url", "")
+                if url:
+                    self.urls_fetched.add(url)
+                unique.append(f)
+            return unique
+        except Exception as e:
+            logger.warning("Seed paper load failed: %s", e)
+            return []
+
+    async def _fetch_similar_paper_findings(self, seed_findings: List[Dict]) -> List[Dict]:
+        """OpenAlex + Semantic Scholar similar-paper pass (Phase 2)."""
+        try:
+            from src.research_similar_papers import similar_papers_from_seeds
+
+            exclude = set(self._zotero_keys_seen)
+            outcome = await asyncio.to_thread(
+                similar_papers_from_seeds,
+                seed_findings,
+                limit_per_seed=5,
+                total_limit=12,
+                exclude_keys=exclude,
+            )
+            if outcome.note:
+                logger.info(outcome.note)
+                self._emit(
+                    phase="reading",
+                    source="similar_papers",
+                    message=outcome.note,
+                )
+            unique = []
+            for f in outcome.findings:
+                url = (f.get("url") or "").strip()
+                if url and url in self.urls_fetched:
+                    continue
+                if url:
+                    self.urls_fetched.add(url)
+                unique.append(f)
+            return unique
+        except Exception as e:
+            logger.warning("Similar-paper fetch failed: %s", e)
+            return []
+
     async def _search(self, query: str, search_kind: str = "discovery") -> List[Dict]:
         """Run a search via the shared web_search provider layer (Phase 1a)."""
         try:
@@ -1009,9 +1189,13 @@ class DeepResearcher:
     # ------------------------------------------------------------------
     async def _final_report(self, question: str, report: str) -> str:
         """LLM writes a polished academic synthesis, retrying if too short."""
+        length_spec = REPORT_LENGTH_SPECS.get(self.report_length, REPORT_LENGTH_SPECS["standard"])
+        min_words = length_spec["min_words"]
+        expand_threshold = length_spec["expand_threshold"]
         prompt = FINAL_REPORT_PROMPT.format(
             question=question,
             report=report,
+            min_words=min_words,
         )
         prompt += "\n\n" + ACADEMIC_REPORT_OVERRIDE
         registry_block = self.evidence_registry.registry_prompt_block()
@@ -1027,7 +1211,7 @@ class DeepResearcher:
             )
 
             # If report is too short, ask the LLM to expand it
-            if len(result.split()) < 400:
+            if len(result.split()) < expand_threshold:
                 logger.info(f"Final report too short ({len(result.split())} words), requesting expansion")
                 self._emit(phase="writing", message="Expanding report...")
                 expanded = await self._llm(

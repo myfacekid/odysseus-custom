@@ -3890,6 +3890,12 @@ async def do_trigger_research(content: str, owner: Optional[str] = None) -> Dict
         payload["include_zotero"] = bool(args["include_zotero"])
     if args.get("include_preprints") is not None:
         payload["include_preprints"] = bool(args["include_preprints"])
+    if args.get("seed_papers"):
+        payload["seed_papers"] = args["seed_papers"]
+    if args.get("mode"):
+        payload["mode"] = args["mode"]
+    if args.get("report_length"):
+        payload["report_length"] = args["report_length"]
     if args.get("search_provider"):
         payload["search_provider"] = args["search_provider"]
     try:
