@@ -605,6 +605,11 @@ def setup_chat_routes(
         if _global_disabled and isinstance(_global_disabled, list):
             disabled_tools.update(_global_disabled)
 
+        # Project workspace chats: deny cwd escape hatches (Phase 0e).
+        from src.project_tool_policy import disabled_tools_for_project_session, session_is_project
+        if session_is_project(session):
+            disabled_tools.update(disabled_tools_for_project_session())
+
         # Light auto-escalation: the user is in chat mode and just expressed a
         # notes/calendar/email intent. Grant the relevant managers but withhold
         # the heavy "do things on the computer" tools — otherwise the model

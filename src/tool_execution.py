@@ -16,6 +16,7 @@ import sys
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
+from src.project_tool_policy import project_tool_block_reason
 from src.tool_security import is_public_blocked_tool, owner_is_admin_or_single_user
 
 MAX_OUTPUT_CHARS = 10_000
@@ -754,6 +755,13 @@ async def execute_tool_block(
         desc = f"{tool}: BLOCKED"
         result = {"error": f"Tool '{tool}' is disabled by user.", "exit_code": 1}
         logger.info(f"Tool blocked by user: {tool}")
+        return desc, result
+
+    _project_block = project_tool_block_reason(tool, session_id)
+    if _project_block:
+        desc = f"{tool}: BLOCKED"
+        result = {"error": _project_block, "exit_code": 1}
+        logger.info("Project tool policy blocked session=%r tool=%s", session_id, tool)
         return desc, result
 
     if tool in _ADMIN_TOOLS and not _owner_is_admin(owner):

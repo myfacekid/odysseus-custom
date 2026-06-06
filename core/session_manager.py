@@ -117,6 +117,7 @@ class SessionManager:
             history=[],
             owner=getattr(db_session, "owner", None),
             is_important=getattr(db_session, "is_important", False) or False,
+            project_id=getattr(db_session, "project_id", None),
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
         return session
@@ -175,6 +176,7 @@ class SessionManager:
             history=history,
             owner=getattr(db_session, 'owner', None),
             is_important=getattr(db_session, 'is_important', False) or False,
+            project_id=getattr(db_session, "project_id", None),
         )
 
         session.message_count = getattr(db_session, 'message_count', len(history))
@@ -447,11 +449,14 @@ class SessionManager:
         endpoint_url: str,
         model: str,
         rag: bool = False,
-        owner: str = None
+        owner: str = None,
+        project_id: str = None,
+        mode: str = None,
     ) -> Session:
         """Create a new session and save to database."""
         db = SessionLocal()
         try:
+            effective_mode = mode or ("project" if project_id else None)
             db_session = DbSession(
                 id=session_id,
                 name=name,
@@ -460,6 +465,8 @@ class SessionManager:
                 rag=rag,
                 headers={},
                 owner=owner,
+                project_id=project_id,
+                mode=effective_mode,
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
@@ -474,6 +481,7 @@ class SessionManager:
                 rag=rag,
                 headers={},
                 owner=owner,
+                project_id=project_id,
             )
 
             self.sessions[session_id] = session
@@ -601,6 +609,38 @@ class SessionManager:
             sid: s for sid, s in self.sessions.items()
             if s.owner == username
         }
+
+    def list_sessions_for_project(self, owner: str, project_id: str) -> list:
+        """Return session summaries linked to a project workspace."""
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(DbSession)
+                .filter(
+                    DbSession.owner == owner,
+                    DbSession.project_id == project_id,
+                    DbSession.archived == False,
+                )
+                .order_by(DbSession.last_message_at.desc(), DbSession.updated_at.desc())
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "model": row.model,
+                    "endpoint_url": row.endpoint_url,
+                    "mode": row.mode,
+                    "project_id": row.project_id,
+                    "message_count": row.message_count or 0,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                    "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
+                }
+                for row in rows
+            ]
+        finally:
+            db.close()
 
     def save_sessions(self):
         """No-op for DB compatibility."""
