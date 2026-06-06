@@ -14,7 +14,6 @@ from src.zotero_client import (
     fetch_zotero_findings,
     mask_api_key,
     resolve_zotero_credentials,
-    sources_to_zotero_items,
 )
 from src.zotero_catalog import catalog_stats, clear_zotero_catalog, sync_zotero_catalog
 
@@ -219,15 +218,24 @@ def setup_zotero_routes() -> APIRouter:
         if data.get("owner") != owner:
             raise HTTPException(404, "Research not found")
 
-        sources = data.get("sources") or []
-        payloads = sources_to_zotero_items(sources)
-        if not payloads:
-            raise HTTPException(400, "No exportable sources in this research")
+        from src.research_zotero_save import save_research_sources_to_zotero
 
         client = ZoteroClient(creds["api_key"], creds["user_id"])
-        created, err = client.create_items(payloads)
-        if err:
-            raise HTTPException(502, f"Zotero export failed: {err}")
-        return {"ok": True, "created": created, "attempted": len(payloads)}
+        result = save_research_sources_to_zotero(data, client, scope="cited")
+        if not result.get("ok"):
+            raise HTTPException(502, f"Zotero export failed: {result.get('error')}")
+        if result.get("attempted", 0) == 0:
+            raise HTTPException(400, "No exportable sources in this research")
+        if result.get("created", 0) > 0:
+            try:
+                sync_zotero_catalog(owner)
+            except Exception:
+                logger.warning("Catalog sync after Zotero export failed", exc_info=True)
+        return {
+            "ok": True,
+            "created": result.get("created", 0),
+            "attempted": result.get("attempted", 0),
+            "skipped_in_library": result.get("skipped_in_library", 0),
+        }
 
     return router

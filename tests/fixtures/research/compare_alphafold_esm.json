@@ -1,0 +1,81 @@
+{
+  "session_id": "fixture-compare-alphafold-esm",
+  "owner": "fixture-user",
+  "query": "Compare AlphaFold and ESMFold for protein structure prediction accuracy and compute cost",
+  "research_mode": "compare",
+  "status": "done",
+  "seed_papers": ["AFOLD001", "ESMF001"],
+  "seed_paper_details": [
+    {
+      "zotero_key": "AFOLD001",
+      "title": "Highly accurate protein structure prediction with AlphaFold",
+      "authors": "Jumper, J.",
+      "year": "2021",
+      "doi": "10.1038/s41586-021-03819-2",
+      "has_pdf": true,
+      "collection_paths": ["Protein/Structure"]
+    },
+    {
+      "zotero_key": "ESMF001",
+      "title": "Evolutionary-scale prediction of atomic-level protein structure with ESMFold",
+      "authors": "Lin, Z.",
+      "year": "2023",
+      "doi": "10.1126/science.ade2570",
+      "has_pdf": true,
+      "collection_paths": ["Protein/Structure"]
+    }
+  ],
+  "source_breakdown": {
+    "web": 1,
+    "zotero": 2,
+    "graph": 0,
+    "seeds": 2,
+    "total": 3
+  },
+  "evidence_registry": {
+    "sources": [
+      {
+        "source_id": "src:zotero:AFOLD001",
+        "citation_num": 1,
+        "title": "Highly accurate protein structure prediction with AlphaFold",
+        "authors": "Jumper, J.",
+        "year": "2021",
+        "doi_or_id": "10.1038/s41586-021-03819-2",
+        "url": "https://doi.org/10.1038/s41586-021-03819-2",
+        "source_type": "zotero",
+        "is_seed": true,
+        "sourcing_tier": "adequate",
+        "content_excerpt": "AlphaFold predicts structures with atomic accuracy using multiple sequence alignments and evoformer blocks."
+      },
+      {
+        "source_id": "src:zotero:ESMF001",
+        "citation_num": 2,
+        "title": "Evolutionary-scale prediction of atomic-level protein structure with ESMFold",
+        "authors": "Lin, Z.",
+        "year": "2023",
+        "doi_or_id": "10.1126/science.ade2570",
+        "url": "https://doi.org/10.1126/science.ade2570",
+        "source_type": "zotero",
+        "is_seed": true,
+        "sourcing_tier": "adequate",
+        "content_excerpt": "ESMFold uses a language model without explicit MSAs, enabling faster inference on long sequences."
+      },
+      {
+        "source_id": "src:web:https://example.com/structure-benchmark",
+        "citation_num": 3,
+        "title": "Benchmarking open protein structure predictors",
+        "url": "https://example.com/structure-benchmark",
+        "source_type": "web",
+        "sourcing_tier": "abstract_only",
+        "content_excerpt": "Independent benchmarks report trade-offs between AlphaFold accuracy and ESMFold speed."
+      }
+    ]
+  },
+  "raw_report": "## Executive Summary\n\nAlphaFold [1] remains the accuracy benchmark for hard targets, while ESMFold [2] offers faster inference without MSAs. A third review [3] summarizes recent benchmarks.\n\n## Key Differences\n\nAlphaFold [1] emphasizes MSA depth; ESMFold [2] scales via a protein language model.\n\n## References\n\n[1] Alpha\n[2] ESM\n[3] Benchmark",
+  "stats": {
+    "Duration": "118s",
+    "Rounds": "2",
+    "Queries": "4"
+  },
+  "completed_at": 1700000000
+}

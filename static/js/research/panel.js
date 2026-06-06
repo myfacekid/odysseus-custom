@@ -53,6 +53,17 @@ const _TAB_KEY = 'odysseus-research-compose-tab';
 let _activeComposeTab = 'topic';
 /** @type {Array<{zotero_key:string,title:string,authors?:string,year?:string,has_pdf?:boolean,doi?:string}>} */
 let _seedPapers = [];
+let _seedPreviewTimer = null;
+let _seedPreviewRequest = 0;
+
+const _SEED_TIER_CLASS = {
+  adequate: 'tier-adequate',
+  abstract_only: 'tier-abstract',
+  metadata_only: 'tier-thin',
+  retrieval_failed: 'tier-thin',
+  unsourced: 'tier-thin',
+  unknown: 'tier-unknown',
+};
 
 function _loadSeedsFromStorage() {
   try {
@@ -85,7 +96,7 @@ function _renderSeedChips() {
   host.querySelectorAll('.research-seed-chip-remove').forEach(btn => {
     btn.addEventListener('click', () => {
       const i = parseInt(btn.getAttribute('data-idx') || '-1', 10);
-      if (i >= 0) { _seedPapers.splice(i, 1); _saveSeedsToStorage(); _renderSeedChips(); }
+      if (i >= 0) { _seedPapers.splice(i, 1); _saveSeedsToStorage(); _renderSeedChips(); _scheduleSeedPreview(); }
     });
   });
 }
@@ -106,7 +117,139 @@ function _addSeedPaper(paper) {
   });
   _saveSeedsToStorage();
   _renderSeedChips();
+  _scheduleSeedPreview();
   return true;
+}
+
+function _extractDoiFromText(text) {
+  const raw = (text || '').trim();
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  for (const prefix of ['https://doi.org/', 'http://doi.org/', 'https://dx.doi.org/', 'http://dx.doi.org/']) {
+    if (lower.startsWith(prefix)) {
+      return raw.slice(prefix.length).split(/[\s?#]/)[0].replace(/[.,;)]+$/, '');
+    }
+  }
+  if (/^10\.\d/.test(raw) && raw.includes('/')) return raw.split(/\s/)[0].replace(/[.,;)]+$/, '');
+  return '';
+}
+
+function _parseSeedInput(raw) {
+  const s = (raw || '').trim();
+  if (!s) return { ok: false, error: 'Enter a Zotero key or DOI' };
+
+  const doiFromUrl = _extractDoiFromText(s);
+  if (doiFromUrl) {
+    return { ok: true, paper: { doi: doiFromUrl, zotero_key: doiFromUrl, title: `DOI ${doiFromUrl}` } };
+  }
+
+  if (/^paper:/i.test(s)) {
+    const key = s.replace(/^paper:/i, '').trim().toUpperCase();
+    if (/^[A-Z0-9]{8}$/.test(key)) return { ok: true, paper: { zotero_key: key, title: key } };
+    return { ok: false, error: 'Invalid paper:KEY — use an 8-character Zotero key' };
+  }
+
+  if (/^doi:/i.test(s)) {
+    const d = s.replace(/^doi:/i, '').trim();
+    if (/^10\.\d/i.test(d)) return { ok: true, paper: { doi: d, zotero_key: d, title: `DOI ${d}` } };
+    return { ok: false, error: 'Invalid DOI after doi: prefix' };
+  }
+
+  if (/^10\.\d/i.test(s)) {
+    const d = s.split(/\s/)[0].replace(/[.,;)]+$/, '');
+    return { ok: true, paper: { doi: d, zotero_key: d, title: `DOI ${d}` } };
+  }
+
+  const key = s.toUpperCase();
+  if (/^[A-Z0-9]{8}$/.test(key)) return { ok: true, paper: { zotero_key: key, title: key } };
+
+  return {
+    ok: false,
+    error: 'Unrecognized format — use an 8-character Zotero key, bare DOI, paper:KEY, or doi.org link',
+  };
+}
+
+function _setSeedInputHint(message, isError) {
+  const hint = document.getElementById('research-seed-input-hint');
+  if (!hint) return;
+  hint.textContent = message || '';
+  hint.classList.toggle('research-seed-input-hint--error', !!isError && !!message);
+}
+
+function _scheduleSeedPreview() {
+  clearTimeout(_seedPreviewTimer);
+  _seedPreviewTimer = setTimeout(() => { void _refreshSeedPreview(); }, 350);
+}
+
+async function _refreshSeedPreview() {
+  const host = document.getElementById('research-seed-preview');
+  if (!host) return;
+  if (!_seedPapers.length) {
+    host.innerHTML = '';
+    host.hidden = true;
+    return;
+  }
+  host.hidden = false;
+  host.innerHTML = '<div class="research-seed-preview-loading">Checking seed sources…</div>';
+  const reqId = ++_seedPreviewRequest;
+  const refs = _seedRefsForApi();
+  try {
+    const res = await fetch(`${_apiBase}/api/research/seeds/preview`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refs }),
+    });
+    if (!res.ok) throw new Error('Preview unavailable');
+    const data = await res.json();
+    if (reqId !== _seedPreviewRequest) return;
+    const seeds = data.seeds || [];
+    if (!seeds.length) {
+      host.innerHTML = '<div class="research-seed-preview-empty">No preview — seeds will resolve when the run starts.</div>';
+      return;
+    }
+    const syncBanner = data.sync_recommended
+      ? '<div class="research-seed-sync-hint">Some seed PDF flags look stale vs Zotero — sync your catalog in Settings → Search.</div>'
+      : '';
+    host.innerHTML = `${syncBanner}<div class="research-seed-preview-heading">Before you run</div>
+      <ul class="research-seed-preview-list">${seeds.map((s) => {
+        const tierCls = _SEED_TIER_CLASS[s.sourcing_tier] || 'tier-unknown';
+        const col = (s.collection_paths || []).slice(0, 2).join(', ');
+        const bits = [
+          s.doi ? `DOI ${s.doi}` : '',
+          col ? col : '',
+          s.live_has_pdf === true ? 'PDF on Zotero' : (s.has_pdf ? 'PDF in library' : ''),
+        ].filter(Boolean);
+        return `<li class="research-seed-preview-item">
+          <div class="research-seed-preview-title">${_esc(s.title || s.ref || 'Paper')}</div>
+          <div class="research-seed-preview-meta">${_esc(bits.join(' · ') || 'No catalog metadata')}</div>
+          <span class="research-seed-preview-tier ${tierCls}">${_esc(s.sourcing_label || s.sourcing_tier || 'Unknown')}</span>
+          ${s.in_catalog === false ? '<span class="research-seed-preview-note">Not in catalog — sync Zotero or resolves at run</span>' : ''}
+          ${s.catalog_stale ? '<span class="research-seed-preview-note research-seed-preview-note--sync">Catalog out of date — sync Zotero in Settings</span>' : ''}
+        </li>`;
+      }).join('')}</ul>`;
+  } catch {
+    if (reqId !== _seedPreviewRequest) return;
+    host.innerHTML = '<div class="research-seed-preview-empty">Could not load preview — seeds still run normally.</div>';
+  }
+}
+
+/** Add a paper to Deep Research seeds and focus the Papers compose tab. */
+export function addSeedPaper(paper) {
+  const added = _addSeedPaper(paper);
+  if (!_open) {
+    openPanel();
+  } else {
+    const overlay = document.getElementById('research-overlay');
+    if (overlay && overlay.style.display === 'none') {
+      overlay.style.display = '';
+      document.getElementById('tool-research-btn')?.classList.remove('minimized');
+    }
+  }
+  _switchComposeTab('papers');
+  _renderSeedChips();
+  _scheduleSeedPreview();
+  return added;
 }
 
 async function _toggleSeedPicker() {
@@ -126,13 +269,20 @@ async function _toggleSeedPicker() {
       return;
     }
     picker.innerHTML = `<input type="search" class="research-seed-picker-search" placeholder="Filter papers…">
-      <div class="research-seed-picker-list">${papers.map(p => `
-        <button type="button" class="research-seed-picker-item" data-key="${_esc(p.zotero_key)}"
+      <div class="research-seed-picker-list">${papers.map(p => {
+        const meta = [p.authors, p.year].filter(Boolean).join(' · ');
+        const col = (p.collection_paths || []).slice(0, 1)[0] || '';
+        return `<button type="button" class="research-seed-picker-item research-seed-picker-card" data-key="${_esc(p.zotero_key)}"
           data-title="${_esc(p.title)}" data-authors="${_esc(p.authors)}" data-year="${_esc(p.year)}"
           data-doi="${_esc(p.doi)}" data-pdf="${p.has_pdf ? '1' : '0'}">
-          <span class="research-seed-picker-title">${_esc(p.title)}</span>
-          <span class="research-seed-picker-meta">${_esc([p.authors, p.year].filter(Boolean).join(' · '))}${p.has_pdf ? ' · PDF' : ''}</span>
-        </button>`).join('')}</div>`;
+          <div class="research-seed-picker-card-body">
+            <span class="research-seed-picker-title">${_esc(p.title)}</span>
+            ${meta ? `<span class="research-seed-picker-meta">${_esc(meta)}</span>` : ''}
+            ${col ? `<span class="research-seed-picker-col">${_esc(col)}</span>` : ''}
+          </div>
+          ${p.has_pdf ? '<span class="research-seed-picker-badge">PDF</span>' : ''}
+        </button>`;
+      }).join('')}</div>`;
     const searchEl = picker.querySelector('.research-seed-picker-search');
     const listEl = picker.querySelector('.research-seed-picker-list');
     searchEl?.addEventListener('input', () => {
@@ -157,15 +307,6 @@ async function _toggleSeedPicker() {
   } catch (e) {
     picker.innerHTML = `<div class="research-seed-picker-empty">${_esc(e.message || 'Could not load papers')}</div>`;
   }
-}
-
-function _parseSeedInput(raw) {
-  const s = (raw || '').trim();
-  if (!s) return null;
-  if (/^10\.\d/i.test(s)) return { doi: s, zotero_key: s, title: `DOI ${s}` };
-  const key = s.replace(/^paper:/i, '').trim().toUpperCase();
-  if (/^[A-Z0-9]{8}$/.test(key)) return { zotero_key: key, title: key };
-  return { zotero_key: s, title: s };
 }
 
 function _seedRefsForApi() {
@@ -195,8 +336,8 @@ function _switchComposeTab(tab) {
   const queryEl = document.getElementById('research-query');
   if (hint) {
     hint.textContent = next === 'papers'
-      ? 'Pick seed papers, then optionally add a question to steer the synthesis.'
-      : 'Ask a research question — searches the web, reviews, and your library when seeding is on.';
+      ? 'Pick seed papers, then optionally add a question. Source toggles above apply to both tabs.'
+      : 'Ask a research question — use the source toggles below to control library, Links, and preprints.';
   }
   if (queryEl) {
     queryEl.placeholder = next === 'papers'
@@ -209,6 +350,7 @@ function _saveSettingsToStorage() {
   try {
     const preprintsEl = document.getElementById('research-include-preprints');
     const zoteroEl = document.getElementById('research-include-zotero');
+    const knowledgeEl = document.getElementById('research-include-knowledge');
     const modeEl = document.getElementById('research-mode');
     const lengthEl = document.getElementById('research-report-length');
     localStorage.setItem(_SETTINGS_KEY, JSON.stringify({
@@ -218,6 +360,7 @@ function _saveSettingsToStorage() {
       model: document.getElementById('research-model')?.value || '',
       include_preprints: preprintsEl ? !!preprintsEl.checked : true,
       include_zotero: zoteroEl ? !!zoteroEl.checked : true,
+      include_knowledge: knowledgeEl ? !!knowledgeEl.checked : true,
       mode: modeEl?.value || 'literature_review',
       report_length: lengthEl?.value || 'standard',
       compose_tab: _getActiveComposeTab(),
@@ -352,6 +495,9 @@ const _retryIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" 
 const _chevronIcon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
 const _editIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
 const _chatIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+const _exportIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+
+let _researchExportMenu = null;
 
 export function init(apiBase, markdownMod, sessionMod) {
   _apiBase = apiBase;
@@ -525,11 +671,22 @@ function _buildPanelHTML() {
         </div>
         <p id="research-tab-hint" class="research-tab-hint">Ask a research question — searches the web, reviews, and your library when seeding is on.</p>
         <textarea id="research-query" class="research-query" placeholder="e.g. What is the evidence for intermittent fasting on cardiovascular outcomes in adults? Include RCTs and systematic reviews." rows="4"></textarea>
-        <div id="research-pane-topic" class="research-compose-pane">
-          <label class="research-preprint-toggle research-library-seed-toggle" id="research-library-seed-row" title="When on, recent papers from your synced Zotero catalog are loaded as seeds before searching the web">
-            <input type="checkbox" id="research-include-zotero" checked>
-            <span>Seed from my library</span>
+        <div class="research-source-toggles" id="research-source-toggles">
+          <div class="research-source-toggles-label">Evidence sources</div>
+          <label class="research-preprint-toggle" title="When off, preprint servers (arXiv, bioRxiv, medRxiv) are excluded from search results">
+            <input type="checkbox" id="research-include-preprints" checked>
+            <span>Include preprints (arXiv, bioRxiv, medRxiv)</span>
           </label>
+          <label class="research-preprint-toggle" title="Search your synced Zotero catalog and load library seeds (Topic tab)">
+            <input type="checkbox" id="research-include-zotero" checked>
+            <span>Include Zotero library</span>
+          </label>
+          <label class="research-preprint-toggle" title="Pull matching papers and documents from your Links knowledge graph">
+            <input type="checkbox" id="research-include-knowledge" checked>
+            <span>Include Links (documents &amp; graph)</span>
+          </label>
+        </div>
+        <div id="research-pane-topic" class="research-compose-pane">
           <label class="research-setting research-length-inline">
             <span class="research-setting-label">Report length</span>
             <select id="research-report-length">
@@ -551,18 +708,16 @@ function _buildPanelHTML() {
           <div class="research-seeds-block research-seeds-block--compact">
             <div class="research-seeds-label">Seed papers</div>
             <div id="research-seed-chips" class="research-seed-chips"></div>
+            <div id="research-seed-preview" class="research-seed-preview" hidden></div>
             <div class="research-seed-actions">
               <button type="button" id="research-seed-browse" class="research-seed-browse-btn">Browse library</button>
               <input type="text" id="research-seed-input" class="research-seed-input" placeholder="Zotero key or DOI…">
               <button type="button" id="research-seed-add" class="research-seed-add-btn">Add</button>
             </div>
+            <div id="research-seed-input-hint" class="research-seed-input-hint"></div>
             <div id="research-seed-picker" class="research-seed-picker" style="display:none"></div>
           </div>
         </div>
-        <label class="research-preprint-toggle" id="research-preprint-row" title="When off, preprint servers (arXiv, bioRxiv, medRxiv) are excluded from search results">
-          <input type="checkbox" id="research-include-preprints" checked>
-          <span>Include preprints (arXiv, bioRxiv, medRxiv)</span>
-        </label>
         <button id="research-settings-toggle" class="research-settings-toggle${chevronCls}">
           Settings<span class="research-settings-chevron">${_chevronIcon}</span>
         </button>
@@ -635,12 +790,23 @@ function _wireEvents(pane) {
     if (savedTab === 'papers' || savedTab === 'topic') _activeComposeTab = savedTab;
   } catch {}
   _switchComposeTab(_activeComposeTab);
-  pane.querySelector('#research-seed-browse')?.addEventListener('click', _toggleSeedPicker);
+  pane.querySelector('#research-seed-browse')?.addEventListener('click', () => { void _toggleSeedPicker(); });
   pane.querySelector('#research-seed-add')?.addEventListener('click', () => {
     const inp = document.getElementById('research-seed-input');
     const parsed = _parseSeedInput(inp?.value || '');
-    if (parsed && _addSeedPaper(parsed)) inp.value = '';
+    if (!parsed.ok) {
+      _setSeedInputHint(parsed.error, true);
+      inp?.focus();
+      return;
+    }
+    if (_addSeedPaper(parsed.paper)) {
+      if (inp) inp.value = '';
+      _setSeedInputHint('');
+    } else {
+      _setSeedInputHint('Already in seed list', false);
+    }
   });
+  pane.querySelector('#research-seed-input')?.addEventListener('input', () => _setSeedInputHint(''));
   pane.querySelector('#research-seed-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -649,6 +815,7 @@ function _wireEvents(pane) {
   });
   _loadSeedsFromStorage();
   _renderSeedChips();
+  _scheduleSeedPreview();
 
   pane.querySelector('#research-settings-toggle').addEventListener('click', () => {
     const body = document.getElementById('research-settings-body');
@@ -671,12 +838,17 @@ function _wireEvents(pane) {
   const endpointSelect = pane.querySelector('#research-endpoint');
   endpointSelect.addEventListener('change', () => _populateModels(endpointSelect.value));
 
+  ['research-include-preprints', 'research-include-zotero', 'research-include-knowledge'].forEach((id) => {
+    pane.querySelector(`#${id}`)?.addEventListener('change', _saveSettingsToStorage);
+  });
+
   _renderJobs();
 }
 
 function _readSettings() {
   const preprintsEl = document.getElementById('research-include-preprints');
-  const librarySeedEl = document.getElementById('research-include-zotero');
+  const zoteroEl = document.getElementById('research-include-zotero');
+  const knowledgeEl = document.getElementById('research-include-knowledge');
   const tab = _getActiveComposeTab();
   const seeds = tab === 'papers' ? _seedRefsForApi() : [];
   const settings = {
@@ -685,7 +857,8 @@ function _readSettings() {
     endpoint_id: document.getElementById('research-endpoint')?.value || undefined,
     model: document.getElementById('research-model')?.value || undefined,
     include_preprints: preprintsEl ? !!preprintsEl.checked : true,
-    include_zotero: tab === 'topic' ? !!(librarySeedEl && librarySeedEl.checked) : true,
+    include_zotero: zoteroEl ? !!zoteroEl.checked : true,
+    include_knowledge: knowledgeEl ? !!knowledgeEl.checked : true,
     mode: tab === 'papers'
       ? (document.getElementById('research-mode')?.value || 'literature_review')
       : 'literature_review',
@@ -735,6 +908,8 @@ function _editJob(job) {
   if (preprintsEl && s.include_preprints !== undefined) preprintsEl.checked = !!s.include_preprints;
   const zoteroEl = document.getElementById('research-include-zotero');
   if (zoteroEl && s.include_zotero !== undefined) zoteroEl.checked = !!s.include_zotero;
+  const knowledgeEl = document.getElementById('research-include-knowledge');
+  if (knowledgeEl && s.include_knowledge !== undefined) knowledgeEl.checked = !!s.include_knowledge;
   if (s.compose_tab) _switchComposeTab(s.compose_tab);
   else if ((s.seed_papers || []).length) _switchComposeTab('papers');
   const modeEl = document.getElementById('research-mode');
@@ -846,6 +1021,10 @@ function _restoreSavedSettings() {
   const zoteroEl = document.getElementById('research-include-zotero');
   if (zoteroEl && saved.include_zotero !== undefined) {
     zoteroEl.checked = !!saved.include_zotero;
+  }
+  const knowledgeEl = document.getElementById('research-include-knowledge');
+  if (knowledgeEl && saved.include_knowledge !== undefined) {
+    knowledgeEl.checked = !!saved.include_knowledge;
   }
   const modeEl = document.getElementById('research-mode');
   if (modeEl && saved.mode) modeEl.value = saved.mode;
@@ -1250,25 +1429,34 @@ function _buildJobCard(job) {
       ${failNote}
       <div class="research-job-actions">
         <button class="research-job-action" data-action="copy" title="Copy report to clipboard">${_copyIcon}</button>
+        <button class="research-job-action" data-action="export" title="Download report">${_exportIcon} Export</button>
         <button class="research-job-action" data-action="chat" title="Open follow-up chat with this research as context">${_chatIcon} Discuss</button>
         <button class="research-job-action research-job-action-report" data-action="report" title="Visual report">${_externalIcon} Visual Report</button>
-        <button class="research-job-action" data-action="zotero" title="Export research citations to your Zotero library">Export Citations to Zotero</button>
+        <button class="research-job-action" data-action="zotero" title="Save cited web sources to your Zotero library">Save to Zotero</button>
         <button class="research-job-action research-job-action-dim" data-action="dismiss" title="Clear from list">${_cancelIcon}</button>
         <button class="research-job-action research-job-action-dim" data-action="delete" title="Delete from disk">${_trashIcon} Delete</button>
       </div>
-      ${isExpanded ? `<div class="research-job-result">${_renderResult(job)}</div>` : ''}
+      ${isExpanded ? `<div class="research-job-result">${_renderResult(job)}</div>` : '<div class="research-job-preview-hint">Click to preview report</div>'}
     `;
-    // Clicking anywhere on the card (except the action buttons, which
-    // stopPropagation) opens the visual report — same as the Visual Report btn.
-    card.style.cursor = 'pointer';
-    card.addEventListener('click', () => {
-      window.open(`${_apiBase}/api/research/report/${job.id}`, '_blank');
+    card.classList.toggle('is-expanded', isExpanded);
+    card.addEventListener('click', async (e) => {
+      if (e.target.closest('.research-job-action, .research-export-menu, .research-cite-link, .research-report-sources a, .research-preview-section, .research-preview-section *')) return;
+      if (_expandedJobId === job.id) _expandedJobId = null;
+      else {
+        _expandedJobId = job.id;
+        await _ensureResult(job);
+      }
+      _renderJobs();
     });
     card.querySelector('[data-action="copy"]').addEventListener('click', async (e) => {
       e.stopPropagation();
       const btn = e.currentTarget; // capture before await — currentTarget becomes null after
       if (!job.result) await _ensureResult(job);
       _copyResult(job, btn);
+    });
+    card.querySelector('[data-action="export"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      _toggleResearchExportMenu(e.currentTarget, job.id);
     });
     card.querySelector('[data-action="report"]').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1282,22 +1470,23 @@ function _buildJobCard(job) {
       e.stopPropagation();
       const btn = e.currentTarget;
       const orig = btn.textContent;
-      btn.textContent = 'Exporting…';
+      btn.textContent = 'Saving…';
       btn.disabled = true;
       try {
-        const res = await fetch(`${_apiBase}/api/zotero/export`, {
+        const res = await fetch(`${_apiBase}/api/research/${encodeURIComponent(job.id)}/save-to-zotero`, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: job.id }),
+          body: JSON.stringify({ scope: 'cited' }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Export failed');
-        btn.textContent = `Saved ${data.created || 0}`;
+        if (!res.ok) throw new Error(data.detail || 'Save failed');
+        const skipped = data.skipped_in_library ? ` (${data.skipped_in_library} already in library)` : '';
+        btn.textContent = `Saved ${data.created || 0}${skipped}`;
         setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
       } catch (err) {
         btn.textContent = 'Failed';
-        btn.title = err.message || 'Export failed';
-        setTimeout(() => { btn.textContent = orig; btn.disabled = false; btn.title = 'Export research citations to your Zotero library'; }, 2500);
+        btn.title = err.message || 'Save failed';
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; btn.title = 'Save cited web sources to your Zotero library'; }, 2500);
       }
     });
     card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
@@ -1313,6 +1502,7 @@ function _buildJobCard(job) {
       e.stopPropagation();
       _animateOutThenRemove(card, () => jobs.removeJob(job.id));
     });
+    if (isExpanded) _wireResearchReportInteractions(card);
 
   } else {
     const errMsg = job.errorMsg ? `<div class="research-job-error">${_esc(job.errorMsg)}</div>` : '';
@@ -1350,44 +1540,268 @@ const _CAT_LABELS = {
   academic: 'Academic Literature Review',
 };
 
+function _splitExecutiveSummary(markdown) {
+  const text = markdown || '';
+  const match = text.match(/^##\s+Executive Summary\s*$/im);
+  if (!match) return { summary: '', body: text };
+  const start = match.index + match[0].length;
+  const rest = text.slice(start);
+  const next = rest.search(/^##\s+/m);
+  const summary = (next >= 0 ? rest.slice(0, next) : rest).trim();
+  const prefix = text.slice(0, match.index).trim();
+  const suffix = next >= 0 ? rest.slice(next).trim() : '';
+  const body = [prefix, suffix].filter(Boolean).join('\n\n');
+  return { summary, body: body || text };
+}
+
+function _resolveSourceNav(source) {
+  const url = (source.url || '').trim();
+  const sid = (source.source_id || '').trim();
+  const num = source.citation_num;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return { href: url, external: true, nodeId: '' };
+  }
+  let nodeId = '';
+  if (url.startsWith('links://')) nodeId = url.slice('links://'.length);
+  else if (sid.startsWith('src:graph:')) nodeId = sid.slice('src:graph:'.length);
+  else if (sid.startsWith('src:paper:')) nodeId = `paper:${sid.slice('src:paper:'.length)}`;
+  else if (sid.startsWith('src:zotero:')) nodeId = `paper:${sid.slice('src:zotero:'.length)}`;
+  if (nodeId) {
+    const idx = nodeId.indexOf(':');
+    const type = idx >= 0 ? nodeId.slice(0, idx) : 'document';
+    const raw = idx >= 0 ? nodeId.slice(idx + 1) : nodeId;
+    if (type === 'document' && raw) return { href: `#document-${raw}`, external: false, nodeId };
+    if (type === 'paper' && raw) return { href: `#paper-${raw.toUpperCase()}`, external: false, nodeId };
+    if (type === 'task' && raw) return { href: `#task-${raw}`, external: false, nodeId };
+  }
+  if (url.startsWith('#document-') || url.startsWith('#paper-') || url.startsWith('#task-')) {
+    return { href: url, external: false, nodeId: nodeId || '' };
+  }
+  return { href: `#research-source-${num}`, external: false, nodeId: '' };
+}
+
+function _linkifyCitationMarkersMd(md) {
+  return (md || '').split('\n').map((line) => {
+    if (/^\[\d+\]:\s/.test(line.trim())) return line;
+    return line.replace(/\[(\d+)\](?!\()(?!:)/g, '%%CITE:$1%%');
+  }).join('\n');
+}
+
+const _CITE_SLOT_PREFIX = '___CITE_SLOT_';
+
+function _protectCitationPlaceholders(md) {
+  const slots = [];
+  const text = (md || '').replace(/%%CITE:(\d+)%%/g, (_m, num) => {
+    const token = `${_CITE_SLOT_PREFIX}${slots.length}___`;
+    slots.push(num);
+    return token;
+  });
+  return { text, slots };
+}
+
+function _restoreCitationPlaceholders(html, slots) {
+  let out = html || '';
+  slots.forEach((num, i) => {
+    out = out.split(`${_CITE_SLOT_PREFIX}${i}___`).join(`%%CITE:${num}%%`);
+  });
+  return out;
+}
+
+function _linkifyBracketCitationsHtml(html) {
+  const parts = (html || '').split(/(<a\b[^>]*>.*?<\/a>)/gis);
+  return parts.map((part, i) => {
+    if (i % 2 === 1) return part;
+    return part.replace(/\[(\d+)\](?!\()/g, (_m, num) =>
+      `<a href="#research-source-${num}" class="research-cite-link" data-cite="${num}">[${num}]</a>`);
+  }).join('');
+}
+
+function _applyCitationPlaceholders(html) {
+  let out = (html || '').replace(/%%CITE:(\d+)%%/g, (_m, num) =>
+    `<a href="#research-source-${num}" class="research-cite-link" data-cite="${num}">[${num}]</a>`);
+  return _linkifyBracketCitationsHtml(out);
+}
+
+function _renderMarkdown(md) {
+  if (!md) return '';
+  const prepared = _linkifyCitationMarkersMd(md);
+  const { text, slots } = _protectCitationPlaceholders(prepared);
+  if (_markdownModule?.mdToHtml) {
+    const html = _restoreCitationPlaceholders(_markdownModule.mdToHtml(text), slots);
+    return _applyCitationPlaceholders(html);
+  }
+  return `<p>${_esc(md)}</p>`;
+}
+
+function _registrySources(job) {
+  const reg = job.evidence_registry;
+  if (reg && Array.isArray(reg.sources) && reg.sources.length) {
+    return reg.sources
+      .slice()
+      .sort((a, b) => (a.citation_num || 0) - (b.citation_num || 0))
+      .map((s) => ({
+        citation_num: s.citation_num,
+        title: s.title || '',
+        url: s.url || '',
+        authors: s.authors || '',
+        year: s.year || '',
+        source_id: s.source_id || '',
+      }));
+  }
+  return (job.sources || []).map((s, i) => ({
+    citation_num: i + 1,
+    title: s.title || '',
+    url: s.url || '',
+    authors: '',
+    year: '',
+    source_id: '',
+  }));
+}
+
+function _renderRegistrySources(sources) {
+  if (!sources.length) return '';
+  const rows = sources.map((s) => {
+    const nav = _resolveSourceNav(s);
+    const meta = [s.authors, s.year].filter(Boolean).join(' · ');
+    const title = _esc(s.title || s.url || 'Untitled');
+    const href = _esc(nav.href);
+    const external = nav.external ? ' target="_blank" rel="noopener"' : '';
+    const nodeAttr = nav.nodeId ? ` data-node-id="${_esc(nav.nodeId)}"` : '';
+    const cls = nav.external ? '' : ' research-report-source-internal';
+    return `<a id="research-source-${s.citation_num}" class="research-report-source${cls}" href="${href}"${external}${nodeAttr} data-cite="${s.citation_num}">
+      <span class="research-report-source-num">[${s.citation_num}]</span>
+      <span class="research-report-source-title">${title}${meta ? `<span class="research-report-source-meta">${_esc(meta)}</span>` : ''}</span>
+    </a>`;
+  }).join('');
+  return `<aside class="research-report-sources"><div class="research-report-sources-title">Sources</div><div class="research-report-sources-scroll">${rows}</div></aside>`;
+}
+
+function _openInternalResearchLink(href, nodeId) {
+  const openNode = (id) => {
+    import('../knowledge.js').then((mod) => {
+      const open = mod.openKnowledgeNode || mod.default?.openKnowledgeNode;
+      if (open) open(id);
+    }).catch(() => {});
+  };
+  if (nodeId) {
+    openNode(nodeId);
+    return;
+  }
+  if (href.startsWith('#document-')) {
+    openNode(`document:${href.slice('#document-'.length)}`);
+    return;
+  }
+  if (href.startsWith('#paper-')) {
+    openNode(`paper:${href.slice('#paper-'.length)}`);
+    return;
+  }
+  if (href.startsWith('#task-')) {
+    openNode(`task:${href.slice('#task-'.length)}`);
+    return;
+  }
+}
+
+function _wireResearchReportInteractions(card) {
+  card.querySelectorAll('.research-cite-link').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const target = card.querySelector(`#research-source-${link.dataset.cite}`);
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      target.classList.add('is-highlighted');
+      setTimeout(() => target.classList.remove('is-highlighted'), 1600);
+    });
+  });
+  card.querySelectorAll('.research-report-source-internal, .research-report-source[data-node-id]').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      const href = link.getAttribute('href') || '';
+      if (!href || href.startsWith('http')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      _openInternalResearchLink(href, link.dataset.nodeId || '');
+    });
+  });
+}
+
+function _closeResearchExportMenu() {
+  if (_researchExportMenu) {
+    _researchExportMenu.remove();
+    _researchExportMenu = null;
+  }
+}
+
+function _downloadResearchExport(jobId, format, scope = 'cited') {
+  const url = `${_apiBase}/api/research/${encodeURIComponent(jobId)}/export?format=${encodeURIComponent(format)}&scope=${encodeURIComponent(scope)}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function _toggleResearchExportMenu(anchorBtn, jobId) {
+  if (_researchExportMenu) {
+    _closeResearchExportMenu();
+    return;
+  }
+  const rect = anchorBtn.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'research-export-menu';
+  menu.innerHTML = [
+    { label: 'Markdown (.md)', fmt: 'markdown', scope: 'cited' },
+    { label: 'BibTeX (cited)', fmt: 'bibtex', scope: 'cited' },
+    { label: 'CSL JSON (cited)', fmt: 'csl-json', scope: 'cited' },
+    { label: 'BibTeX (all sources)', fmt: 'bibtex', scope: 'all' },
+  ].map((item) => `<button type="button" class="research-export-item" data-fmt="${item.fmt}" data-scope="${item.scope}">${item.label}</button>`).join('');
+  document.body.appendChild(menu);
+  _researchExportMenu = menu;
+  const top = Math.min(rect.bottom + 6, window.innerHeight - menu.offsetHeight - 8);
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.left = `${Math.round(Math.max(8, rect.left))}px`;
+  const close = () => {
+    _closeResearchExportMenu();
+    document.removeEventListener('click', onDocClick, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onDocClick = (e) => {
+    if (menu.contains(e.target) || e.target === anchorBtn) return;
+    close();
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+  };
+  setTimeout(() => {
+    document.addEventListener('click', onDocClick, true);
+    document.addEventListener('keydown', onKey, true);
+  }, 0);
+  menu.querySelectorAll('.research-export-item').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _downloadResearchExport(jobId, btn.dataset.fmt, btn.dataset.scope || 'cited');
+      close();
+    });
+  });
+}
+
 function _renderResult(job) {
   if (!job.result) return '<div class="research-job-loading">Loading result...</div>';
-  const cat = job.category || 'academic';
-  const catIcon = _CAT_ICONS[cat] || '';
-  const catLabel = _CAT_LABELS[cat] || '';
+  const reportText = job.rawReport || job.result;
+  const { summary } = _splitExecutiveSummary(reportText);
+  const registrySources = _registrySources(job);
 
-  let html = '';
-
-  // Category hero banner — only for completed, known-category results
-  if (cat && catIcon) {
-    html += `
-      <div class="research-hero research-hero-${cat}">
-        <span class="research-hero-icon">${catIcon}</span>
-        <div class="research-hero-text">
-          <div class="research-hero-label">${catLabel}</div>
-          <div class="research-hero-query">${_esc(job.query)}</div>
-        </div>
-      </div>
-    `;
-  }
-
-  if (job.sources?.length) {
-    html += '<div class="research-job-sources">';
-    for (const s of job.sources.slice(0, 10)) {
-      const title = _esc(s.title || s.url || '');
-      const url = _esc(s.url || '');
-      html += `<a href="${url}" target="_blank" rel="noopener" class="research-source-link">${title}</a>`;
-    }
-    if (job.sources.length > 10) html += `<span class="research-source-more">+${job.sources.length - 10} more</span>`;
-    html += '</div>';
-  }
-
-  const bodyCls = `research-job-report-body${cat ? ' research-body-' + cat : ''}`;
-  if (_markdownModule) {
-    html += `<div class="${bodyCls}">${_markdownModule.renderContent(job.result)}</div>`;
-  } else {
-    html += `<div class="${bodyCls}"><pre>${_esc(job.result)}</pre></div>`;
-  }
+  let html = '<div class="research-report-shell">';
+  html += _renderRegistrySources(registrySources);
+  html += '<div class="research-report-main">';
+  html += `
+    <section class="research-preview-section">
+      <div class="research-preview-label">Executive Summary</div>
+      <div class="research-preview-body">${summary
+    ? _renderMarkdown(summary)
+    : '<p class="research-preview-empty">No executive summary section in this report.</p>'}</div>
+    </section>`;
+  html += '</div></div>';
   return html;
 }
 
@@ -1400,8 +1814,10 @@ async function _ensureResult(job) {
     if (!res.ok) return;
     const d = await res.json();
     job.result = d.result;
+    job.rawReport = d.raw_report || d.result;
     job.sources = d.sources;
     job.findings = d.raw_findings;
+    job.evidence_registry = d.evidence_registry || null;
   } catch {}
 }
 

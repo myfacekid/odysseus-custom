@@ -29,6 +29,14 @@ class EvidenceSource:
     search_provider: str = ""
     search_kind: str = ""
     zotero_source: str = ""
+    sample_size: str = ""
+    effect_size: str = ""
+    outcome: str = ""
+    quality_notes: str = ""
+    sourcing_tier: str = ""
+    sourcing_note: str = ""
+    allow_substantive_claims: bool = True
+    content_excerpt: str = ""
 
     def reference_line(self) -> str:
         """Format a single References entry."""
@@ -43,6 +51,16 @@ class EvidenceSource:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+from src.research_finding_enrich import extract_doi, normalize_finding_fields
+from src.research_sourcing import (
+    annotate_finding_sourcing,
+    build_sourcing_limitations_block,
+    ensure_sourcing_disclosure,
+    format_finding_content_for_prompt,
+    is_thin_sourcing,
+)
 
 
 def source_id_for_finding(finding: dict) -> str:
@@ -71,6 +89,123 @@ def source_id_for_finding(finding: dict) -> str:
     title = (finding.get("title") or "unknown").strip()
     digest = hashlib.sha256(title.encode("utf-8")).hexdigest()[:16]
     return f"src:unknown:{digest}"
+
+
+    return f"src:unknown:{digest}"
+
+
+_ZOTERO_KEY_IN_SOURCE_RE = re.compile(r"^[A-Z0-9]{8}$", re.I)
+
+
+def normalize_doi(value: str) -> str:
+    """Normalize a DOI string for cross-source matching."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    if raw.lower().startswith("doi:"):
+        raw = raw[4:].strip()
+    for prefix in (
+        "https://doi.org/",
+        "http://doi.org/",
+        "https://dx.doi.org/",
+        "http://dx.doi.org/",
+    ):
+        if raw.lower().startswith(prefix):
+            raw = raw[len(prefix) :].strip()
+            break
+    return raw.lower().rstrip(".,;)/")
+
+
+def zotero_key_from_source_id(source_id: str) -> str:
+    """Extract a Zotero/catalog key embedded in a registry source id."""
+    sid = (source_id or "").strip()
+    if sid.startswith("src:zotero:"):
+        return sid.rsplit(":", 1)[-1].strip().upper()
+    if sid.startswith("src:paper:"):
+        return sid.rsplit(":", 1)[-1].strip().upper()
+    return ""
+
+
+def doi_from_finding(finding: dict) -> str:
+    """Best-effort DOI for deduplicating web hits against seed papers."""
+    doi = normalize_doi((finding.get("doi_or_id") or "").strip())
+    if doi.startswith("10."):
+        return doi
+    for field in ("url", "evidence", "summary", "abstract"):
+        inferred = normalize_doi(extract_doi((finding.get(field) or "").strip()))
+        if inferred.startswith("10."):
+            return inferred
+    return ""
+
+
+def _sourcing_tier_rank(tier: str) -> int:
+    order = {
+        "adequate": 4,
+        "abstract_only": 3,
+        "metadata_only": 2,
+        "retrieval_failed": 1,
+        "unsourced": 0,
+    }
+    return order.get((tier or "").strip().lower(), -1)
+
+
+def _prefer_sourcing_tier(existing: str, incoming: str) -> str:
+    if _sourcing_tier_rank(incoming) > _sourcing_tier_rank(existing):
+        return incoming
+    return existing
+
+
+_QUANTITATIVE_SOURCE_FIELDS = ("sample_size", "effect_size", "outcome", "quality_notes")
+
+
+def _excerpt_from_finding(finding: dict, *, limit: int = 480) -> str:
+    from src.research_sourcing import best_finding_body_text
+
+    body = best_finding_body_text(finding)
+    if not body:
+        return ""
+    body = re.sub(r"\s+", " ", body).strip()
+    if len(body) <= limit:
+        return body
+    return body[: limit - 1].rstrip() + "…"
+
+
+def _merge_quantitative_fields(target: EvidenceSource, finding: dict) -> None:
+    """Fill empty registry fields from a newer finding."""
+    protected = {"url", "source_type", "zotero_source"} if target.is_seed else set()
+    for key in _QUANTITATIVE_SOURCE_FIELDS + (
+        "study_type",
+        "peer_review_status",
+        "authors",
+        "year",
+        "doi_or_id",
+        "title",
+        "content_excerpt",
+    ):
+        if key in protected:
+            continue
+        cur = (getattr(target, key, "") or "").strip()
+        new = (finding.get(key) or "").strip()
+        if not cur and new:
+            setattr(target, key, new)
+    incoming_tier = (finding.get("sourcing_tier") or "").strip()
+    if incoming_tier:
+        chosen = _prefer_sourcing_tier(target.sourcing_tier or "", incoming_tier)
+        if chosen != (target.sourcing_tier or ""):
+            target.sourcing_tier = chosen
+            note = (finding.get("sourcing_note") or "").strip()
+            if note:
+                target.sourcing_note = note
+        elif not (target.sourcing_note or "").strip():
+            target.sourcing_note = (finding.get("sourcing_note") or "").strip()
+    if not (target.content_excerpt or "").strip():
+        excerpt = _excerpt_from_finding(finding)
+        if excerpt:
+            target.content_excerpt = excerpt
+    elif finding and not target.is_seed:
+        newer = _excerpt_from_finding(finding)
+        if len(newer) > len(target.content_excerpt or ""):
+            target.content_excerpt = newer
 
 
 def extract_citation_nums(text: str) -> Set[int]:
@@ -104,22 +239,78 @@ class EvidenceRegistry:
     def __init__(self) -> None:
         self._sources: List[EvidenceSource] = []
         self._by_id: Dict[str, EvidenceSource] = {}
+        self._by_doi: Dict[str, str] = {}
+        self._by_zotero: Dict[str, str] = {}
 
     def __len__(self) -> int:
         return len(self._sources)
 
+    def _index_source(self, src: EvidenceSource) -> None:
+        """Track DOI / Zotero aliases for cross-path deduplication."""
+        doi = normalize_doi(src.doi_or_id or "")
+        if not doi.startswith("10."):
+            doi = normalize_doi(extract_doi(src.url or ""))
+        if doi.startswith("10."):
+            self._by_doi.setdefault(doi, src.source_id)
+        zkey = zotero_key_from_source_id(src.source_id)
+        if zkey:
+            self._by_zotero.setdefault(zkey, src.source_id)
+        for key in (src.doi_or_id or "",):
+            k = (key or "").strip().upper()
+            if _ZOTERO_KEY_IN_SOURCE_RE.match(k):
+                self._by_zotero.setdefault(k, src.source_id)
+
+    def _resolve_canonical_source_id(self, finding: dict) -> Optional[str]:
+        """Map a finding to an existing registry row when it is the same paper."""
+        primary = source_id_for_finding(finding)
+        if primary in self._by_id:
+            return primary
+
+        for raw_key in (
+            finding.get("zotero_key"),
+            finding.get("paper_key"),
+            finding.get("catalog_key"),
+        ):
+            key = (raw_key or "").strip().upper()
+            if key and key in self._by_zotero:
+                return self._by_zotero[key]
+
+        doi = doi_from_finding(finding)
+        if doi and doi in self._by_doi:
+            return self._by_doi[doi]
+
+        return None
+
+    def _apply_source_to_finding(self, finding: dict, existing: EvidenceSource) -> None:
+        finding["source_id"] = existing.source_id
+        finding["citation_num"] = existing.citation_num
+        if existing.is_seed:
+            finding["is_seed"] = True
+        zkey = zotero_key_from_source_id(existing.source_id)
+        if zkey and not (finding.get("zotero_key") or finding.get("paper_key")):
+            finding["zotero_key"] = zkey
+
     def register(self, finding: dict, *, is_seed: bool = False) -> int:
         """Register a finding; return its stable citation number."""
-        sid = source_id_for_finding(finding)
-        existing = self._by_id.get(sid)
-        if existing:
+        normalized = normalize_finding_fields(dict(finding or {}))
+        finding.clear()
+        finding.update(normalized)
+        annotate_finding_sourcing(finding)
+        canonical = self._resolve_canonical_source_id(finding)
+        if canonical:
+            existing = self._by_id[canonical]
             if is_seed:
                 existing.is_seed = True
                 finding["is_seed"] = True
-            finding["source_id"] = sid
-            finding["citation_num"] = existing.citation_num
+            _merge_quantitative_fields(existing, finding)
+            if finding.get("allow_substantive_claims") is False and existing.is_seed:
+                pass
+            elif finding.get("allow_substantive_claims") is False:
+                existing.allow_substantive_claims = False
+            self._apply_source_to_finding(finding, existing)
             return existing.citation_num
 
+        sid = source_id_for_finding(finding)
         num = len(self._sources) + 1
         src = EvidenceSource(
             source_id=sid,
@@ -137,9 +328,18 @@ class EvidenceRegistry:
             search_provider=(finding.get("search_provider") or "").strip(),
             search_kind=(finding.get("search_kind") or "").strip(),
             zotero_source=(finding.get("zotero_source") or "").strip(),
+            sample_size=(finding.get("sample_size") or "").strip(),
+            effect_size=(finding.get("effect_size") or "").strip(),
+            outcome=(finding.get("outcome") or "").strip(),
+            quality_notes=(finding.get("quality_notes") or "").strip(),
+            sourcing_tier=(finding.get("sourcing_tier") or "").strip(),
+            sourcing_note=(finding.get("sourcing_note") or "").strip(),
+            allow_substantive_claims=bool(finding.get("allow_substantive_claims", True)),
+            content_excerpt=_excerpt_from_finding(finding),
         )
         self._sources.append(src)
         self._by_id[sid] = src
+        self._index_source(src)
         finding["source_id"] = sid
         finding["citation_num"] = num
         if is_seed:
@@ -153,6 +353,11 @@ class EvidenceRegistry:
 
     def get(self, source_id: str) -> Optional[EvidenceSource]:
         return self._by_id.get(source_id)
+
+    def has_doi(self, doi: str) -> bool:
+        """True when a registry source is already indexed under this DOI."""
+        normalized = normalize_doi(doi or "")
+        return bool(normalized.startswith("10.") and normalized in self._by_doi)
 
     def sources(self) -> List[EvidenceSource]:
         return list(self._sources)
@@ -216,6 +421,14 @@ class EvidenceRegistry:
                 meta_bits.append(f"ID: {f['doi_or_id']}")
             if f.get("study_type"):
                 meta_bits.append(f"Type: {f['study_type']}")
+            if f.get("sample_size"):
+                meta_bits.append(f"N: {f['sample_size']}")
+            if f.get("effect_size"):
+                meta_bits.append(f"Effect: {f['effect_size']}")
+            if f.get("outcome"):
+                meta_bits.append(f"Outcome: {f['outcome']}")
+            if f.get("quality_notes"):
+                meta_bits.append(f"Quality: {f['quality_notes']}")
             if f.get("peer_review_status"):
                 meta_bits.append(f"Status: {f['peer_review_status']}")
             if f.get("source_id"):
@@ -226,10 +439,16 @@ class EvidenceRegistry:
                 meta_bits.append(f"Kind: {f['search_kind']}")
             if f.get("zotero_source"):
                 meta_bits.append(f"Zotero: {f['zotero_source']}")
+            tier = (f.get("sourcing_tier") or "").strip()
+            if tier and is_thin_sourcing(tier):
+                meta_bits.append(f"Sourcing: {tier}")
+                note = (f.get("sourcing_note") or "").strip()
+                if note:
+                    meta_bits.append(f"Limit: {note[:160]}")
             if f.get("collection_paths"):
                 meta_bits.append(f"Collections: {', '.join(f['collection_paths'][:2])}")
             meta = " | ".join(meta_bits)
-            content = summary if summary else (evidence[:1000] if evidence else "(no content)")
+            content = format_finding_content_for_prompt(f)
             header = f"**[{num}]** — [{title}]({url})"
             if meta:
                 header += f"\n*{meta}*"
@@ -274,6 +493,7 @@ class EvidenceRegistry:
             include_all_if_empty=True,
         )
         repaired = f"{body.rstrip()}\n\n{refs}" if body.strip() else refs
+        repaired = ensure_sourcing_disclosure(repaired, self._sources)
         return repaired.strip(), warnings
 
     def build_structured_fallback(self, question: str, findings: List[dict]) -> str:
@@ -298,11 +518,11 @@ class EvidenceRegistry:
                 (item for item in findings if item.get("source_id") == src.source_id),
                 {},
             )
-            summary = (f.get("summary") or f.get("evidence") or "").strip()
-            if summary:
-                summary = summary[:1200]
-            else:
-                summary = "(No extract available.)"
+            summary = format_finding_content_for_prompt(f)
+            if is_thin_sourcing(src.sourcing_tier):
+                summary = (
+                    f"_(Insufficient source text — bibliographic record only.)_ {summary[:800]}"
+                )
             seed_note = " _(seed source)_" if src.is_seed else ""
             lines.append(f"- **[{src.citation_num}]** {src.title}{seed_note}: {summary}")
         lines.append("")
@@ -319,6 +539,44 @@ class EvidenceRegistry:
         for src in self._sources:
             lines.append(f"[{src.citation_num}] {src.source_id} — {src.title}")
         return "\n".join(lines)
+
+    def quantitative_evidence_block(self) -> str:
+        """List quantitative fields the final report may cite per source."""
+        rows: List[str] = []
+        for src in self._sources:
+            bits = []
+            if src.sample_size:
+                bits.append(f"sample_size={src.sample_size}")
+            if src.effect_size:
+                bits.append(f"effect_size={src.effect_size}")
+            if src.outcome:
+                bits.append(f"outcome={src.outcome}")
+            if src.quality_notes:
+                bits.append(f"quality={src.quality_notes}")
+            if bits:
+                rows.append(f"[{src.citation_num}] {'; '.join(bits)}")
+        if not rows:
+            return (
+                "**Quantitative evidence block:** No sample sizes or effect sizes were "
+                "extracted — do not report specific N, p-values, OR, HR, or CI values."
+            )
+        return (
+            "**Quantitative evidence block (only these numbers may appear in the report):**\n"
+            + "\n".join(rows)
+        )
+
+    def sourcing_limitations_block(self) -> str:
+        """Sources that must not be discussed substantively."""
+        findings = []
+        for src in self._sources:
+            findings.append({
+                "citation_num": src.citation_num,
+                "title": src.title,
+                "sourcing_tier": src.sourcing_tier,
+                "sourcing_note": src.sourcing_note,
+                "allow_substantive_claims": src.allow_substantive_claims,
+            })
+        return build_sourcing_limitations_block(findings)
 
     def to_dict(self) -> dict:
         return {
@@ -345,9 +603,18 @@ class EvidenceRegistry:
                 search_provider=raw.get("search_provider") or "",
                 search_kind=raw.get("search_kind") or "",
                 zotero_source=raw.get("zotero_source") or "",
+                sample_size=raw.get("sample_size") or "",
+                effect_size=raw.get("effect_size") or "",
+                outcome=raw.get("outcome") or "",
+                quality_notes=raw.get("quality_notes") or "",
+                sourcing_tier=raw.get("sourcing_tier") or "",
+                sourcing_note=raw.get("sourcing_note") or "",
+                allow_substantive_claims=bool(raw.get("allow_substantive_claims", True)),
+                content_excerpt=raw.get("content_excerpt") or "",
             )
             if not src.source_id or not src.citation_num:
                 continue
             reg._sources.append(src)
             reg._by_id[src.source_id] = src
+            reg._index_source(src)
         return reg

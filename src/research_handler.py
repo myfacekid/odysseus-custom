@@ -61,7 +61,12 @@ class ResearchHandler:
         """Initialize the legacy research engine as a fallback."""
         try:
             from research_engine import ResearchOrchestrator, Config
-            config = Config(max_searches=12, max_content_per_page=15000)
+            from src.research_utils import get_research_max_content_chars
+
+            config = Config(
+                max_searches=12,
+                max_content_per_page=get_research_max_content_chars(),
+            )
             self._legacy_engine = ResearchOrchestrator(config)
             logger.info("Legacy ResearchOrchestrator initialized (fallback)")
         except ImportError:
@@ -228,6 +233,7 @@ class ResearchHandler:
         extraction_concurrency: int = None,
         include_preprints: bool = True,
         include_zotero: bool = True,
+        include_knowledge: bool = True,
         owner: str = "",
         seed_papers: list = None,
         research_mode: str = "literature_review",
@@ -277,6 +283,7 @@ class ResearchHandler:
             "category": "academic",
             "include_preprints": bool(include_preprints),
             "include_zotero": bool(include_zotero),
+            "include_knowledge": bool(include_knowledge),
             "seed_papers": list(seed_papers or []),
             "research_mode": research_mode or "literature_review",
             "report_length": report_length or "standard",
@@ -319,6 +326,7 @@ class ResearchHandler:
                         extraction_concurrency=extraction_concurrency,
                         include_preprints=include_preprints,
                         include_zotero=include_zotero,
+                        include_knowledge=include_knowledge,
                         owner=owner,
                         seed_papers=seed_papers,
                         research_mode=research_mode,
@@ -485,11 +493,7 @@ class ResearchHandler:
             summary = f.get("summary", "") or f.get("evidence", "")
             if url and url not in seen and not is_low_quality(summary):
                 seen.add(url)
-                entry = {"url": url, "title": title}
-                og_img = f.get("og_image", "")
-                if og_img:
-                    entry["image"] = og_img
-                sources.append(entry)
+                sources.append({"url": url, "title": title})
         return sources
 
     @staticmethod
@@ -559,23 +563,54 @@ class ResearchHandler:
                 raw_findings = self._extract_raw_findings(researcher.findings)
             entry["sources"] = sources
 
+            if entry.get("seed_papers") and not entry.get("seed_paper_details"):
+                try:
+                    from src.research_seeds import seed_details_for_refs
+                    entry["seed_paper_details"] = seed_details_for_refs(
+                        entry.get("owner") or "",
+                        entry.get("seed_papers") or [],
+                    )
+                except Exception:
+                    entry["seed_paper_details"] = []
+
+            try:
+                from src.research_graph import compute_source_breakdown
+
+                entry["source_breakdown"] = compute_source_breakdown(
+                    {
+                        "evidence_registry": (
+                            researcher.evidence_registry.to_dict()
+                            if researcher and getattr(researcher, "evidence_registry", None)
+                            else entry.get("evidence_registry")
+                        ),
+                    }
+                )
+            except Exception:
+                entry["source_breakdown"] = entry.get("source_breakdown") or {}
+
             path = RESEARCH_DATA_DIR / f"{session_id}.json"
+            evidence_registry = (
+                researcher.evidence_registry.to_dict()
+                if researcher and getattr(researcher, "evidence_registry", None)
+                else entry.get("evidence_registry")
+            )
             data = {
+                "session_id": session_id,
                 "query": entry["query"],
                 "status": entry["status"],
                 "result": entry["result"],
                 "raw_report": entry.get("raw_report", ""),
                 "sources": sources,
                 "raw_findings": raw_findings,
-                "evidence_registry": (
-                    researcher.evidence_registry.to_dict()
-                    if researcher and getattr(researcher, "evidence_registry", None)
-                    else entry.get("evidence_registry")
-                ),
+                "evidence_registry": evidence_registry,
                 "stats": entry.get("stats"),
                 "category": entry.get("category") or "academic",
                 "include_preprints": entry.get("include_preprints", True),
+                "include_zotero": entry.get("include_zotero", True),
+                "include_knowledge": entry.get("include_knowledge", True),
                 "seed_papers": entry.get("seed_papers") or [],
+                "seed_paper_details": entry.get("seed_paper_details") or [],
+                "source_breakdown": entry.get("source_breakdown") or {},
                 "research_mode": entry.get("research_mode") or "literature_review",
                 "report_length": entry.get("report_length") or "standard",
                 "started_at": entry["started_at"],
@@ -585,6 +620,12 @@ class ResearchHandler:
             }
             path.write_text(json.dumps(data), encoding="utf-8")
             logger.info(f"Research result saved to {path}")
+            try:
+                from src.research_graph import link_research_on_complete
+
+                link_research_on_complete(entry.get("owner") or "", session_id, data)
+            except Exception:
+                logger.debug("Research graph hook failed", exc_info=True)
             try:
                 from src.event_bus import fire_event
                 fire_event("research_completed", entry.get("owner") or None)
@@ -623,6 +664,7 @@ class ResearchHandler:
                 category=data.get("category"),
                 session_id=session_id,
                 hidden_images=data.get("hidden_images") or [],
+                evidence_registry=data.get("evidence_registry"),
             )
             logger.info(f"Visual report generated for {session_id}")
             return html_content
@@ -662,6 +704,56 @@ class ResearchHandler:
         except Exception as e:
             logger.error(f"Failed to unhide images: {e}")
             return False
+
+    def export_research(
+        self,
+        session_id: str,
+        fmt: str,
+        *,
+        scope: str = "cited",
+    ) -> tuple[str, str, str]:
+        """Export a completed research session as markdown, BibTeX, or CSL JSON."""
+        from src.research_export import build_export
+
+        data = self._get_session_json(session_id)
+        if not data:
+            raise FileNotFoundError(session_id)
+        return build_export(data, fmt, scope=scope, session_id=session_id)
+
+    def save_to_zotero(
+        self,
+        session_id: str,
+        *,
+        scope: str = "cited",
+        citation_nums: list | None = None,
+    ) -> dict:
+        """Save selected research sources to the user's Zotero library."""
+        from src.research_zotero_save import save_research_sources_to_zotero
+        from src.zotero_client import ZoteroClient, resolve_zotero_credentials
+
+        data = self._get_session_json(session_id)
+        if not data:
+            raise FileNotFoundError(session_id)
+        owner = (data.get("owner") or "").strip()
+        creds = resolve_zotero_credentials(owner)
+        if not creds:
+            raise ValueError("Zotero not configured")
+        client = ZoteroClient(creds["api_key"], creds["user_id"])
+        return save_research_sources_to_zotero(
+            data,
+            client,
+            scope=scope,
+            citation_nums=citation_nums,
+        )
+
+    def preview_save_to_zotero(self, session_id: str, *, scope: str = "cited") -> dict:
+        """Summarize saveable vs in-library sources for UI."""
+        from src.research_zotero_save import preview_save_sources
+
+        data = self._get_session_json(session_id)
+        if not data:
+            raise FileNotFoundError(session_id)
+        return preview_save_sources(data, scope=scope)
 
     @staticmethod
     async def _probe_endpoint(endpoint: str, model: str, headers: dict = None):
@@ -703,6 +795,7 @@ class ResearchHandler:
         extraction_concurrency: int = None,
         include_preprints: bool = True,
         include_zotero: bool = True,
+        include_knowledge: bool = True,
         owner: str = "",
         seed_papers: list = None,
         research_mode: str = "literature_review",
@@ -741,6 +834,10 @@ class ResearchHandler:
             from src.deep_research import DeepResearcher
 
             from src.settings import get_setting
+            from src.research_utils import (
+                get_research_max_content_chars,
+                get_research_synthesis_window,
+            )
             _max_report_tokens = int(get_setting("research_max_tokens", 16384))
             if report_length == "extended":
                 _max_report_tokens = max(_max_report_tokens, 24576)
@@ -765,6 +862,8 @@ class ResearchHandler:
                 min_rounds=min(3, max_rounds),
                 max_time=max_time,
                 max_report_tokens=_max_report_tokens,
+                max_content_chars=get_research_max_content_chars(),
+                synthesis_window=get_research_synthesis_window(),
                 extraction_timeout=_extraction_timeout,
                 extraction_concurrency=_extraction_concurrency,
                 progress_callback=progress_callback,
@@ -772,6 +871,7 @@ class ResearchHandler:
                 category="academic",
                 include_preprints=include_preprints,
                 include_zotero=include_zotero,
+                include_knowledge=include_knowledge,
                 owner=owner or (_task_entry.get("owner") if _task_entry else ""),
                 seed_papers=seed_papers or (_task_entry.get("seed_papers") if _task_entry else None),
                 research_mode=research_mode or (_task_entry.get("research_mode") if _task_entry else "literature_review"),

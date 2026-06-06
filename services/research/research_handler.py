@@ -258,6 +258,10 @@ class ResearchHandler:
         try:
             from src.deep_research import DeepResearcher
             from src.settings import get_setting
+            from src.research_utils import (
+                get_research_max_content_chars,
+                get_research_synthesis_window,
+            )
 
             researcher = DeepResearcher(
                 llm_endpoint=llm_endpoint,
@@ -266,6 +270,8 @@ class ResearchHandler:
                 max_rounds=8,
                 max_time=max_time,
                 max_report_tokens=int(get_setting("research_max_tokens", 8192)),
+                max_content_chars=get_research_max_content_chars(),
+                synthesis_window=get_research_synthesis_window(),
                 progress_callback=progress_callback,
             )
             if _task_entry is not None:

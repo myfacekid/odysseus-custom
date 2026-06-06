@@ -1050,7 +1050,7 @@ document.addEventListener('click', function(e) {
   if (!a) return;
   const href = a.getAttribute('href') || '';
   if (!href.startsWith('#')) return;
-  const m = href.match(/^#(session|document|note|image|email|event|task|skill|research)-(.+)$/);
+  const m = href.match(/^#(session|document|note|image|email|event|task|skill|research|paper)-(.+)$/);
   if (!m) return;
   e.preventDefault();
   e.stopPropagation();
@@ -1097,6 +1097,11 @@ document.addEventListener('click', function(e) {
     import('./research/panel.js').then(mod => {
       const open = mod.openPanel || (mod.default && mod.default.openPanel);
       if (open) open(id);
+    }).catch(() => {});
+  } else if (kind === 'paper') {
+    import('./knowledge.js').then(mod => {
+      const open = mod.openKnowledgeNode || (mod.default && mod.default.openKnowledgeNode);
+      if (open) open(`paper:${id}`);
     }).catch(() => {});
   }
 });

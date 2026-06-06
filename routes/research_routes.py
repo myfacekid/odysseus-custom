@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from src.endpoint_resolver import resolve_endpoint
 from src.auth_helpers import _auth_disabled, get_current_user
@@ -165,6 +165,87 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             raise HTTPException(404, "No visual report available for this session")
         return HTMLResponse(content=html_content)
 
+    @router.get("/api/research/{session_id}/export")
+    async def research_export(
+        session_id: str,
+        request: Request,
+        format: str = Query("markdown", alias="format"),
+        scope: str = Query("cited"),
+    ):
+        """Export a completed research session as Markdown, BibTeX, or CSL JSON."""
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        try:
+            content, media_type, filename = research_handler.export_research(
+                session_id,
+                format,
+                scope=scope,
+            )
+        except FileNotFoundError:
+            raise HTTPException(404, "Research not found")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    class SaveToZoteroRequest(BaseModel):
+        citation_nums: Optional[List[int]] = None
+        scope: str = "cited"
+
+    @router.get("/api/research/{session_id}/save-to-zotero/preview")
+    async def research_save_to_zotero_preview(
+        session_id: str,
+        request: Request,
+        scope: str = Query("cited"),
+    ):
+        """List registry sources that can be saved to Zotero vs already in library."""
+        from src.auth_helpers import require_privilege
+
+        user = require_privilege(request, "can_use_research")
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        try:
+            preview = research_handler.preview_save_to_zotero(session_id, scope=scope)
+        except FileNotFoundError:
+            raise HTTPException(404, "Research not found")
+        return preview
+
+    @router.post("/api/research/{session_id}/save-to-zotero")
+    async def research_save_to_zotero(
+        session_id: str,
+        body: SaveToZoteroRequest,
+        request: Request,
+    ):
+        """Batch-save selected research sources to the user's Zotero library."""
+        from src.auth_helpers import require_privilege
+        from src.zotero_catalog import sync_zotero_catalog
+
+        user = require_privilege(request, "can_use_research")
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        try:
+            result = research_handler.save_to_zotero(
+                session_id,
+                scope=body.scope or "cited",
+                citation_nums=body.citation_nums,
+            )
+        except FileNotFoundError:
+            raise HTTPException(404, "Research not found")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        if not result.get("ok"):
+            raise HTTPException(502, result.get("error") or "Zotero save failed")
+        if result.get("created", 0) > 0:
+            try:
+                sync_zotero_catalog(user)
+            except Exception:
+                logger.warning("Catalog sync after Zotero save failed", exc_info=True)
+        return result
+
     class HideImageRequest(BaseModel):
         url: str
 
@@ -218,11 +299,22 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
                 if search and search.lower() not in query.lower():
                     continue
                 sources = d.get("sources", [])
+                seed_papers = d.get("seed_papers") or []
+                breakdown = d.get("source_breakdown") or {}
+                if not breakdown and d.get("evidence_registry"):
+                    try:
+                        from src.research_graph import compute_source_breakdown
+                        breakdown = compute_source_breakdown(d)
+                    except Exception:
+                        breakdown = {}
                 items.append({
                     "id": p.stem,
                     "query": query,
                     "category": d.get("category") or "",
                     "source_count": len(sources),
+                    "source_breakdown": breakdown,
+                    "seed_count": len(seed_papers),
+                    "research_mode": d.get("research_mode") or "literature_review",
                     "status": d.get("status", "done"),
                     "duration": d.get("stats", {}).get("Duration", ""),
                     "rounds": d.get("stats", {}).get("Rounds", ""),
@@ -321,6 +413,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         extraction_concurrency: Optional[int] = Field(default=None, ge=1, le=12)
         include_preprints: bool = True
         include_zotero: bool = True
+        include_knowledge: bool = True
         seed_papers: List[str] = Field(default_factory=list)
         mode: str = Field(default="literature_review")
         report_length: str = Field(default="standard")
@@ -443,6 +536,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             extraction_concurrency=body.extraction_concurrency,
             include_preprints=body.include_preprints,
             include_zotero=body.include_zotero,
+            include_knowledge=body.include_knowledge,
             owner=user,
             seed_papers=seed_papers,
             research_mode=mode,
@@ -502,6 +596,29 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             ]
         return {"papers": papers, "total": len(papers)}
 
+    class SeedPreviewRequest(BaseModel):
+        refs: List[str] = Field(default_factory=list)
+
+    @router.post("/api/research/seeds/preview")
+    async def research_seeds_preview(body: SeedPreviewRequest, request: Request):
+        """Catalog-based sourcing preview for seed papers before a run."""
+        from src.auth_helpers import require_privilege
+        from src.research_seeds import preview_seed_refs
+
+        user = require_privilege(request, "can_use_research")
+        if user == "internal-tool":
+            tool_owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            if tool_owner and tool_owner not in {"internal-tool", "api", "demo", "system"}:
+                user = tool_owner
+        refs = [r.strip() for r in (body.refs or []) if (r or "").strip()]
+        if not refs:
+            return {"seeds": [], "sync_recommended": False}
+        seeds = preview_seed_refs(user, refs)
+        return {
+            "seeds": seeds,
+            "sync_recommended": any(s.get("catalog_stale") for s in seeds),
+        }
+
     @router.get("/api/research/stream/{session_id}")
     async def research_stream(session_id: str, request: Request):
         """SSE stream of research progress events."""
@@ -549,10 +666,12 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             if p.exists():
                 d = json.loads(p.read_text(encoding="utf-8"))
                 return {
-                    "result": d.get("result", ""),
+                    "result": d.get("raw_report") or d.get("result", ""),
                     "sources": d.get("sources", []),
                     "raw_findings": d.get("raw_findings", []),
                     "category": d.get("category") or "",
+                    "evidence_registry": d.get("evidence_registry") or {},
+                    "raw_report": d.get("raw_report") or "",
                 }
             raise HTTPException(404, "No research result available")
         sources = research_handler.get_sources(session_id) or []
@@ -596,9 +715,36 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         sources = research_handler.get_sources(session_id) or disk.get("sources") or []
         raw_findings = research_handler.get_raw_findings(session_id) or disk.get("raw_findings") or []
         query = disk.get("query", "") or ""
+        evidence_registry = disk.get("evidence_registry") or {}
 
         if not (result or "").strip():
             raise HTTPException(404, "No research result available for this session")
+
+        def _registry_context_block() -> str:
+            sources = (evidence_registry or {}).get("sources") or []
+            if not sources:
+                return ""
+            lines = ["\n\n=== EVIDENCE REGISTRY (cite using these [N] numbers) ==="]
+            for src in sorted(sources, key=lambda s: int((s or {}).get("citation_num") or 0)):
+                if not isinstance(src, dict):
+                    continue
+                num = src.get("citation_num")
+                title = (src.get("title") or "Untitled").strip()
+                url = (src.get("url") or "").strip()
+                doi = (src.get("doi_or_id") or "").strip()
+                tier = (src.get("sourcing_tier") or "").strip()
+                seed_note = " seed" if src.get("is_seed") else ""
+                block = f"\n[{num}]{seed_note} {title}"
+                if doi.startswith("10."):
+                    block += f"\nDOI: {doi}"
+                elif doi:
+                    block += f"\nID: {doi}"
+                if url:
+                    block += f"\nURL: {url}"
+                if tier:
+                    block += f"\nSourcing: {tier}"
+                lines.append(block)
+            return "".join(lines)
 
         # Inherit endpoint/model/headers from the source session when possible.
         # For panel-launched research (rp-* IDs), there is no chat session, so
@@ -693,7 +839,10 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             f"=== ORIGINAL QUERY ===\n{query or '(not recorded)'}\n\n"
             f"=== REPORT ===\n{result}"
         )
-        if raw_findings:
+        registry_block = _registry_context_block()
+        if registry_block:
+            primer += registry_block
+        elif raw_findings:
             lines = ["\n\n=== SOURCE SUMMARIES ==="]
             for i, finding in enumerate(raw_findings[:25], 1):
                 title = (finding.get("title") or "Untitled").strip()

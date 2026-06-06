@@ -47,6 +47,54 @@ def test_registry_assigns_stable_citation_numbers():
     assert f1["source_id"].startswith("src:web:")
 
 
+def test_registry_stores_content_excerpt():
+    reg = EvidenceRegistry()
+    finding = _web_finding("https://ex.com/a", "Alpha")
+    finding["abstract"] = "This is a long abstract used for sidebar excerpts in the report UI."
+    reg.register(finding)
+    stored = reg.to_dict()["sources"][0]
+    assert stored["content_excerpt"]
+    assert "long abstract" in stored["content_excerpt"]
+
+
+def test_registry_dedupes_web_hit_against_seed_by_doi():
+    reg = EvidenceRegistry()
+    seed = _zotero_finding(
+        "SEED1234",
+        "AlphaFold structure prediction",
+        doi_or_id="10.1234/alphafold",
+        is_seed=True,
+    )
+    reg.register(seed, is_seed=True)
+    web = _web_finding(
+        "https://doi.org/10.1234/alphafold",
+        "AlphaFold structure prediction (Nature)",
+        summary="Thin web scrape",
+    )
+    num = reg.register(web)
+    assert num == 1
+    assert len(reg.sources()) == 1
+    assert web["source_id"] == "src:zotero:SEED1234"
+    assert web["citation_num"] == 1
+    assert web.get("is_seed") is True
+    assert reg.sources()[0].is_seed is True
+
+
+def test_registry_dedupes_web_hit_by_doi_without_zotero_key_on_web_finding():
+    reg = EvidenceRegistry()
+    first = _web_finding(
+        "https://doi.org/10.5555/first",
+        "First paper",
+        doi_or_id="10.5555/first",
+    )
+    reg.register(first)
+    second = _web_finding("https://example.com/paper-page", "First paper again")
+    second["doi_or_id"] = "10.5555/first"
+    num = reg.register(second)
+    assert num == 1
+    assert len(reg.sources()) == 1
+
+
 def test_select_for_synthesis_keeps_seeds_and_recent_window():
     reg = EvidenceRegistry()
     findings = [

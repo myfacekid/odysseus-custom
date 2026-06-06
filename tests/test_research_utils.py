@@ -1,6 +1,11 @@
 """Tests for research_utils.py — thinking block stripping and quality filtering."""
 
-from src.research_utils import strip_thinking, is_low_quality
+from src.research_utils import (
+    get_research_max_content_chars,
+    get_research_synthesis_window,
+    is_low_quality,
+    strip_thinking,
+)
 
 
 class TestStripThinking:
@@ -99,3 +104,29 @@ class TestIsLowQuality:
     # Boilerplate is still caught via phrases.
     def test_cookie_consent_banner_still_filtered(self):
         assert is_low_quality("The page is just a cookie consent banner.") is True
+
+
+class TestResearchRuntimeLimits:
+    def test_defaults(self, monkeypatch):
+        monkeypatch.setattr("src.settings.get_setting", lambda key, default=None: default)
+        assert get_research_max_content_chars() == 15000
+        assert get_research_synthesis_window() == 10
+
+    def test_bounded_overrides(self, monkeypatch):
+        def fake_get(key, default=None):
+            return {
+                "research_max_content_chars": 25000,
+                "research_synthesis_window": 15,
+            }.get(key, default)
+
+        monkeypatch.setattr("src.settings.get_setting", fake_get)
+        assert get_research_max_content_chars() == 25000
+        assert get_research_synthesis_window() == 15
+
+    def test_clamps_out_of_range(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.settings.get_setting",
+            lambda key, default=None: 999999 if key == "research_max_content_chars" else 0,
+        )
+        assert get_research_max_content_chars() == 100_000
+        assert get_research_synthesis_window() == 1

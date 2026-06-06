@@ -58,6 +58,9 @@ def catalog_row_to_finding(
     authors = row.get("authors") or ""
     year = str(row.get("year") or "")
     doi = (row.get("doi") or "").strip()
+    if not doi:
+        from src.research_finding_enrich import extract_doi
+        doi = extract_doi(row.get("url") or "")
     abstract = (row.get("abstract") or "").strip()
     item_type = row.get("item_type") or "journalArticle"
     url = (row.get("url") or "").strip()
@@ -78,7 +81,11 @@ def catalog_row_to_finding(
             evidence_parts.append(extra)
     evidence = "\n\n".join(evidence_parts)[:15000]
 
-    summary = abstract[:2000] if abstract else (evidence[:800] if evidence else f"Zotero paper: {title}")
+    summary = abstract[:2000] if abstract else ""
+    if not summary and evidence and len(evidence) >= 220:
+        summary = evidence[:800]
+    if not summary:
+        summary = f"Bibliographic record: {title}"
     rational = (
         "Matched from local Zotero catalog"
         if zotero_source == "catalog"
@@ -103,6 +110,8 @@ def catalog_row_to_finding(
         "has_pdf": bool(row.get("has_pdf")),
         "collection_paths": list(row.get("collection_paths") or []),
     }
+    if abstract:
+        finding["abstract"] = abstract
     if pdf_text:
         finding["pdf_extracted"] = True
     return finding
@@ -128,13 +137,20 @@ def findings_from_catalog_rows(
         if not key:
             continue
         pdf_text = ""
-        if extract_pdfs and row.get("has_pdf"):
+        pdf_note = ""
+        if extract_pdfs:
             pdf_text, pdf_note = fetch_paper_pdf_text(owner, key, max_chars=pdf_max_chars)
             if pdf_note and not pdf_text:
                 logger.info("Zotero PDF for %s: %s", key, pdf_note)
         finding = catalog_row_to_finding(
             row, creds["user_id"], pdf_text=pdf_text, zotero_source="catalog",
         )
+        if extract_pdfs and not pdf_text and pdf_note:
+            finding["pdf_fetch_failed"] = True
+            finding["pdf_fetch_note"] = pdf_note
+        elif pdf_note and not pdf_text and row.get("has_pdf"):
+            finding["pdf_fetch_failed"] = True
+            finding["pdf_fetch_note"] = pdf_note
         findings.append(finding)
     return findings
 
@@ -156,13 +172,11 @@ def _catalog_search_rows(
 
     if q:
         hits = search_catalog(owner, q, limit=limit)
-        if hits:
-            return hits
-        if seed_library:
-            return seed_catalog_rows(owner, limit)
-        return []
+        return hits
 
-    return seed_catalog_rows(owner, limit)
+    if seed_library:
+        return seed_catalog_rows(owner, limit)
+    return []
 
 
 def research_zotero_findings(

@@ -2,7 +2,9 @@
 
 Living plan to bring Deep Research up to date with Links, Zotero catalog, and web search work. Use this doc when starting future chats: *"Follow docs/deep-research-roadmap.md Phase X"*.
 
-**Last updated:** 2026-06-01
+**Last updated:** 2026-06-05
+
+**Status:** Phases **0–3** implemented (evidence registry, unified gatherers, seed papers + modes, academic templates, sourcing tiers, PubMed/DOI enrichment, export API). **Next:** Phase **5** (Library & Links integration). Phase **4** (agent-shaped orchestration) remains **deferred** per open decision #5.
 
 ---
 
@@ -161,6 +163,96 @@ Replace/supplement live-only `fetch_zotero_findings` with:
 
 **Deliverable:** Structured review; export Markdown + BibTeX/CSL JSON from registry.
 
+**Remaining (optional Phase 3b — defer until token budget allows testing):**
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Export Markdown / BibTeX / CSL JSON | Done | `GET /api/research/{id}/export` |
+| Thematic clustering + evidence tables | Done | Pre-final context blocks |
+| Mode templates (literature / similar / gap / compare) | Done | `research_templates.py` |
+| Report length toggle (standard / extended) | Done | Panel + `research_max_tokens` bump |
+| Field variants (clinical, policy, historical) | Not started | Lower priority than integration |
+| Claim → source UI (“jump to source”) | Done | Visual report sidebar + Library preview citation jumps |
+| Separate Executive summary export | Partial | Section in report; no split export |
+
+---
+
+## Phase 5 — Library & Links integration
+
+**Goal:** Make Deep Research feel native to the rest of the app — easy to start from anywhere, easy to trace results back to Library/Links/Zotero. **Estimate:** 1–2 weeks.
+
+This is the **recommended next phase**. Phase 4 (agent tool orchestration) stays deferred; polish and cross-linking deliver more value per complexity than re-architecting the loop.
+
+### 5a. Seed paper UX (panel + Library)
+
+| Task | Detail |
+|------|--------|
+| **Add from Library** | ✅ Paper card menu → “Use as research seed”. Browse opens inline paper cards in the research panel (not the Documents modal). |
+| **Add from Links** | ✅ Papers tab in Links graph: “Use as research seed” on paper detail → seed chip + Papers compose tab. |
+| **Paste improvements** | ✅ `paper:KEY`, bare DOI, `doi:` prefix, doi.org links; inline validation hint (no journal-site URLs). |
+| **Pre-run seed summary** | ✅ Before Start: catalog sourcing preview (tier, DOI, collection path) via `/api/research/seeds/preview`. |
+| **Persist seeds per session** | ✅ `seed_papers` + `seed_paper_details` on completed research JSON. |
+
+**Files:** `static/js/research/panel.js`, `routes/research_routes.py`, optional `static/js/library*.js`, Links graph UI.
+
+### 5b. Completed report → Library & graph
+
+| Task | Detail |
+|------|--------|
+| **Research record enrichment** | ✅ `session_id`, `source_breakdown`, seeds/mode on JSON; evidence registry persisted. |
+| **Library Research tab** | ✅ Mode badge, seed count, source breakdown, seeds list, export + View in Links. |
+| **Save sources to Zotero** | ✅ Batch save cited web sources; Library checkboxes + panel/report quick save; skips seeds/library hits; catalog sync after write. `POST /api/research/{id}/save-to-zotero` |
+| **Graph linking** | ✅ `research:{session}` node + edges to seed papers and top cited (cap 20). |
+| **Open in chat** | ✅ Spinoff includes evidence registry with stable `[N]` citation numbers. |
+
+**Files:** `src/research_handler.py`, `src/knowledge_graph.py`, `static/js/research/library.js` (or panel), `routes/research_routes.py`.
+
+### 5c. Report UI polish
+
+| Task | Detail |
+|------|--------|
+| **Jump to source** | ✅ Visual report + Library preview: `[N]` scrolls to source card with URL, Zotero key, retrieval tier. |
+| **Source panel** | ✅ Right sidebar (mobile: below report) with filters Seeds / Full text / Limited; expandable excerpt. |
+| **Export from UI** | ✅ Markdown, BibTeX, CSL JSON in report toolbar + Library preview. |
+| **Sourcing disclosure** | ✅ Header chips: full text vs abstract only vs limited retrieval (from registry tiers). |
+
+**Files:** `src/visual_report.py`, `static/js/research/*.js`.
+
+### 5d. Operational hardening (small, ship with Phase 5)
+
+| Task | Detail |
+|------|--------|
+| **Configurable content limits** | ✅ Settings keys `research_max_content_chars`, `research_synthesis_window` (defaults 15k / 10). |
+| **Catalog sync prompt** | ✅ Seed preview compares catalog vs live Zotero PDF; nudges sync when stale. |
+| **Regression fixtures** | ✅ Golden compare + gap-analysis JSON fixtures in `tests/fixtures/research/`. |
+
+**Deliverable:** User can start compare mode from Library or Links, run research, open a report with clickable citations and source provenance, export bibliography, and see the session linked in Library + graph.
+
+### Phase 5 acceptance criteria
+
+- [ ] Add 2+ papers as seeds from Library or Links without manual key paste.
+- [ ] Completed research JSON lists seeds, mode, and source-type counts.
+- [x] Visual report: click `[N]` → source detail with Zotero key or URL.
+- [x] Export Markdown + BibTeX from Library or report view.
+- [ ] At least one graph edge: `research:SESSION` ↔ seed `paper:KEY`.
+
+### Suggested implementation order (Phase 5)
+
+```
+5a (seed UX from Library/Links)
+  → 5b (persist + Library tab + graph links)
+  → 5c (report UI: jump-to-source + export buttons)
+  → 5d (settings + fixtures, as time allows)
+```
+
+### Phase 5 open decisions
+
+| # | Question | Proposed default |
+|---|----------|------------------|
+| 1 | Auto-add all web sources to Zotero on complete? | **No** — user selects via “Save to library” |
+| 2 | Graph node for every source vs seeds + top cited? | **Seeds + top cited** (cap ~20 edges) |
+| 3 | Links picker: single or multi seed? | **Multi**, same as panel |
+
 ---
 
 ## Phase 4 — Agent-shaped research (optional)
@@ -196,15 +288,13 @@ Orchestrator caps rounds/time/cost; each step auditable in progress UI.
 ## Suggested priority order
 
 ```
-Phase 0 (citations & synthesis)
-    → Phase 1a (web) + 1b (Zotero catalog) + 1c (Links)
-    → Phase 2 (seed papers + similar)
-    → Phase 3 (academic templates)
-    → Phase 4 (agent orchestration, optional)
-    → Phase 5 (UI polish)
+Phase 0–3  ✅ (core engine + seeds + academic quality)
+    → Phase 5 (Library & Links integration)  ← NEXT
+    → Phase 3b (optional: field templates, jump-to-source depth)
+    → Phase 4 (agent orchestration — deferred)
 ```
 
-**Recommended first slice:** Phase **0 + 1a + 1b + minimal Phase 2** (stable citations, proper web search, catalog/PDF Zotero, seed keys in panel).
+**Recommended next slice:** Phase **5a + 5b** (seed from Library/Links, persist session metadata, graph links).
 
 ---
 
@@ -224,11 +314,15 @@ Record choices here when made:
 
 ## Acceptance criteria (“done”)
 
-- [ ] User selects 1–5 papers from Library/Links → runs Deep Research.
-- [ ] Engine reads PDFs, finds related papers via web + Zotero, stores all in a source registry.
-- [ ] Final report: themed Key Findings, numbered citations, References matching body, no invented statistics.
-- [ ] Every source traceable (Zotero key, URL, or graph node id).
-- [ ] Web search failures surface clearly (same as chat), with provider fallback.
+- [x] User selects 1–5 papers from catalog picker → runs Deep Research (Phase 2).
+- [x] Engine reads PDFs / PubMed abstracts, finds related papers, stores sources in registry (Phases 1–2 + sourcing work).
+- [x] Final report: themed Key Findings, numbered citations, References repair, sourcing disclosure (Phases 0–3).
+- [x] Export Markdown / BibTeX / CSL JSON from registry (Phase 3).
+- [x] Add seeds from **Links** paper detail (Phase 5a).
+- [x] Add seeds from **Library** paper card menu (Phase 5a).
+- [x] Paste DOI/URL validation and pre-run seed preview (Phase 5a).
+- [ ] Click citation → source detail; graph links for session (Phase 5b–c).
+- [x] Web search failures surface with provider fallback (Phase 1a).
 
 ---
 

@@ -1,7 +1,9 @@
 """Similar-paper discovery for Deep Research (Phase 2).
 
-Uses OpenAlex and Semantic Scholar early (per product decision), supplemented
-by existing web / catalog / graph channels in ``deep_research.py``.
+Primary discovery uses PubMed and Google Scholar web searches (see
+``research_web_search.similar_paper_queries_from_seeds``). OpenAlex and
+Semantic Scholar remain available as a fallback when scholarly web search
+returns too few on-topic hits.
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ class SimilarPapersOutcome:
     findings: List[dict]
     openalex_count: int = 0
     semantic_scholar_count: int = 0
+    web_search_count: int = 0
     note: str = ""
 
 
@@ -273,13 +276,17 @@ def similar_papers_from_seeds(
     limit_per_seed: int = 5,
     total_limit: int = 12,
     exclude_keys: Optional[Set[str]] = None,
+    relevance_query: str = "",
 ) -> SimilarPapersOutcome:
-    """Find similar papers for seed findings via OpenAlex + Semantic Scholar."""
+    """Fallback similar-paper pass via OpenAlex + Semantic Scholar APIs."""
+    from src.research_relevance import build_relevance_query, is_similar_paper_relevant
+
     exclude = {k.upper() for k in (exclude_keys or set()) if k}
     seen: Set[str] = set()
     pooled: List[dict] = []
     oa_count = 0
     s2_count = 0
+    gate_q = (relevance_query or build_relevance_query("", seed_findings=seed_findings)).strip()
 
     for seed in seed_findings or []:
         if not seed.get("is_seed") and not seed.get("paper_key"):
@@ -314,7 +321,16 @@ def similar_papers_from_seeds(
             pooled.append(f)
             s2_count += 1
 
+    if gate_q:
+        pooled = [
+            f for f in pooled
+            if is_similar_paper_relevant(f, gate_q, seed_findings)
+        ]
+
     pooled.sort(key=_rank_similar, reverse=True)
     findings = pooled[: max(total_limit, 1)]
-    note = f"Similar papers: {len(findings)} (OpenAlex {oa_count}, Semantic Scholar {s2_count})"
-    return SimilarPapersOutcome(findings, oa_count, s2_count, note)
+    note = (
+        f"Similar papers (API fallback): {len(findings)} "
+        f"(OpenAlex {oa_count}, Semantic Scholar {s2_count})"
+    )
+    return SimilarPapersOutcome(findings, oa_count, s2_count, note=note)

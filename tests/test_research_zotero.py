@@ -94,13 +94,6 @@ def test_research_zotero_uses_catalog_before_live_api(tmp_path, monkeypatch):
 
 
 def test_research_zotero_falls_back_to_live_api(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.zotero_catalog.ZOTERO_ROOT", tmp_path / "zotero")
-    owner = "tester"
-    _write_catalog(tmp_path, owner, [
-        {"zotero_key": "OTHER", "title": "Unrelated", "abstract": "nope", "has_pdf": False},
-    ])
-
-    class FakeClient:
         def search_items(self, query, limit=10, seed_library=False):
             return [{
                 "key": "LIVE01",
@@ -131,6 +124,38 @@ def test_research_zotero_falls_back_to_live_api(tmp_path, monkeypatch):
     assert outcome.source == "live_api"
     assert outcome.findings[0]["zotero_key"] == "LIVE01"
     assert outcome.findings[0]["zotero_source"] == "live_api"
+
+
+def test_research_zotero_does_not_seed_unrelated_when_query_misses(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.zotero_catalog.ZOTERO_ROOT", tmp_path / "zotero")
+    owner = "tester"
+    _write_catalog(tmp_path, owner, [
+        {
+            "zotero_key": "OTHER",
+            "title": "Astronomy survey",
+            "abstract": "Stars and galaxies",
+            "has_pdf": True,
+            "item_type": "journalArticle",
+        },
+    ])
+    monkeypatch.setattr(
+        "src.zotero_client.resolve_zotero_credentials",
+        lambda o="": {"api_key": "k", "user_id": "1"},
+    )
+
+    class FailClient:
+        def search_items(self, *a, **k):
+            raise AssertionError("live API should not run when catalog is synced")
+
+    monkeypatch.setattr("src.zotero_client.ZoteroClient", lambda *a, **k: FailClient())
+
+    outcome = research_zotero_findings(
+        "protein structure prediction alphafold",
+        owner,
+        limit=5,
+        seed_library=True,
+    )
+    assert outcome.findings == []
 
 
 def test_findings_from_catalog_rows_extracts_pdf(tmp_path, monkeypatch):

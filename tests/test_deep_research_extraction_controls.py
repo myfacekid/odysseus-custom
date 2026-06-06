@@ -48,9 +48,11 @@ async def test_search_and_extract_respects_extraction_concurrency():
 @pytest.mark.asyncio
 async def test_fetch_and_extract_uses_configured_timeout(monkeypatch):
     captured = {}
+    fetch_kwargs = {}
     search_mod = types.ModuleType("src.search")
 
-    def fake_fetch_webpage_content(url, timeout):
+    def fake_fetch_webpage_content(url, timeout, retry_attempt=0, *, include_og_image=True):
+        fetch_kwargs["include_og_image"] = include_og_image
         return {
             "success": True,
             "content": "useful page content",
@@ -86,6 +88,7 @@ async def test_fetch_and_extract_uses_configured_timeout(monkeypatch):
 
     assert result["summary"] == "useful page content"
     assert captured["timeout"] == 123
+    assert fetch_kwargs.get("include_og_image") is False
 
 
 def test_extraction_timeout_allows_long_local_model_runs():

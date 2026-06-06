@@ -6,8 +6,7 @@ Takes the markdown report, sources, and stats produced by DeepResearcher
 and wraps them in an editorial-quality HTML document with:
 - System/local typography, no remote font provider
 - Dark/light theme via prefers-color-scheme
-- Hero section with animated gradient + optional hero image
-- Inline OG images between sections
+- Hero section with animated gradient
 - Auto-generated table of contents from headings
 - Collapsible compact sources list
 - Print/Share toolbar
@@ -27,6 +26,9 @@ from urllib.parse import urlparse
 import markdown
 
 logger = logging.getLogger(__name__)
+
+# Research reports are text-only — no hero/section OG images scraped or rendered.
+REPORT_IMAGES_ENABLED = False
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -134,7 +136,328 @@ def _apply_heading_ids(report_html: str, headings: List[Dict[str, str]]) -> str:
     return str(soup)
 
 
-# Overlay buttons shown on each image: reroll (swap for the next unused
+def split_executive_summary(markdown: str) -> Tuple[str, str]:
+    """Split an Executive Summary section from the rest of the report body."""
+    if not markdown:
+        return "", markdown
+    match = re.search(r"^##\s+Executive Summary\s*$", markdown, re.I | re.M)
+    if not match:
+        return "", markdown
+    start = match.end()
+    rest = markdown[start:]
+    next_match = re.search(r"^##\s+", rest, re.M)
+    summary = (rest[: next_match.start()] if next_match else rest).strip()
+    prefix = markdown[: match.start()].rstrip()
+    suffix = (rest[next_match.start() :] if next_match else "").lstrip()
+    body_parts = [part for part in (prefix, suffix) if part]
+    body = "\n\n".join(body_parts)
+    return summary, body
+
+
+def strip_references_section(markdown: str) -> str:
+    """Remove the trailing ## References block from report markdown."""
+    from src.research_evidence import split_references_section
+
+    body, _refs = split_references_section(markdown or "")
+    return body
+
+
+def build_toc_html(
+    headings: List[Dict[str, str]],
+    registry_sources: Optional[List[Dict]] = None,
+) -> str:
+    """Build a nested TOC: h3 items collapsed under h2; sources collapsed as one group."""
+    lines: List[str] = []
+    i = 0
+    while i < len(headings):
+        heading = headings[i]
+        if heading["level"] != 2:
+            lines.append(
+                f'<a href="#{heading["slug"]}" class="depth-{heading["level"]}">'
+                f'{html.escape(heading["text"])}</a>'
+            )
+            i += 1
+            continue
+
+        children: List[Dict[str, str]] = []
+        j = i + 1
+        while j < len(headings) and headings[j]["level"] == 3:
+            children.append(headings[j])
+            j += 1
+
+        title = html.escape(heading["text"])
+        if children:
+            child_links = "\n".join(
+                f'<a href="#{child["slug"]}" class="depth-3">{html.escape(child["text"])}</a>'
+                for child in children
+            )
+            lines.append(
+                '<details class="toc-group">'
+                f'<summary><a href="#{heading["slug"]}" class="toc-group-title">{title}</a></summary>'
+                f'<div class="toc-group-children">{child_links}</div>'
+                "</details>"
+            )
+        else:
+            lines.append(f'<a href="#{heading["slug"]}" class="depth-2">{title}</a>')
+        i = j
+
+    if registry_sources:
+        source_links = "\n".join(
+            (
+                f'<a href="#source-{src.get("citation_num")}" class="depth-3 toc-source-link">'
+                f'[{src.get("citation_num")}] '
+                f'{html.escape(((src.get("title") or src.get("url") or "Untitled").strip())[:42])}'
+                f'{"…" if len((src.get("title") or src.get("url") or "Untitled").strip()) > 42 else ""}'
+                f"</a>"
+            )
+            for src in registry_sources[:40]
+        )
+        lines.append(
+            f'<details class="toc-group toc-sources-group">'
+            f"<summary>Sources ({len(registry_sources)})</summary>"
+            f'<div class="toc-group-children">{source_links}</div>'
+            "</details>"
+        )
+
+    return "\n      ".join(lines)
+
+
+def linkify_citation_markers(html_text: str) -> str:
+    """Turn inline [N] markers into in-page source jumps (not markdown links)."""
+    from src.research_source_links import linkify_citation_placeholders_html
+
+    return linkify_citation_placeholders_html(html_text or "")
+
+
+def prepare_markdown_for_report_html(markdown: str) -> str:
+    """Inject citation placeholders before markdown → HTML conversion."""
+    from src.research_source_links import inject_citation_placeholders
+
+    return inject_citation_placeholders(markdown or "")
+
+
+def sources_from_registry(
+    evidence_registry: Optional[dict],
+    legacy_sources: Optional[List[Dict]] = None,
+    *,
+    for_visual_report: bool = False,
+) -> List[Dict]:
+    """Normalize registry + legacy source lists for report UI/export."""
+    from src.research_source_links import enrich_registry_source_row
+
+    if evidence_registry and evidence_registry.get("sources"):
+        from src.research_evidence import EvidenceRegistry
+
+        reg = EvidenceRegistry.from_dict(evidence_registry)
+        rows: List[Dict] = []
+        for src in reg.sources():
+            row = {
+                "citation_num": src.citation_num,
+                "title": src.title,
+                "url": src.url,
+                "authors": src.authors,
+                "year": src.year,
+                "doi_or_id": src.doi_or_id,
+                "source_id": src.source_id,
+                "peer_review_status": src.peer_review_status,
+                "study_type": src.study_type,
+                "source_type": src.source_type,
+                "is_seed": src.is_seed,
+                "sourcing_tier": src.sourcing_tier,
+                "sourcing_note": src.sourcing_note,
+                "content_excerpt": src.content_excerpt,
+                "zotero_key": zotero_key_from_source_row(src.to_dict()),
+            }
+            rows.append(enrich_registry_source_row(row, for_visual_report=for_visual_report))
+        return rows
+    rows = []
+    for i, src in enumerate(legacy_sources or [], 1):
+        if not isinstance(src, dict):
+            continue
+        row = {**src, "citation_num": src.get("citation_num") or i}
+        row["zotero_key"] = zotero_key_from_source_row(row)
+        rows.append(enrich_registry_source_row(row, for_visual_report=for_visual_report))
+    return rows
+
+
+_ZOTERO_KEY_RE = re.compile(r"^[A-Z0-9]{8}$", re.I)
+
+
+def zotero_key_from_source_row(row: dict) -> str:
+    """Extract a Zotero item key from a registry source row when known."""
+    sid = (row.get("source_id") or "").strip()
+    if sid.startswith("src:zotero:"):
+        return sid.rsplit(":", 1)[-1].strip().upper()
+    if sid.startswith("src:paper:"):
+        return sid.rsplit(":", 1)[-1].strip().upper()
+    doi_or = (row.get("doi_or_id") or "").strip()
+    if _ZOTERO_KEY_RE.match(doi_or):
+        return doi_or.upper()
+    return ""
+
+
+def build_sourcing_disclosure_html(registry_sources: List[Dict]) -> str:
+    """Compact retrieval-tier summary for the report header."""
+    from src.research_sourcing import compute_sourcing_tier_counts, tier_badge_class
+
+    counts = compute_sourcing_tier_counts(registry_sources)
+    if not counts["total"]:
+        return ""
+    chips = []
+    if counts["adequate"]:
+        chips.append(
+            f'<span class="sourcing-chip sourcing-chip-{tier_badge_class("adequate")}">'
+            f'{counts["adequate"]} full text</span>'
+        )
+    if counts["abstract_only"]:
+        chips.append(
+            f'<span class="sourcing-chip sourcing-chip-{tier_badge_class("abstract_only")}">'
+            f'{counts["abstract_only"]} abstract only</span>'
+        )
+    if counts["thin"]:
+        chips.append(
+            f'<span class="sourcing-chip sourcing-chip-{tier_badge_class("metadata_only")}">'
+            f'{counts["thin"]} limited retrieval</span>'
+        )
+    if not chips:
+        return ""
+    return (
+        '<div class="sourcing-disclosure" aria-label="Source retrieval summary">'
+        + "".join(chips)
+        + "</div>"
+    )
+
+
+def build_sources_sidebar_html(registry_sources: List[Dict]) -> str:
+    """Right-hand source panel with filters and expandable excerpts."""
+    from src.research_sourcing import (
+        SOURCING_TIER_ADEQUATE,
+        tier_badge_class,
+        tier_display_label,
+    )
+
+    if not registry_sources:
+        return ""
+
+    cards: List[str] = []
+    for src in registry_sources:
+        num = src.get("citation_num")
+        title = html.escape((src.get("title") or src.get("url") or "Untitled").strip())
+        tier = (src.get("sourcing_tier") or "").strip().lower()
+        tier_label = html.escape(tier_display_label(tier))
+        tier_cls = tier_badge_class(tier)
+        is_seed = bool(src.get("is_seed"))
+        filter_tier = "adequate" if tier == SOURCING_TIER_ADEQUATE else "thin"
+        seed_attr = "1" if is_seed else "0"
+
+        meta_bits = []
+        if src.get("authors"):
+            meta_bits.append(html.escape(str(src["authors"])))
+        if src.get("year"):
+            meta_bits.append(html.escape(str(src["year"])))
+        meta_line = " · ".join(meta_bits)
+
+        detail_rows: List[str] = []
+        zkey = (src.get("zotero_key") or zotero_key_from_source_row(src)).strip()
+        if zkey:
+            detail_rows.append(
+                f'<div class="source-detail-row"><span class="source-detail-label">Zotero</span>'
+                f'<code class="source-detail-value">{html.escape(zkey)}</code></div>'
+            )
+        doi_or = (src.get("doi_or_id") or "").strip()
+        if doi_or.startswith("10."):
+            doi_url = f"https://doi.org/{doi_or}"
+            detail_rows.append(
+                f'<div class="source-detail-row"><span class="source-detail-label">DOI</span>'
+                f'<a class="source-detail-link" href="{html.escape(doi_url)}" '
+                f'target="_blank" rel="noopener noreferrer">{html.escape(doi_or)}</a></div>'
+            )
+        elif doi_or:
+            detail_rows.append(
+                f'<div class="source-detail-row"><span class="source-detail-label">ID</span>'
+                f'<span class="source-detail-value">{html.escape(doi_or)}</span></div>'
+            )
+
+        raw_url = (src.get("url") or "").strip()
+        href = (src.get("href") or "").strip()
+        external = bool(src.get("external"))
+        if raw_url.startswith(("http://", "https://")):
+            detail_rows.append(
+                f'<div class="source-detail-row"><span class="source-detail-label">URL</span>'
+                f'<a class="source-detail-link" href="{html.escape(raw_url)}" '
+                f'target="_blank" rel="noopener noreferrer">{html.escape(raw_url[:72])}'
+                f'{"…" if len(raw_url) > 72 else ""}</a></div>'
+            )
+        elif href and not href.startswith("#"):
+            detail_rows.append(
+                f'<div class="source-detail-row"><span class="source-detail-label">Link</span>'
+                f'<a class="source-detail-link source-internal" href="{html.escape(href)}" '
+                f'data-node-id="{html.escape(src.get("node_id") or "")}">Open in app</a></div>'
+            )
+
+        note = (src.get("sourcing_note") or "").strip()
+        if note:
+            detail_rows.append(
+                f'<p class="source-tier-note">{html.escape(note)}</p>'
+            )
+
+        excerpt = (src.get("content_excerpt") or "").strip()
+        excerpt_html = ""
+        if excerpt:
+            excerpt_html = (
+                f'<details class="source-excerpt"><summary>Abstract / excerpt</summary>'
+                f'<p>{html.escape(excerpt)}</p></details>'
+            )
+
+        seed_badge = (
+            '<span class="source-seed-badge">Seed</span>' if is_seed else ""
+        )
+        meta_html = (
+            f'<div class="source-card-meta">{meta_line}</div>' if meta_line else ""
+        )
+        cards.append(
+            f'<article class="source-card" id="source-{num}" data-cite="{num}" '
+            f'data-tier="{filter_tier}" data-seed="{seed_attr}">'
+            f'<div class="source-card-head">'
+            f'<span class="snum">[{num}]</span>'
+            f'<div class="source-card-title-wrap">'
+            f'<div class="source-card-title">{title}</div>'
+            f'{meta_html}'
+            f'</div>'
+            f'<div class="source-card-badges">{seed_badge}'
+            f'<span class="tier-badge tier-{tier_cls}">{tier_label}</span></div>'
+            f'</div>'
+            f'<div class="source-card-body">{"".join(detail_rows)}{excerpt_html}</div>'
+            f'</article>'
+        )
+
+    return (
+        '<aside class="sources-sidebar" aria-label="Reference sources">'
+        '<div class="sources-sidebar-header">'
+        f'<h2>Sources <span class="sources-count">({len(registry_sources)})</span></h2>'
+        '<div class="source-filters" role="toolbar" aria-label="Filter sources">'
+        '<button type="button" class="source-filter active" data-filter="all">All</button>'
+        '<button type="button" class="source-filter" data-filter="seed">Seeds</button>'
+        '<button type="button" class="source-filter" data-filter="adequate">Full text</button>'
+        '<button type="button" class="source-filter" data-filter="thin">Limited</button>'
+        '</div>'
+        '</div>'
+        '<div class="sources-sidebar-list">'
+        + "\n".join(cards)
+        + "</div></aside>"
+    )
+
+
+def _wrap_executive_summary_html(summary_html: str) -> str:
+    if not summary_html.strip():
+        return ""
+    return (
+        '<details class="exec-summary-panel" open>'
+        "<summary>Executive Summary</summary>"
+        f'<div class="exec-summary-body">{summary_html}</div>'
+        "</details>"
+    )
+
 # scraped image) + hide (remove and skip on future renders). Reroll is
 # wired up in the page script using the embedded spare-image pool.
 _IMG_OVERLAY_BTNS = (
@@ -201,7 +524,7 @@ _TEMPLATE = """\
 {og_image_meta}
 <meta name="theme-color" content="#b8543a" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#131214" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75'>O</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75'>N</text></svg>">
 <style>
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
@@ -532,12 +855,58 @@ body::after {{
 .stat {{ display: flex; align-items: center; gap: 0.35rem; }}
 .stat-value {{ font-weight: 600; color: var(--text); }}
 
+.sourcing-disclosure {{
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0 2rem 0.85rem;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}}
+.sourcing-chip {{
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface-alt);
+  color: var(--text-dim);
+}}
+.sourcing-chip-adequate {{
+  border-color: color-mix(in srgb, #4caf50 35%, var(--border));
+  color: color-mix(in srgb, #4caf50 75%, var(--text));
+}}
+.sourcing-chip-abstract {{
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--border));
+  color: color-mix(in srgb, var(--gold) 80%, var(--text));
+}}
+.sourcing-chip-thin {{
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
+}}
+
 /* ── Layout ────────────────────────────────────────── */
 .layout {{
   display: grid;
-  grid-template-columns: 200px 1fr;
-  max-width: calc(var(--max-w) + 260px);
+  grid-template-columns: 200px minmax(0, 1fr) 300px;
+  max-width: calc(var(--max-w) + 560px);
   margin: 0 auto;
+  align-items: start;
+}}
+@media (max-width: 1100px) {{
+  .layout {{ grid-template-columns: 1fr; }}
+  .toc-sidebar {{ display: none; }}
+  .sources-sidebar {{
+    display: flex;
+    grid-column: 1;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    max-height: none;
+    position: static;
+  }}
 }}
 @media (max-width: 900px) {{
   .layout {{ grid-template-columns: 1fr; }}
@@ -600,6 +969,48 @@ body::after {{
   color: var(--text-muted);
 }}
 .toc-sidebar nav a.depth-3:hover {{ padding-left: 1.45rem; }}
+
+.toc-group {{
+  margin: 2px 0;
+  border-radius: 6px;
+}}
+.toc-group > summary {{
+  cursor: pointer;
+  list-style: none;
+  padding: 0.42rem 0.7rem 0.42rem 0.85rem;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}}
+.toc-group > summary::-webkit-details-marker {{ display: none; }}
+.toc-group > summary::before {{
+  content: '\\25B6';
+  display: inline-block;
+  margin-right: 0.45rem;
+  font-size: 0.55em;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}}
+.toc-group[open] > summary::before {{ transform: rotate(90deg); }}
+.toc-group > summary:hover {{
+  color: var(--text);
+  background: var(--accent-bg);
+}}
+.toc-group-title {{
+  color: inherit;
+  text-decoration: none;
+}}
+.toc-group-title:hover {{ color: var(--accent); }}
+.toc-group-children {{
+  padding: 0.1rem 0 0.35rem 0.55rem;
+  border-left: 1px solid var(--border);
+  margin: 0 0 0.35rem 0.85rem;
+}}
+.toc-sources-group > summary {{
+  font-weight: 600;
+  color: var(--text);
+}}
 
 /* ── Content ───────────────────────────────────────── */
 .content {{ max-width: var(--max-w); padding: 3rem 2.5rem 4rem; }}
@@ -704,29 +1115,251 @@ body::after {{
 .content tr:last-child td {{ border-bottom: none; }}
 .content tr:hover td {{ background: var(--accent-bg); }}
 
-/* ── Sources (collapsible list) ───────────────────── */
-.sources-panel {{ margin-top: 3rem; border-top: 2px solid var(--border); padding-top: 1.5rem; }}
-.sources-panel details {{ margin: 0; }}
-.sources-panel summary {{
-  display: flex; align-items: center; gap: 0.5rem;
-  cursor: pointer; font-size: 1rem; font-weight: 600;
-  color: var(--text); padding: 0.5rem 0; list-style: none;
+.cite-link {{
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent);
+}}
+.cite-link:hover {{ border-bottom-style: solid; }}
+
+.exec-summary-panel {{
+  margin: 0 0 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}}
+.exec-summary-panel > summary {{
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 0.85rem 1.1rem;
+  list-style: none;
   user-select: none;
 }}
-.sources-panel summary::-webkit-details-marker {{ display: none; }}
-.sources-panel summary::before {{
-  content: '\\25B6'; font-size: 0.65em; color: var(--text-muted);
+.exec-summary-panel > summary::-webkit-details-marker {{ display: none; }}
+.exec-summary-panel > summary::before {{
+  content: '\\25B6';
+  display: inline-block;
+  margin-right: 0.55rem;
+  font-size: 0.65em;
+  color: var(--text-muted);
   transition: transform 0.2s;
 }}
-.sources-panel details[open] summary::before {{ transform: rotate(90deg); }}
-.sources-list {{ padding: 0.5rem 0 0 0.25rem; }}
-.sources-list a {{
-  display: flex; align-items: baseline; gap: 0.5rem;
-  padding: 0.35rem 0; font-size: 0.85rem;
-  color: var(--text); text-decoration: none;
-  transition: color 0.15s;
+.exec-summary-panel[open] > summary::before {{ transform: rotate(90deg); }}
+.exec-summary-body {{
+  padding: 0 1.1rem 1rem;
+  border-top: 1px solid var(--border);
 }}
-.sources-list a:hover {{ color: var(--accent); }}
+.exec-summary-body p:last-child {{ margin-bottom: 0; }}
+
+.toc-sources-label {{
+  margin: 1rem 0 0.35rem;
+  padding: 0 0.7rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}}
+
+/* legacy — bottom sources panel replaced by sources-sidebar (Phase 5c) */
+.sources-panel {{ margin-top: 3rem; border-top: 2px solid var(--border); padding-top: 1.5rem; }}
+.sources-sidebar {{
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+}}
+.sources-sidebar-header {{
+  padding: 1.4rem 1rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}}
+.sources-sidebar-header h2 {{
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin: 0 0 0.65rem;
+  letter-spacing: -0.01em;
+}}
+.sources-count {{ font-weight: 500; color: var(--text-muted); font-size: 0.82em; }}
+.source-filters {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}}
+.source-filter {{
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.68rem;
+  font-family: inherit;
+  cursor: pointer;
+}}
+.source-filter:hover {{ background: var(--bg-surface-alt); color: var(--text); }}
+.source-filter.active {{
+  background: var(--accent-bg);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--accent);
+  font-weight: 600;
+}}
+.sources-sidebar-list {{
+  overflow-y: auto;
+  padding: 0.65rem 0.75rem 1.25rem;
+  flex: 1;
+  min-height: 0;
+}}
+.source-card {{
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  margin-bottom: 0.55rem;
+  scroll-margin-top: 4.5rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}}
+.source-card.source-highlight {{
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}}
+.source-card[data-hidden="1"] {{ display: none; }}
+.source-card-head {{
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.45rem;
+  align-items: start;
+  padding: 0.55rem 0.65rem 0.35rem;
+}}
+.source-card-title-wrap {{ min-width: 0; }}
+.source-card-title {{
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+}}
+.source-card-meta {{
+  margin-top: 0.15rem;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}}
+.source-card-badges {{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}}
+.source-seed-badge {{
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+}}
+.tier-badge {{
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 0.12rem 0.38rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  white-space: nowrap;
+}}
+.tier-adequate {{
+  border-color: color-mix(in srgb, #4caf50 35%, var(--border));
+  color: color-mix(in srgb, #4caf50 75%, var(--text));
+}}
+.tier-abstract {{
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--border));
+  color: color-mix(in srgb, var(--gold) 80%, var(--text));
+}}
+.tier-thin, .tier-unknown {{
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: color-mix(in srgb, var(--accent) 75%, var(--text));
+}}
+.source-card-body {{
+  padding: 0 0.65rem 0.6rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}}
+.source-detail-row {{
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+  margin: 0.15rem 0;
+  min-width: 0;
+}}
+.source-detail-label {{
+  flex-shrink: 0;
+  width: 3.2rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}}
+.source-detail-value, .source-detail-link {{
+  min-width: 0;
+  word-break: break-word;
+}}
+.source-detail-link {{
+  color: var(--accent);
+  text-decoration: none;
+}}
+.source-detail-link:hover {{ text-decoration: underline; }}
+.source-tier-note {{
+  margin: 0.35rem 0 0.15rem;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  font-style: italic;
+}}
+.source-excerpt {{
+  margin-top: 0.35rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.35rem;
+}}
+.source-excerpt > summary {{
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  list-style: none;
+  user-select: none;
+}}
+.source-excerpt > summary::-webkit-details-marker {{ display: none; }}
+.source-excerpt > summary::before {{
+  content: '\\25B6';
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-size: 0.55em;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}}
+.source-excerpt[open] > summary::before {{ transform: rotate(90deg); }}
+.source-excerpt p {{
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
+  color: var(--text-dim);
+}}
+.source-card-head .snum {{
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  padding-top: 0.1rem;
+}}
 .sources-list .snum {{
   color: var(--text-muted); font-size: 0.75rem;
   min-width: 1.5rem; text-align: right; flex-shrink: 0;
@@ -796,6 +1429,10 @@ body::after {{
       Export &#9662;
     </button>
     <div class="dropdown-menu" id="export-menu">
+      <button id="btn-export-md">Download Markdown</button>
+      <button id="btn-export-bib">Download BibTeX</button>
+      <button id="btn-export-csl">Download CSL JSON</button>
+      <button id="btn-save-zotero">Save cited to Zotero</button>
       <button id="btn-pdf">Save as PDF</button>
       <button id="btn-html">Download HTML</button>
     </div>
@@ -803,7 +1440,7 @@ body::after {{
 </div>
 
 <div class="hero">
-  <div class="hero-label">Odysseus &mdash; Deep Research Report</div>
+  <div class="hero-label">Nobody &mdash; Deep Research Report</div>
   <h1>{question_html}</h1>
 </div>
 
@@ -812,6 +1449,8 @@ body::after {{
 <div class="stats-bar">
   {stats_html}
 </div>
+
+{sourcing_disclosure_html}
 
 <div class="layout">
   <aside class="toc-sidebar">
@@ -822,14 +1461,13 @@ body::after {{
   <main class="content">
     {report_html}
 
-    {sources_html}
-
     {chat_cta_html}
   </main>
+  {sources_sidebar_html}
 </div>
 
 <div class="report-footer">
-  Generated by Odysseus Deep Research &middot; {timestamp}
+  Generated by Nobody Deep Research &middot; {timestamp}
 </div>
 
 <script>
@@ -874,6 +1512,143 @@ body::after {{
     a.href = URL.createObjectURL(blob);
     a.download = document.title.replace(/[^a-z0-9]+/gi, '-').substring(0, 60) + '.html';
     a.click();
+  }});
+
+  function __downloadExport(fmt, scope) {{
+    if (!__sessionId) return;
+    exportMenu.classList.remove('open');
+    var url = '/api/research/' + encodeURIComponent(__sessionId)
+      + '/export?format=' + encodeURIComponent(fmt)
+      + '&scope=' + encodeURIComponent(scope || 'cited');
+    var a = document.createElement('a');
+    a.href = url;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }}
+  var btnMd = document.getElementById('btn-export-md');
+  if (btnMd) btnMd.addEventListener('click', function() {{ __downloadExport('markdown'); }});
+  var btnBib = document.getElementById('btn-export-bib');
+  if (btnBib) btnBib.addEventListener('click', function() {{ __downloadExport('bibtex', 'cited'); }});
+  var btnCsl = document.getElementById('btn-export-csl');
+  if (btnCsl) btnCsl.addEventListener('click', function() {{ __downloadExport('csl-json', 'cited'); }});
+
+  var btnZotero = document.getElementById('btn-save-zotero');
+  if (btnZotero && __sessionId) {{
+    btnZotero.addEventListener('click', function() {{
+      exportMenu.classList.remove('open');
+      var orig = btnZotero.textContent;
+      btnZotero.disabled = true;
+      btnZotero.textContent = 'Saving…';
+      fetch('/api/research/' + encodeURIComponent(__sessionId) + '/save-to-zotero', {{
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ scope: 'cited' }}),
+      }})
+        .then(function(r) {{ return r.json().then(function(d) {{ return {{ ok: r.ok, data: d }}; }}); }})
+        .then(function(out) {{
+          if (!out.ok) throw new Error(out.data.detail || 'Save failed');
+          btnZotero.textContent = 'Saved ' + (out.data.created || 0);
+          setTimeout(function() {{ btnZotero.textContent = orig; btnZotero.disabled = false; }}, 2500);
+        }})
+        .catch(function(err) {{
+          btnZotero.textContent = 'Failed';
+          btnZotero.title = err.message || 'Save failed';
+          setTimeout(function() {{ btnZotero.textContent = orig; btnZotero.disabled = false; btnZotero.title = ''; }}, 2500);
+        }});
+    }});
+  }}
+
+  document.querySelectorAll('.cite-link').forEach(function(link) {{
+    link.addEventListener('click', function(e) {{
+      var cite = link.getAttribute('data-cite');
+      if (!cite) return;
+      var target = document.getElementById('source-' + cite);
+      if (!target) return;
+      e.preventDefault();
+      var sidebar = document.querySelector('.sources-sidebar');
+      if (sidebar && sidebar.offsetParent !== null) {{
+        target.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+      }} else {{
+        target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+      }}
+      var excerpt = target.querySelector('.source-excerpt');
+      if (excerpt && !excerpt.open) excerpt.open = true;
+      target.classList.add('source-highlight');
+      setTimeout(function() {{ target.classList.remove('source-highlight'); }}, 1600);
+    }});
+  }});
+
+  document.querySelectorAll('.source-filter').forEach(function(btn) {{
+    btn.addEventListener('click', function() {{
+      document.querySelectorAll('.source-filter').forEach(function(b) {{ b.classList.remove('active'); }});
+      btn.classList.add('active');
+      var filter = btn.getAttribute('data-filter') || 'all';
+      document.querySelectorAll('.source-card').forEach(function(card) {{
+        var show = filter === 'all'
+          || (filter === 'seed' && card.getAttribute('data-seed') === '1')
+          || (filter === 'adequate' && card.getAttribute('data-tier') === 'adequate')
+          || (filter === 'thin' && card.getAttribute('data-tier') === 'thin');
+        card.setAttribute('data-hidden', show ? '0' : '1');
+      }});
+    }});
+  }});
+
+  function __openInternalHref(href) {{
+    if (!href) return;
+    var dest = href.charAt(0) === '#' ? ('/' + href) : href;
+    try {{
+      if (window.opener && !window.opener.closed) {{
+        window.opener.location.href = dest;
+        window.opener.focus();
+        return;
+      }}
+    }} catch (err) {{}}
+    window.location.href = dest;
+  }}
+
+  function __openInternalNode(nodeId) {{
+    if (!nodeId) return;
+    try {{
+      if (window.opener && !window.opener.closed) {{
+        window.opener.postMessage({{ type: 'odysseus-open-knowledge', nodeId: nodeId }}, window.location.origin);
+        window.opener.focus();
+        return;
+      }}
+    }} catch (err) {{}}
+  }}
+
+  document.querySelectorAll('.source-detail-link.source-internal, .source-detail-link[data-node-id]').forEach(function(link) {{
+    if (!link.getAttribute('data-node-id') && !link.classList.contains('source-internal')) return;
+    link.addEventListener('click', function(e) {{
+      var href = link.getAttribute('href') || '';
+      if (!href || href.indexOf('http') === 0) return;
+      e.preventDefault();
+      var nodeId = link.getAttribute('data-node-id') || '';
+      if (nodeId) {{
+        __openInternalNode(nodeId);
+        return;
+      }}
+      __openInternalHref(href);
+    }});
+  }});
+
+  document.querySelectorAll('.sources-list a.source-internal, .sources-list a[data-node-id]').forEach(function(link) {{
+    link.addEventListener('click', function(e) {{
+      var href = link.getAttribute('href') || '';
+      if (!href || href.indexOf('http') === 0) return;
+      e.preventDefault();
+      var panel = link.closest('.sources-panel details');
+      if (panel && !panel.open) panel.open = true;
+      var nodeId = link.getAttribute('data-node-id') || '';
+      if (nodeId) {{
+        __openInternalNode(nodeId);
+        return;
+      }}
+      __openInternalHref(href);
+    }});
   }});
 
   // Per-image hide — fades the image out, then POSTs to the backend so
@@ -987,9 +1762,15 @@ body::after {{
       var target = document.getElementById(id);
       if (!target) return;
       e.preventDefault();
+      if (link.classList.contains('toc-group-title')) e.stopPropagation();
+      var panel = target.closest('details');
+      if (panel && !panel.open) panel.open = true;
       target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
       history.replaceState(null, '', '#' + id);
     }});
+  }});
+  document.querySelectorAll('.toc-group-title').forEach(function(link) {{
+    link.addEventListener('click', function(e) {{ e.stopPropagation(); }});
   }});
 
   // Highlight the TOC entry that matches whichever heading is currently
@@ -1698,11 +2479,17 @@ def generate_visual_report(
     category: Optional[str] = None,
     session_id: Optional[str] = None,
     hidden_images: Optional[List[str]] = None,
+    evidence_registry: Optional[dict] = None,
 ) -> str:
     sources = sources or []
     stats = stats or {}
     category = category or "academic"
     hidden_images_set = set(hidden_images or [])
+    registry_sources = sources_from_registry(
+        evidence_registry,
+        sources,
+        for_visual_report=True,
+    )
 
     # Strip thinking artifacts
     report_markdown = strip_thinking(report_markdown)
@@ -1721,40 +2508,67 @@ def generate_visual_report(
             flags=re.MULTILINE,
         )
 
-    report_html = _md_to_html(report_markdown)
+    summary_md, body_md = split_executive_summary(report_markdown)
+    body_md = strip_references_section(body_md if summary_md else report_markdown)
+    markdown_for_body = prepare_markdown_for_report_html(body_md)
+    report_html = _md_to_html(markdown_for_body)
+    if summary_md:
+        summary_html = _md_to_html(prepare_markdown_for_report_html(summary_md))
+        report_html = _wrap_executive_summary_html(summary_html) + report_html
+    report_html = linkify_citation_markers(report_html)
 
-    headings = _extract_headings(report_markdown)
+    headings = _extract_headings(markdown_for_body)
     report_html = _apply_heading_ids(report_html, headings)
 
-    # Collect all OG images from sources (skip icons, tiny images, known junk)
-    _IMAGE_BLOCKLIST = {
-        "cdn.shopify.com/s/files/1/0179/4388/7926/files/icon.png",
-    }
-    _seen_images = set()
-    all_images = []
-    for s in sources:
-        img = s.get("image", "")
-        if (img and img.startswith("https://")
-            and img not in _seen_images
-            and img not in hidden_images_set
-            and not img.endswith((".svg", ".ico", ".gif"))
-            and not any(b in img for b in _IMAGE_BLOCKLIST)
-            and not _is_icon_or_logo_url(img)):
-            _seen_images.add(img)
-            all_images.append(img)
-
-    # Hero image = first available. data-img-url drives the per-image hide
-    # button rendered by the script at the bottom of the page.
+    # Collect OG images for hero/section figures (disabled — text-only reports).
     hero_image_html = ""
-    if all_images:
-        hero_url = html.escape(all_images[0])
-        hero_image_html = (
-            f'<div class="hero-image" data-img-url="{hero_url}">'
-            f'<img src="{hero_url}" alt="" loading="lazy" '
-            f'onerror="this.parentElement.style.display=\'none\'">'
-            f'{_IMG_OVERLAY_BTNS}'
-            f'</div>'
-        )
+    spare_images: List[str] = []
+    og_image_meta = ""
+    restore_btn_html = ""
+    if REPORT_IMAGES_ENABLED:
+        _IMAGE_BLOCKLIST = {
+            "cdn.shopify.com/s/files/1/0179/4388/7926/files/icon.png",
+        }
+        _seen_images = set()
+        all_images = []
+        for s in sources:
+            img = s.get("image", "")
+            if (img and img.startswith("https://")
+                and img not in _seen_images
+                and img not in hidden_images_set
+                and not img.endswith((".svg", ".ico", ".gif"))
+                and not any(b in img for b in _IMAGE_BLOCKLIST)
+                and not _is_icon_or_logo_url(img)):
+                _seen_images.add(img)
+                all_images.append(img)
+
+        if all_images:
+            hero_url = html.escape(all_images[0])
+            hero_image_html = (
+                f'<div class="hero-image" data-img-url="{hero_url}">'
+                f'<img src="{hero_url}" alt="" loading="lazy" '
+                f'onerror="this.parentElement.style.display=\'none\'">'
+                f'{_IMG_OVERLAY_BTNS}'
+                f'</div>'
+            )
+            og_image_meta = f'<meta property="og:image" content="{html.escape(all_images[0])}">'
+
+        section_pool = all_images[1:]
+        report_html, _consumed = _inject_images(report_html, section_pool)
+        spare_images = section_pool[_consumed:]
+
+        if session_id and hidden_images_set:
+            restore_btn_html = (
+                '<button id="btn-restore-images" type="button" '
+                f'title="Restore {len(hidden_images_set)} hidden image'
+                f'{"" if len(hidden_images_set) == 1 else "s"}">'
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+                '<path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>'
+                '</svg>'
+                f'Show hidden ({len(hidden_images_set)})'
+                '</button>'
+            )
 
     # Product quick-links bar
     if category == "product" and headings:
@@ -1766,21 +2580,8 @@ def generate_visual_report(
             )
             report_html = f'<div class="quick-links-bar">{pills}</div>\n' + report_html
 
-    # Inject remaining images between sections. Whatever isn't placed (hero
-    # took [0], sections took the next `consumed`) becomes the spare pool the
-    # reroll button draws from to swap out an irrelevant image in-page.
-    section_pool = all_images[1:]
-    report_html, _consumed = _inject_images(report_html, section_pool)
-    spare_images = section_pool[_consumed:]
-
     # Build TOC
-    toc_lines = []
-    for h in headings:
-        depth_class = f"depth-{h['level']}"
-        toc_lines.append(
-            f'<a href="#{h["slug"]}" class="{depth_class}">{html.escape(h["text"])}</a>'
-        )
-    toc_html = "\n      ".join(toc_lines) if toc_lines else ""
+    toc_html = build_toc_html(headings, registry_sources)
 
     # Build stats bar
     stat_items = []
@@ -1792,9 +2593,11 @@ def generate_visual_report(
             )
     stats_html = "\n  ".join(stat_items)
 
-    # Build sources panel — compact collapsible list
+    # Build sources sidebar + retrieval disclosure (Phase 5c)
+    sources_sidebar_html = build_sources_sidebar_html(registry_sources)
+    sourcing_disclosure_html = build_sourcing_disclosure_html(registry_sources)
     sources_html = ""
-    if sources:
+    if not registry_sources and sources:
         items = []
         for i, s in enumerate(sources, 1):
             url = s.get("url", "")
@@ -1821,14 +2624,12 @@ def generate_visual_report(
             + "\n".join(items)
             + "\n</div>\n</details>\n</div>"
         )
+        report_html = report_html + sources_html
 
     timestamp = datetime.now().strftime("%B %d, %Y at %H:%M")
 
     # Build description for OG/meta tags (first 160 chars of plain text)
     desc_text = re.sub(r'[#*_\[\]()]', '', report_markdown)[:160].strip()
-    og_image_meta = ""
-    if all_images:
-        og_image_meta = f'<meta property="og:image" content="{html.escape(all_images[0])}">'
 
     chat_cta_html = ""
     if session_id:
@@ -1847,23 +2648,6 @@ def generate_visual_report(
             '</div>'
         )
 
-    # "Restore hidden images" toolbar button — only render if there are any
-    # hidden images on this research AND we have a session_id (needed for
-    # the POST endpoint).
-    restore_btn_html = ""
-    if session_id and hidden_images_set:
-        restore_btn_html = (
-            '<button id="btn-restore-images" type="button" '
-            f'title="Restore {len(hidden_images_set)} hidden image'
-            f'{"" if len(hidden_images_set) == 1 else "s"}">'
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
-            '<path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>'
-            '</svg>'
-            f'Show hidden ({len(hidden_images_set)})'
-            '</button>'
-        )
-
     return _TEMPLATE.format(
         title=html.escape(title_text),
         description=html.escape(desc_text),
@@ -1871,9 +2655,10 @@ def generate_visual_report(
         question_html=html.escape(synthesized),
         hero_image_html=hero_image_html,
         stats_html=stats_html,
+        sourcing_disclosure_html=sourcing_disclosure_html,
         toc_html=toc_html,
         report_html=report_html,
-        sources_html=sources_html,
+        sources_sidebar_html=sources_sidebar_html,
         chat_cta_html=chat_cta_html,
         restore_btn_html=restore_btn_html,
         timestamp=timestamp,

@@ -34,6 +34,30 @@ def test_normalize_seed_ref():
     assert normalize_seed_ref("https://doi.org/10.1234/xyz") == "10.1234/xyz"
 
 
+def test_preview_seed_refs(tmp_path, monkeypatch):
+    from src.research_seeds import preview_seed_refs
+
+    monkeypatch.setattr("src.zotero_catalog.ZOTERO_ROOT", tmp_path / "zotero")
+    owner = "tester"
+    _write_catalog(tmp_path, owner, [
+        {
+            "zotero_key": "PAPER123",
+            "title": "Attention",
+            "doi": "10.1234/abc",
+            "abstract": "Transformers " * 40,
+            "has_pdf": True,
+            "item_type": "journalArticle",
+            "collection_paths": ["ML/Papers"],
+        },
+    ])
+    previews = preview_seed_refs(owner, ["PAPER123", "10.9999/missing"])
+    assert len(previews) == 2
+    assert previews[0]["in_catalog"] is True
+    assert previews[0]["zotero_key"] == "PAPER123"
+    assert previews[0]["collection_paths"] == ["ML/Papers"]
+    assert previews[1]["in_catalog"] is False
+
+
 def test_resolve_seed_catalog_rows(tmp_path, monkeypatch):
     monkeypatch.setattr("src.zotero_catalog.ZOTERO_ROOT", tmp_path / "zotero")
     owner = "tester"
@@ -108,14 +132,32 @@ def test_semantic_scholar_paper_to_finding():
 def test_similar_papers_from_seeds_merged(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "src.research_similar_papers.openalex_similar_works",
-        lambda **k: [_finding_from_openalex_work({"title": "OA Paper", "doi": "https://doi.org/10.1/oa"})],
+        lambda **k: [_finding_from_openalex_work({
+            "title": "Protein structure prediction benchmark",
+            "doi": "https://doi.org/10.1/oa",
+            "abstract_inverted_index": {"protein": [0], "structure": [1], "prediction": [2]},
+        })],
     )
     monkeypatch.setattr(
         "src.research_similar_papers.semantic_scholar_recommendations",
-        lambda **k: [_finding_from_s2_paper({"title": "S2 Paper", "abstract": "x", "externalIds": {}})],
+        lambda **k: [_finding_from_s2_paper({
+            "title": "AlphaFold accuracy assessment",
+            "abstract": "protein structure prediction methods",
+            "externalIds": {},
+        })],
     )
-    seeds = [{"is_seed": True, "paper_key": "SEED1", "doi_or_id": "10.1234/seed", "title": "Seed"}]
-    outcome = similar_papers_from_seeds(seeds, total_limit=5)
+    seeds = [{
+        "is_seed": True,
+        "paper_key": "SEED1",
+        "doi_or_id": "10.1234/seed",
+        "title": "AlphaFold protein structure prediction",
+        "summary": "protein structure prediction benchmark",
+    }]
+    outcome = similar_papers_from_seeds(
+        seeds,
+        total_limit=5,
+        relevance_query="compare alphafold protein structure prediction",
+    )
     assert len(outcome.findings) == 2
     assert outcome.openalex_count >= 1
     assert outcome.semantic_scholar_count >= 1

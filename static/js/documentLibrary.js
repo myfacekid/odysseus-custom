@@ -50,12 +50,17 @@ function _maybeCascadeGrid(grid, tabKey) {
   setTimeout(() => grid.classList.remove('doclib-just-opened'), 900);
 }
 let _libraryDocs = [];
+let _libraryPapers = [];
 let _libraryTotal = 0;
+let _libraryPapersTotal = 0;
 let _libraryOffset = 0;
+let _libraryPapersOffset = 0;
 let _docsVisibleLimit = 20;  // chunked reveal (matches the Chats tab's 20)
+let _papersVisibleLimit = 20;
 let _libraryLanguages = {};
 let _librarySessionCount = 0;
 let _libraryActiveLanguage = null;
+let _libraryTypeFilter = '';  // '' | 'documents' | 'paper'
 let _librarySort = 'recent';
 let _librarySearch = '';
 let _librarySearchDebounce = null;
@@ -107,9 +112,63 @@ async function _libraryOpenPaperInLinks(doc) {
     if (openModal) openModal();
     const open = mod.openKnowledgeNode || mod.default?.openKnowledgeNode;
     if (open) await open(`paper:${key}`);
-  } catch (e) {
+  } catch {
     if (uiModule) uiModule.showError('Failed to open paper in Links');
   }
+}
+
+async function _libraryUsePaperAsSeed(doc) {
+  const key = _libraryPaperKey(doc);
+  const doi = (doc?.doi || '').trim();
+  if (!key && !doi) {
+    if (uiModule) uiModule.showToast('No Zotero key or DOI for this paper', 3500);
+    return;
+  }
+  try {
+    const mod = await import('./research/panel.js');
+    const addSeed = mod.addSeedPaper;
+    if (!addSeed) {
+      if (uiModule) uiModule.showToast('Research panel unavailable', 3000);
+      return;
+    }
+    const added = addSeed({
+      zotero_key: key,
+      title: doc?.title || key || doi,
+      authors: doc?.authors || '',
+      year: doc?.year || '',
+      doi,
+      has_pdf: !!doc?.has_pdf,
+    });
+    if (uiModule) {
+      uiModule.showToast(
+        added ? 'Added as research seed' : 'Already in seed list — opened research panel',
+        3500,
+      );
+    }
+  } catch (e) {
+    if (uiModule) uiModule.showToast(e.message || 'Could not add research seed', 4000);
+  }
+}
+
+function _librarySectionHeader(title, count) {
+  const el = document.createElement('div');
+  el.className = 'doclib-section-header skills-section-header';
+  el.innerHTML = `<span class="skills-section-title">${title}</span><span class="skills-section-count">${count}</span>`;
+  return el;
+}
+
+function _librarySectionForFetch() {
+  if (_libraryTypeFilter === 'paper') return 'papers';
+  if (_libraryTypeFilter === 'documents') return 'documents';
+  return 'all';
+}
+
+function _librarySyncTypeFilters() {
+  const wrap = document.getElementById('doclib-type-filters');
+  if (!wrap) return;
+  wrap.querySelectorAll('[data-doclib-type]').forEach((btn) => {
+    btn.classList.toggle('active', (btn.dataset.doclibType || '') === (_libraryTypeFilter || ''));
+  });
 }
 
 // ---- Library animation helpers ----
@@ -331,15 +390,21 @@ async function _libraryOpenPaperInLinks(doc) {
   }
 
   async function libraryFetch(append) {
-    if (!append) _libraryOffset = 0;
-    // Bump page size to the backend max (50) so fullscreen doesn't leave
-    // empty space below the loaded rows — same idea as emailLibrary's
-    // limit=100, but documents_library validates `le=50` so we have to
-    // cap at that. Auto-fill loop below picks up any remaining gap.
+    let section = _librarySectionForFetch();
+    if (append && section === 'all') section = 'documents';
+    if (!append) {
+      _libraryOffset = 0;
+      _libraryPapersOffset = 0;
+    } else if (section === 'papers') {
+      _libraryOffset = _libraryPapers.length;
+    } else {
+      _libraryOffset = _libraryDocs.length;
+    }
     const params = new URLSearchParams({
       sort: _librarySort,
       offset: String(_libraryOffset),
       limit: '50',
+      section,
     });
     if (_librarySearch) params.set('search', _librarySearch);
     if (_libraryActiveLanguage) params.set('language', _libraryActiveLanguage);
@@ -351,17 +416,27 @@ async function _libraryOpenPaperInLinks(doc) {
       const data = await res.json();
 
       if (append) {
-        _libraryDocs = _libraryDocs.concat(data.documents);
+        if (section === 'papers') {
+          _libraryPapers = _libraryPapers.concat(data.papers || []);
+        } else if (section === 'documents') {
+          _libraryDocs = _libraryDocs.concat(data.documents || []);
+        } else {
+          _libraryDocs = _libraryDocs.concat(data.documents || []);
+        }
       } else {
-        _libraryDocs = data.documents;
-        _docsVisibleLimit = 20;  // reset chunk on a fresh load / search / sort
+        _libraryDocs = data.documents || [];
+        _libraryPapers = data.papers || [];
+        _docsVisibleLimit = 20;
+        _papersVisibleLimit = 20;
       }
-      _libraryTotal = data.total;
-      _libraryLanguages = data.languages;
+      _libraryTotal = data.total ?? 0;
+      _libraryPapersTotal = data.papers_total ?? (_libraryPapers.length || 0);
+      _libraryLanguages = data.languages || {};
       _librarySessionCount = data.session_count;
 
       libraryRenderStats();
       libraryRenderLangChips();
+      libraryRenderTypeFilters();
       libraryRenderGrid();
       libraryRenderLoadMore();
     } catch (e) {
@@ -378,12 +453,47 @@ async function _libraryOpenPaperInLinks(doc) {
   function libraryRenderStats() {
     const el = document.getElementById('doclib-stats');
     if (!el) return;
+    const docCount = _libraryTotal;
+    const paperCount = _libraryPapersTotal;
     const totalAll = Object.values(_libraryLanguages).reduce((a, b) => a + b, 0);
-    if (_librarySearch || _libraryActiveLanguage) {
-      el.textContent = `${_libraryTotal} of ${totalAll} document${totalAll !== 1 ? 's' : ''}`;
-    } else {
-      el.textContent = `${totalAll} document${totalAll !== 1 ? 's' : ''}`;
+    if (_libraryTypeFilter === 'paper') {
+      if (_librarySearch) {
+        el.textContent = `${paperCount} of ${_libraryPapersTotal} paper${paperCount !== 1 ? 's' : ''}`;
+      } else {
+        el.textContent = `${paperCount} paper${paperCount !== 1 ? 's' : ''}`;
+      }
+      return;
     }
+    if (_libraryTypeFilter === 'documents') {
+      if (_librarySearch || _libraryActiveLanguage) {
+        el.textContent = `${docCount} of ${totalAll} document${totalAll !== 1 ? 's' : ''}`;
+      } else {
+        el.textContent = `${docCount} document${docCount !== 1 ? 's' : ''}`;
+      }
+      return;
+    }
+    const combined = docCount + paperCount;
+    if (_librarySearch || _libraryActiveLanguage) {
+      el.textContent = `${combined} items`;
+    } else {
+      el.textContent = `${combined} item${combined !== 1 ? 's' : ''}`;
+    }
+  }
+
+  function libraryRenderTypeFilters() {
+    const wrap = document.getElementById('doclib-type-filters');
+    if (!wrap) return;
+    wrap.querySelectorAll('[data-doclib-type]').forEach((btn) => {
+      const type = btn.dataset.doclibType || '';
+      const count = type === 'paper'
+        ? _libraryPapersTotal
+        : type === 'documents'
+          ? _libraryTotal
+          : (_libraryTotal + _libraryPapersTotal);
+      const label = type === 'paper' ? 'Papers' : type === 'documents' ? 'Documents' : 'All';
+      btn.textContent = count ? `${label} (${count})` : label;
+      btn.classList.toggle('active', type === (_libraryTypeFilter || ''));
+    });
   }
 
   function libraryRenderLangChips() {
@@ -413,11 +523,14 @@ async function _libraryOpenPaperInLinks(doc) {
     });
     wrap.appendChild(allChip);
 
-    const sorted = Object.entries(_libraryLanguages).sort((a, b) => b[1] - a[1]);
+    const sorted = Object.entries(_libraryLanguages)
+      .filter(([lang]) => lang !== 'paper')
+      .sort((a, b) => b[1] - a[1]);
+    if (_libraryTypeFilter === 'paper') return;
     for (const [lang, count] of sorted) {
       const chip = document.createElement('button');
       chip.className = 'memory-cat-chip' + (_libraryActiveLanguage === lang ? ' active' : '');
-      chip.textContent = `${lang === 'paper' ? 'papers' : lang} (${count})`;
+      chip.textContent = `${lang} (${count})`;
       chip.addEventListener('click', () => {
         _libraryActiveLanguage = lang;
         libraryFetch(false);
@@ -429,17 +542,20 @@ async function _libraryOpenPaperInLinks(doc) {
   function libraryRenderGrid() {
     const grid = document.getElementById('doclib-grid');
     if (!grid) return;
-    // An open card menu is mounted on <body> (to escape overflow clipping), so
-    // clearing the grid would orphan it; dismiss it first so its listener +
-    // Escape-stack entry go too.
     document.querySelectorAll('.doclib-card-dropdown').forEach(dismissOrRemove);
     grid.innerHTML = '';
-    // Drop any previous inline load-more — regenerated below alongside the list.
     if (grid.parentElement) grid.parentElement.querySelectorAll(':scope > .doclib-inline-load-more').forEach(b => b.remove());
 
-    if (_libraryDocs.length === 0) {
+    const showDocs = !_libraryTypeFilter || _libraryTypeFilter === 'documents';
+    const showPapers = !_libraryTypeFilter || _libraryTypeFilter === 'paper';
+    const hasDocs = showDocs && _libraryDocs.length > 0;
+    const hasPapers = showPapers && _libraryPapers.length > 0;
+
+    if (!hasDocs && !hasPapers) {
       if (_librarySearch || _libraryActiveLanguage) {
-        grid.innerHTML = '<div class="doclib-empty">No documents match your search.</div>';
+        grid.innerHTML = '<div class="doclib-empty">No items match your search.</div>';
+      } else if (_libraryTypeFilter === 'paper') {
+        grid.innerHTML = '<div class="doclib-empty">No papers indexed — connect Zotero in Settings → Search, then Sync catalog.</div>';
       } else {
         const _impIco = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin:0 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
         grid.innerHTML =
@@ -459,30 +575,71 @@ async function _libraryOpenPaperInLinks(doc) {
     }
     _maybeCascadeGrid(grid, 'documents');
 
-    // Reveal in 20-at-a-time chunks (matches the Chats tab). The legacy
-    // server-pagination button is suppressed in libraryRenderLoadMore; this
-    // inline button is the single control.
-    const shown = _libraryDocs.slice(0, _docsVisibleLimit);
-    for (const doc of shown) {
-      grid.appendChild(libraryCreateCard(doc));
+    const useSections = showDocs && showPapers;
+
+    if (showDocs && hasDocs) {
+      if (useSections) grid.appendChild(_librarySectionHeader('Documents', _libraryTotal));
+      for (const doc of _libraryDocs.slice(0, _docsVisibleLimit)) {
+        grid.appendChild(libraryCreateCard(doc));
+      }
+    } else if (showDocs && useSections && _libraryTotal > 0 && !hasDocs) {
+      grid.appendChild(_librarySectionHeader('Documents', 0));
+      const empty = document.createElement('div');
+      empty.className = 'doclib-section-empty';
+      empty.textContent = 'No documents match.';
+      grid.appendChild(empty);
     }
-    // Show a "Load more" while either more loaded docs remain to reveal, or
-    // more exist on the server beyond what we've fetched.
-    const shownCount = shown.length;
-    if (shownCount < _libraryTotal) {
+
+    if (showPapers && hasPapers) {
+      if (useSections) grid.appendChild(_librarySectionHeader('Papers', _libraryPapersTotal));
+      for (const doc of _libraryPapers.slice(0, _papersVisibleLimit)) {
+        grid.appendChild(libraryCreateCard(doc));
+      }
+    } else if (showPapers && useSections && _libraryPapersTotal > 0 && !hasPapers) {
+      grid.appendChild(_librarySectionHeader('Papers', 0));
+      const empty = document.createElement('div');
+      empty.className = 'doclib-section-empty';
+      empty.textContent = 'No papers match — sync your Zotero catalog in Settings → Search.';
+      grid.appendChild(empty);
+    }
+
+    const docsNeedMore = showDocs && (_docsVisibleLimit < _libraryDocs.length || _libraryDocs.length < _libraryTotal);
+    const papersNeedMore = showPapers && (_papersVisibleLimit < _libraryPapers.length || _libraryPapers.length < _libraryPapersTotal);
+    if (docsNeedMore || papersNeedMore) {
       const btn = document.createElement('button');
       btn.className = 'doclib-load-more doclib-inline-load-more';
       btn.id = 'doclib-docs-load-more';
-      btn.textContent = `Load more (${shownCount} of ${_libraryTotal})`;
+      if (_libraryTypeFilter === 'paper') {
+        btn.textContent = `Load more (${Math.min(_papersVisibleLimit, _libraryPapers.length)} of ${_libraryPapersTotal})`;
+      } else if (_libraryTypeFilter === 'documents') {
+        btn.textContent = `Load more (${Math.min(_docsVisibleLimit, _libraryDocs.length)} of ${_libraryTotal})`;
+      } else {
+        btn.textContent = 'Load more';
+      }
       btn.addEventListener('click', async () => {
-        _docsVisibleLimit += 20;
-        // Need more than we've fetched? pull the next server page first.
-        if (_docsVisibleLimit > _libraryDocs.length && _libraryDocs.length < _libraryTotal) {
-          _libraryOffset = _libraryDocs.length;
-          await libraryFetch(true);  // appends + re-renders
-        } else {
-          libraryRenderGrid();
+        if (_libraryTypeFilter === 'paper') {
+          _papersVisibleLimit += 20;
+          if (_papersVisibleLimit > _libraryPapers.length && _libraryPapers.length < _libraryPapersTotal) {
+            await libraryFetch(true);
+          } else {
+            libraryRenderGrid();
+          }
+          return;
         }
+        if (_libraryTypeFilter === 'documents' || docsNeedMore) {
+          _docsVisibleLimit += 20;
+          if (_docsVisibleLimit > _libraryDocs.length && _libraryDocs.length < _libraryTotal) {
+            await libraryFetch(true);
+          } else if (papersNeedMore && !_libraryTypeFilter) {
+            _papersVisibleLimit += 20;
+            libraryRenderGrid();
+          } else {
+            libraryRenderGrid();
+          }
+          return;
+        }
+        _papersVisibleLimit += 20;
+        libraryRenderGrid();
       });
       grid.parentElement.appendChild(btn);
     }
@@ -719,6 +876,13 @@ async function _libraryOpenPaperInLinks(doc) {
       linksItem.innerHTML = _di(_openIco) + '<span>View in Links</span>';
       linksItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); void _libraryOpenPaperInLinks(doc); });
       dropdown.appendChild(linksItem);
+
+      const seedItem = document.createElement('button');
+      seedItem.className = 'dropdown-item-compact';
+      seedItem.style.cssText = 'background:none;border:none;width:100%;';
+      seedItem.innerHTML = _di(_openIco) + '<span>Use as research seed</span>';
+      seedItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); void _libraryUsePaperAsSeed(doc); });
+      dropdown.appendChild(seedItem);
     } else {
     // Clone
     const _cloneIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -1677,9 +1841,12 @@ async function _libraryOpenPaperInLinks(doc) {
     _librarySelectedIds.clear();
     _librarySearch = '';
     _libraryActiveLanguage = null;
+    _libraryTypeFilter = '';
     _librarySort = 'recent';
     _libraryOffset = 0;
+    _libraryPapersOffset = 0;
     _libraryDocs = [];
+    _libraryPapers = [];
 
     // Create modal
     const modal = document.createElement('div');
@@ -1786,7 +1953,12 @@ async function _libraryOpenPaperInLinks(doc) {
               <button class="memory-toolbar-btn" id="doclib-import-file-btn" title="Import files from disk" style="margin-left:auto;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:2px;"><polyline points="7 10 12 5 17 10"/><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="21" x2="19" y2="21"/></svg> Import</button>
               <button class="memory-toolbar-btn" id="doclib-create-btn" title="Create new blank document"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> Create</button>
             </div>
-            <p class="memory-desc doclib-desc">Open documents in a session, clone to a new or import new files.</p>
+            <p class="memory-desc doclib-desc">Open documents in a session, clone to a new or import new files. Zotero papers appear in their own section below.</p>
+            <div class="doclib-type-filters kg-filters" id="doclib-type-filters">
+              <button type="button" class="kg-type-filter active" data-doclib-type="">All</button>
+              <button type="button" class="kg-type-filter" data-doclib-type="documents">Documents</button>
+              <button type="button" class="kg-type-filter" data-doclib-type="paper">Papers</button>
+            </div>
             <div class="memory-toolbar">
               <div class="memory-category-filters">
                 <select class="memory-sort-select" id="doclib-sort">
@@ -2730,6 +2902,137 @@ async function _libraryOpenPaperInLinks(doc) {
     let _researchArchivedView = false;
     const _researchSelected = new Set();
 
+    function _researchModeLabel(mode) {
+      const map = {
+        literature_review: 'Literature review',
+        compare: 'Compare',
+        gap_analysis: 'Gap analysis',
+        similar_papers: 'Similar papers',
+      };
+      return map[mode] || (mode || '').replace(/_/g, ' ') || 'Research';
+    }
+
+    function _researchBreakdownText(br) {
+      if (!br || !br.total) return '';
+      const bits = [];
+      if (br.web) bits.push(`${br.web} web`);
+      if (br.zotero) bits.push(`${br.zotero} library`);
+      if (br.graph) bits.push(`${br.graph} links`);
+      return bits.join(' · ');
+    }
+
+    function _researchTierLabel(tier) {
+      const map = {
+        adequate: 'Full text',
+        abstract_only: 'Abstract only',
+        metadata_only: 'Metadata only',
+        retrieval_failed: 'Retrieval failed',
+        unsourced: 'Limited text',
+      };
+      const key = (tier || '').toLowerCase();
+      return map[key] || key.replace(/_/g, ' ') || 'Unknown';
+    }
+
+    function _researchTierClass(tier) {
+      const key = (tier || '').toLowerCase();
+      if (key === 'adequate') return 'adequate';
+      if (key === 'abstract_only') return 'abstract';
+      return 'thin';
+    }
+
+    function _researchZoteroKey(src) {
+      const sid = (src.source_id || '').trim();
+      if (sid.startsWith('src:zotero:') || sid.startsWith('src:paper:')) {
+        return sid.split(':').pop().toUpperCase();
+      }
+      const doi = (src.doi_or_id || '').trim();
+      return /^[A-Z0-9]{8}$/i.test(doi) ? doi.toUpperCase() : '';
+    }
+
+    function _linkifyResearchCitationsHtml(html, anchorPrefix = 'research-source') {
+      if (!html) return html;
+      return html.replace(/\[(\d+)\](?!\()/g, (m, num) =>
+        `<a href="#${anchorPrefix}-${num}" class="doclib-research-cite" data-cite="${num}">[${num}]</a>`);
+    }
+
+    function _researchSourceSaveable(src) {
+      const sid = (src.source_id || '').trim();
+      if (sid.startsWith('src:zotero:') || sid.startsWith('src:paper:')) return false;
+      return !!((src.title || '').trim() || (src.url || '').trim() || (src.doi_or_id || '').trim());
+    }
+
+    function _researchCitedNumsFromText(text) {
+      const nums = new Set();
+      String(text || '').replace(/\[(\d+)\](?!\()/g, (_m, num) => {
+        const n = parseInt(num, 10);
+        if (n > 0) nums.add(n);
+        return _m;
+      });
+      return nums;
+    }
+
+    function _buildResearchRegistrySourcesHtml(registry, anchorPrefix = 'research-source', opts = {}) {
+      const showSaveCheckboxes = !!opts.showSaveCheckboxes;
+      const citedNums = opts.citedNums || null;
+      const rows = (registry && registry.sources) || [];
+      if (!rows.length) return '';
+      const cards = rows.slice(0, 24).map((src) => {
+        const num = src.citation_num;
+        const title = _esc(src.title || src.url || 'Untitled');
+        const tier = _researchTierLabel(src.sourcing_tier);
+        const tierCls = _researchTierClass(src.sourcing_tier);
+        const zkey = _researchZoteroKey(src);
+        const meta = [src.authors, src.year].filter(Boolean).map((v) => _esc(String(v))).join(' · ');
+        const excerpt = (src.content_excerpt || src.sourcing_note || '').trim();
+        const saveable = _researchSourceSaveable(src);
+        const saveChecked = saveable && (!citedNums || citedNums.has(num));
+        const saveCell = showSaveCheckboxes
+          ? (saveable
+            ? `<label class="doclib-research-save-check" title="Save to Zotero"><input type="checkbox" class="doclib-research-save-cb" data-cite="${num}"${saveChecked ? ' checked' : ''}></label>`
+            : `<span class="doclib-research-save-skip" title="Already in library">✓</span>`)
+          : '';
+        return `<article class="doclib-research-source-card${saveable && showSaveCheckboxes ? ' doclib-research-source-saveable' : ''}" id="${anchorPrefix}-${num}" data-cite="${num}">` +
+          `<div class="doclib-research-source-head">` +
+            saveCell +
+            `<span class="doclib-research-source-num">[${num}]</span>` +
+            `<div class="doclib-research-source-title">${title}</div>` +
+            `<span class="doclib-research-tier doclib-research-tier-${tierCls}">${_esc(tier)}</span>` +
+          `</div>` +
+          (meta ? `<div class="doclib-research-source-meta">${meta}</div>` : '') +
+          (zkey ? `<div class="doclib-research-source-meta">Zotero · <code>${_esc(zkey)}</code></div>` : '') +
+          (src.url && /^https?:/i.test(src.url)
+            ? `<div class="doclib-research-source-meta"><a href="${_esc(src.url)}" target="_blank" rel="noopener">${_esc(src.url.slice(0, 72))}${src.url.length > 72 ? '…' : ''}</a></div>`
+            : '') +
+          (excerpt
+            ? `<details class="doclib-research-source-excerpt"><summary>Excerpt</summary><p>${_esc(excerpt)}</p></details>`
+            : '') +
+        `</article>`;
+      }).join('');
+      return `<div class="doclib-research-source-panel">` +
+        `<div class="doclib-research-section-label">Reference sources (${rows.length})</div>` +
+        `<div class="doclib-research-source-list">${cards}</div>` +
+        (rows.length > 24 ? `<div style="opacity:0.5;font-size:10px;margin-top:6px;">…and ${rows.length - 24} more in full report</div>` : '') +
+      `</div>`;
+    }
+
+    function _wireResearchCitationJumps(root, anchorPrefix = 'research-source') {
+      if (!root) return;
+      root.querySelectorAll('.doclib-research-cite').forEach((link) => {
+        link.addEventListener('click', (e) => {
+          const cite = link.getAttribute('data-cite');
+          if (!cite) return;
+          const target = root.querySelector(`#${anchorPrefix}-${cite}`);
+          if (!target) return;
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          target.classList.add('doclib-research-source-highlight');
+          setTimeout(() => target.classList.remove('doclib-research-source-highlight'), 1400);
+          const excerpt = target.querySelector('.doclib-research-source-excerpt');
+          if (excerpt && !excerpt.open) excerpt.open = true;
+        });
+      });
+    }
+
     async function _renderLibResearch() {
       const grid = document.getElementById('doclib-research-grid');
       const stats = document.getElementById('doclib-research-stats');
@@ -2788,6 +3091,48 @@ async function _libraryOpenPaperInLinks(doc) {
         if (res.ok) detail = await res.json();
       } catch {}
       const sources = Array.isArray(detail.sources) ? detail.sources : [];
+      const seeds = Array.isArray(detail.seed_paper_details) ? detail.seed_paper_details : [];
+      const breakdown = detail.source_breakdown || {};
+      const modeLabel = _researchModeLabel(detail.research_mode);
+      const breakdownText = _researchBreakdownText(breakdown);
+      const registry = detail.evidence_registry || null;
+      const registrySources = (registry && registry.sources) || [];
+      const tierCounts = { adequate: 0, abstract_only: 0, thin: 0 };
+      registrySources.forEach((src) => {
+        const tier = (src.sourcing_tier || '').toLowerCase();
+        if (tier === 'adequate') tierCounts.adequate += 1;
+        else if (tier === 'abstract_only') tierCounts.abstract_only += 1;
+        else if (tier) tierCounts.thin += 1;
+      });
+      const tierLine = [
+        tierCounts.adequate ? `${tierCounts.adequate} full text` : '',
+        tierCounts.abstract_only ? `${tierCounts.abstract_only} abstract only` : '',
+        tierCounts.thin ? `${tierCounts.thin} limited` : '',
+      ].filter(Boolean).join(' · ');
+      const metaLine = [
+        modeLabel,
+        breakdownText,
+        tierLine,
+        seeds.length ? `${seeds.length} seed${seeds.length !== 1 ? 's' : ''}` : '',
+      ].filter(Boolean).join(' · ');
+      const metaHtml = metaLine
+        ? `<div class="doclib-research-meta-line">${_esc(metaLine)}</div>`
+        : '';
+      const seedsHtml = seeds.length
+        ? `<div class="doclib-research-seeds"><div class="doclib-research-section-label">Seed papers (${seeds.length})</div><ul>${seeds.slice(0, 8).map((s) => {
+          const title = _esc(s.title || s.zotero_key || 'Paper');
+          const key = s.zotero_key ? ` · ${s.zotero_key}` : '';
+          return `<li>${title}${key ? `<span class="doclib-research-seed-key">${_esc(key)}</span>` : ''}</li>`;
+        }).join('')}${seeds.length > 8 ? `<li style="opacity:0.5;">…and ${seeds.length - 8} more</li>` : ''}</ul></div>`
+        : '';
+      const summary = (detail.summary || detail.report_summary || detail.result || detail.raw_report || '').toString().trim();
+      const citedNums = _researchCitedNumsFromText(summary);
+      const registrySourcesHtml = registrySources.length
+        ? _buildResearchRegistrySourcesHtml(registry, 'research-source', {
+          showSaveCheckboxes: true,
+          citedNums,
+        })
+        : '';
       const sourcesList = sources.slice(0, 12).map((src, i) => {
         const title = _esc(src.title || src.url || `Source ${i + 1}`);
         const url = src.url || '';
@@ -2795,21 +3140,37 @@ async function _libraryOpenPaperInLinks(doc) {
           ? `<li><a href="${_esc(url)}" target="_blank" rel="noopener">${title}</a></li>`
           : `<li>${title}</li>`;
       }).join('');
-      const sourcesHtml = sources.length
+      const legacySourcesHtml = sources.length && !registrySources.length
         ? `<div class="doclib-research-sources"><div class="doclib-research-section-label">Sources (${sources.length})</div><ol>${sourcesList}${sources.length > 12 ? `<li style="opacity:0.5;">…and ${sources.length - 12} more</li>` : ''}</ol></div>`
         : '';
-      // The stored research JSON keeps the report under `result` (clean) /
-      // `raw_report` — there's no `summary` field, so the preview was empty.
-      const summary = (detail.summary || detail.report_summary || detail.result || detail.raw_report || '').toString().trim();
-      const summaryHtml = summary
-        ? `<div class="doclib-research-summary"><div class="doclib-research-section-label">Report</div><div>${markdownModule.mdToHtml ? markdownModule.mdToHtml(summary) : _esc(summary)}</div></div>`
+      const exportHtml = `<div class="doclib-research-export-row">
+        <span class="doclib-research-section-label">Export</span>
+        <button type="button" class="memory-toolbar-btn doclib-research-export-btn" data-fmt="markdown">Markdown</button>
+        <button type="button" class="memory-toolbar-btn doclib-research-export-btn" data-fmt="bibtex">BibTeX</button>
+        <button type="button" class="memory-toolbar-btn doclib-research-export-btn" data-fmt="csl-json">CSL JSON</button>
+        <button type="button" class="memory-toolbar-btn doclib-research-save-zotero-btn">Save to Zotero</button>
+      </div>`;
+      let summaryBodyHtml = '';
+      if (summary) {
+        summaryBodyHtml = markdownModule.mdToHtml ? markdownModule.mdToHtml(summary) : _esc(summary);
+        if (registrySources.length) {
+          summaryBodyHtml = _linkifyResearchCitationsHtml(summaryBodyHtml);
+        }
+      }
+      const summaryHtml = summaryBodyHtml
+        ? `<div class="doclib-research-summary"><div class="doclib-research-section-label">Report</div><div class="doclib-research-summary-body">${summaryBodyHtml}</div></div>`
         : '';
       preview.innerHTML =
         '<div class="doclib-chat-preview-messages">' +
-          (summaryHtml || sourcesHtml || '<div style="opacity:0.4;font-size:11px;padding:6px 4px;">No preview available</div>') +
-          (summaryHtml && sourcesHtml ? sourcesHtml : '') +
+          metaHtml +
+          seedsHtml +
+          (summaryHtml || registrySourcesHtml || legacySourcesHtml || '<div style="opacity:0.4;font-size:11px;padding:6px 4px;">No preview available</div>') +
+          (summaryHtml && registrySourcesHtml ? registrySourcesHtml : '') +
+          (summaryHtml && !registrySourcesHtml && legacySourcesHtml ? legacySourcesHtml : '') +
+          exportHtml +
         '</div>' +
         '<div class="doclib-chat-preview-actions">' +
+          '<button type="button" class="doclib-research-links-btn memory-toolbar-btn">View in Links</button>' +
           '<button class="doclib-chat-delete-btn">' +
             '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>' +
             'Delete' +
@@ -2831,6 +3192,61 @@ async function _libraryOpenPaperInLinks(doc) {
           '</button>' +
         '</div>';
       const discussBtn = preview.querySelector('.doclib-chat-discuss-btn');
+      preview.querySelectorAll('.doclib-research-export-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const fmt = btn.getAttribute('data-fmt') || 'markdown';
+          const sid = detail.session_id || detail.id || item.id;
+          window.open(`${API_BASE}/api/research/${encodeURIComponent(sid)}/export?format=${encodeURIComponent(fmt)}`, '_blank', 'noopener,noreferrer');
+        });
+      });
+      preview.querySelector('.doclib-research-save-zotero-btn')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const btn = e.currentTarget;
+        const sid = detail.session_id || detail.id || item.id;
+        const nums = Array.from(preview.querySelectorAll('.doclib-research-save-cb:checked'))
+          .map((el) => parseInt(el.getAttribute('data-cite'), 10))
+          .filter((n) => n > 0);
+        if (!nums.length) {
+          if (uiModule) uiModule.showError('Select at least one source to save');
+          return;
+        }
+        const orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+        try {
+          const res = await fetch(`${API_BASE}/api/research/${encodeURIComponent(sid)}/save-to-zotero`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ citation_nums: nums, scope: 'cited' }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.detail || 'Save failed');
+          btn.textContent = `Saved ${data.created || 0}`;
+          setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+        } catch (err) {
+          if (uiModule) uiModule.showError(err.message || 'Save to Zotero failed');
+          btn.textContent = orig;
+          btn.disabled = false;
+        }
+      });
+      _wireResearchCitationJumps(preview);
+      preview.querySelector('.doclib-research-links-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void (async () => {
+          try {
+            const mod = await import('./knowledge.js');
+            const openModal = mod.openKnowledgeModal || mod.default?.openKnowledgeModal;
+            if (openModal) openModal();
+            const open = mod.openKnowledgeNode || mod.default?.openKnowledgeNode;
+            const sid = detail.session_id || detail.id || item.id;
+            if (open) await open(`research:${sid}`, { navigate: true });
+          } catch {
+            if (uiModule) uiModule.showError('Failed to open in Links');
+          }
+        })();
+      });
       if (discussBtn) discussBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const _orig = discussBtn.innerHTML;
@@ -2946,9 +3362,15 @@ async function _libraryOpenPaperInLinks(doc) {
         const duration = r.duration || '';
         const rounds = r.rounds || '';
         const selected = _researchSelected.has(r.id);
+        const modeBadge = r.research_mode
+          ? `<span class="doclib-research-mode-badge">${_esc(_researchModeLabel(r.research_mode))}</span>`
+          : '';
         const metaBits = [];
         if (date) metaBits.push(`${date} ${time}`);
         if (sources) metaBits.push(`${sources} sources`);
+        if (r.seed_count) metaBits.push(`${r.seed_count} seed${r.seed_count !== 1 ? 's' : ''}`);
+        const brText = _researchBreakdownText(r.source_breakdown);
+        if (brText) metaBits.push(brText);
         if (rounds) metaBits.push(`${rounds} rounds`);
         if (duration) metaBits.push(`${duration}`);
         const metaText = metaBits.join(' \u00B7 ');
@@ -2956,7 +3378,7 @@ async function _libraryOpenPaperInLinks(doc) {
         html += `<div class="doclib-chat-header" style="display:flex;align-items:center;width:100%;gap:6px;">`;
         if (_researchSelectMode) html += `<input type="checkbox" class="memory-select-cb _res-cb" data-rid="${r.id}"${selected ? ' checked' : ''}>`;
         html += `<div style="flex:1;min-width:0;">`;
-        html += `<div class="memory-item-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;opacity:0.4;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>${_esc(r.query || 'Untitled Research')}</div>`;
+        html += `<div class="memory-item-title" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;opacity:0.4;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg><span>${_esc(r.query || 'Untitled Research')}</span>${modeBadge}</div>`;
         html += `<div class="memory-item-meta" style="font-size:10px;opacity:0.4;margin-top:2px;">${metaText}</div>`;
         html += `</div>`;
         if (!_researchSelectMode) html += `<div class="memory-item-actions"><button class="memory-item-btn doclib-research-delete" data-rid="${r.id}" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button></div>`;
@@ -3228,8 +3650,16 @@ async function _libraryOpenPaperInLinks(doc) {
       libraryFetch(false);
     });
 
+    document.getElementById('doclib-type-filters')?.querySelectorAll('[data-doclib-type]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _libraryTypeFilter = btn.dataset.doclibType || '';
+        _docsVisibleLimit = 20;
+        _papersVisibleLimit = 20;
+        libraryFetch(false);
+      });
+    });
+
     document.getElementById('doclib-load-more').addEventListener('click', () => {
-      _libraryOffset = _libraryDocs.length;
       libraryFetch(true);
     });
 

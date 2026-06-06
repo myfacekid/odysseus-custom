@@ -86,6 +86,10 @@ DEFAULT_SETTINGS = {
     "research_max_tokens": 16384,
     "research_extraction_timeout_seconds": 90,
     "research_extraction_concurrency": 3,
+    # Max chars extracted per paper/page during research (PDF, web, catalog).
+    "research_max_content_chars": 15000,
+    # How many non-seed findings are passed into each synthesis round.
+    "research_synthesis_window": 10,
     # Hard wall-clock cap on a single deep-research run. The previous 600s
     # (10 min) default cut off slow local / edge LLMs mid-synthesis; 1800s
     # (30 min) is comfortable for most local setups while still bounding

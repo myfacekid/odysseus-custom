@@ -61,3 +61,39 @@ def is_low_quality(summary: str) -> bool:
         return any(marker in low for marker in LOW_QUALITY_MARKERS)
     except Exception:
         return False  # fail open
+
+
+# ---------------------------------------------------------------------------
+# Runtime limits (read from settings.json)
+# ---------------------------------------------------------------------------
+
+def _bounded_int(value, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, n))
+
+
+def get_research_max_content_chars() -> int:
+    """Max extracted chars per source (PDF/web/catalog) during research."""
+    from src.settings import get_setting
+
+    return _bounded_int(
+        get_setting("research_max_content_chars", 15000),
+        default=15000,
+        minimum=2000,
+        maximum=100_000,
+    )
+
+
+def get_research_synthesis_window() -> int:
+    """Non-seed findings included in each synthesis round."""
+    from src.settings import get_setting
+
+    return _bounded_int(
+        get_setting("research_synthesis_window", 10),
+        default=10,
+        minimum=1,
+        maximum=50,
+    )

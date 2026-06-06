@@ -325,8 +325,10 @@ async function _fetchResult(job) {
     if (!res.ok) return;
     const d = await res.json();
     job.result = d.result;
+    job.rawReport = d.raw_report || d.result;
     job.sources = d.sources;
     job.findings = d.raw_findings;
+    if (d.evidence_registry) job.evidence_registry = d.evidence_registry;
     if (d.category && !job.category) job.category = d.category;
     _notify();
   } catch {}

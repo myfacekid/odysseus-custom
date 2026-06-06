@@ -285,6 +285,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         offset: int = Query(0, ge=0),
         limit: int = Query(20, ge=1, le=50),
         archived: bool = Query(False),
+        section: Optional[str] = Query(None),
     ) -> Dict[str, Any]:
         user = get_current_user(request)
         db = SessionLocal()
@@ -304,14 +305,21 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             lang_rows = lang_q.group_by(Document.language).all()
             languages = _aggregate_language_facets(lang_rows)
 
+            section_key = (section or "all").strip().lower()
+            if section_key not in ("all", "documents", "papers", "paper"):
+                raise HTTPException(400, "section must be all, documents, or papers")
+            if section_key == "paper":
+                section_key = "papers"
+
             paper_items: List[Dict[str, Any]] = []
-            include_papers = (not archived) and user and (not language or language == "paper")
-            if include_papers:
+            papers_total = 0
+            include_paper_catalog = (not archived) and user
+            if include_paper_catalog:
                 from src.zotero_catalog import library_items_from_catalog
 
-                all_papers = library_items_from_catalog(user, search="")
-                languages["paper"] = languages.get("paper", 0) + len(all_papers)
-                paper_items = library_items_from_catalog(user, search=search or "") if search else all_papers
+                paper_items = library_items_from_catalog(user, search=search or "")
+                papers_total = len(paper_items)
+            include_papers_in_response = include_paper_catalog and section_key != "documents"
 
             # Session count (owner-filtered)
             sc_q = (
@@ -323,13 +331,10 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             session_count = sc_q.scalar()
 
             documents: List[Dict[str, Any]] = []
+            papers: List[Dict[str, Any]] = []
             total = 0
 
-            if language == "paper":
-                sorted_papers = _sort_library_items(paper_items, sort)
-                total = len(sorted_papers)
-                documents = sorted_papers[offset:offset + limit]
-            else:
+            if section_key != "papers":
                 # Base query
                 q = (
                     db.query(Document, DbSession.name)
@@ -354,33 +359,38 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 if language:
                     if language == "text":
                         q = q.filter((Document.language == None) | (Document.language == "text"))
-                    else:
+                    elif language != "paper":
                         q = q.filter(Document.language == language)
 
-                if include_papers and paper_items:
-                    rows = q.all()
-                    doc_items = [_library_item_from_document(doc, session_name) for doc, session_name in rows]
-                    merged = _sort_library_items(doc_items + paper_items, sort)
-                    total = len(merged)
-                    documents = merged[offset:offset + limit]
+                total = q.count()
+
+                if sort == "oldest":
+                    q = q.order_by(Document.created_at.asc())
+                elif sort == "edits":
+                    q = q.order_by(Document.version_count.desc())
+                elif sort == "alpha":
+                    q = q.order_by(Document.title.asc())
+                else:  # recent
+                    q = q.order_by(Document.updated_at.desc())
+
+                rows = q.offset(offset).limit(limit).all()
+                documents = [_library_item_from_document(doc, session_name) for doc, session_name in rows]
+
+            if include_papers_in_response and paper_items:
+                sorted_papers = _sort_library_items(paper_items, sort)
+                papers_total = len(sorted_papers)
+                if section_key == "papers":
+                    papers = sorted_papers[offset:offset + limit]
+                elif section_key == "all":
+                    papers = sorted_papers
                 else:
-                    total = q.count()
-
-                    if sort == "oldest":
-                        q = q.order_by(Document.created_at.asc())
-                    elif sort == "edits":
-                        q = q.order_by(Document.version_count.desc())
-                    elif sort == "alpha":
-                        q = q.order_by(Document.title.asc())
-                    else:  # recent
-                        q = q.order_by(Document.updated_at.desc())
-
-                    rows = q.offset(offset).limit(limit).all()
-                    documents = [_library_item_from_document(doc, session_name) for doc, session_name in rows]
+                    papers = []
 
             return {
                 "documents": documents,
+                "papers": papers,
                 "total": total,
+                "papers_total": papers_total,
                 "languages": languages,
                 "session_count": session_count,
             }

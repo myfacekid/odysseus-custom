@@ -1,0 +1,44 @@
+{
+  "session_id": "fixture-literature-gap",
+  "owner": "fixture-user",
+  "query": "What gaps remain in cryo-EM sample preparation for membrane proteins?",
+  "research_mode": "gap_analysis",
+  "status": "done",
+  "seed_papers": ["CRYO001"],
+  "seed_paper_details": [
+    {
+      "zotero_key": "CRYO001",
+      "title": "Single-particle cryo-EM of membrane proteins",
+      "doi": "10.1016/j.cell.2020.01.001",
+      "has_pdf": false,
+      "collection_paths": ["Methods/Cryo-EM"]
+    }
+  ],
+  "evidence_registry": {
+    "sources": [
+      {
+        "source_id": "src:zotero:CRYO001",
+        "citation_num": 1,
+        "title": "Single-particle cryo-EM of membrane proteins",
+        "doi_or_id": "10.1016/j.cell.2020.01.001",
+        "source_type": "zotero",
+        "is_seed": true,
+        "sourcing_tier": "abstract_only",
+        "sourcing_note": "Abstract or short snippet only — treat specific numeric results as unverified unless quoted verbatim below."
+      },
+      {
+        "source_id": "src:web:https://example.com/nanodisc-protocol",
+        "citation_num": 2,
+        "title": "Nanodisc reconstitution protocols",
+        "url": "https://example.com/nanodisc-protocol",
+        "source_type": "web",
+        "sourcing_tier": "adequate"
+      }
+    ]
+  },
+  "raw_report": "## Gap Analysis\n\nSeed work [1] covers general cryo-EM workflows but leaves detergent stability gaps. Protocol notes [2] address nanodisc reconstitution.\n\n## References\n\n[1] Seed\n[2] Web",
+  "stats": {
+    "Duration": "95s",
+    "Rounds": "2"
+  }
+}

@@ -15,8 +15,10 @@ logger = logging.getLogger(__name__)
 SEARCH_KINDS = ("discovery", "similar_papers", "gap_filling")
 
 _DISCOVERY_MARKERS = ("systematic review", "meta-analysis", "meta analysis", "site:pubmed")
-_SIMILAR_MARKERS = ("cited by", "related work", "doi.org")
+_SIMILAR_MARKERS = ("cited by", "related work", "doi.org", "site:pubmed", "site:scholar", "scholar.google")
 _GAP_MARKERS = ("peer-reviewed", "randomized", "cohort study")
+_PUBMED_SITE = "site:pubmed.ncbi.nlm.nih.gov"
+_SCHOLAR_SITE = "site:scholar.google.com"
 
 
 @dataclass
@@ -78,11 +80,13 @@ def enhance_query_for_kind(query: str, search_kind: str) -> str:
         return q
 
     if search_kind == "similar_papers":
-        if "cited by" not in lower and not lower.startswith('"'):
-            return f'"{q}" cited by'
-        if "related work" not in lower:
-            return f"{q} related work"
-        return q
+        if _PUBMED_SITE in lower or _SCHOLAR_SITE in lower or "scholar.google" in lower:
+            return q
+        if re.search(r"\b10\.\S+", lower) or "doi.org" in lower:
+            return f"{q} {_PUBMED_SITE}"
+        if lower.startswith('"') or "intitle:" in lower:
+            return f"{q} {_SCHOLAR_SITE}"
+        return f'{_SCHOLAR_SITE} intitle:"{q}"'
 
     if search_kind == "gap_filling":
         if not any(m in lower for m in _GAP_MARKERS):
@@ -144,22 +148,178 @@ def apply_academic_query_templates(
     return out
 
 
+def normalize_paper_doi(finding: dict) -> str:
+    """Return a bare DOI from a finding, if present."""
+    from src.research_finding_enrich import extract_doi
+
+    for raw in (
+        finding.get("doi_or_id") or "",
+        finding.get("doi") or "",
+        finding.get("url") or "",
+    ):
+        text = (raw or "").strip()
+        if text.lower().startswith("10.") and "/" in text:
+            return text.split()[0].rstrip("/")
+        doi = extract_doi(text)
+        if doi:
+            return doi
+    return ""
+
+
+def is_scholar_author_profile_url(url: str) -> bool:
+    """True for Google Scholar author/citation profile pages, not paper hits."""
+    lower = (url or "").lower()
+    if "scholar.google" not in lower:
+        return False
+    if "/citations" in lower:
+        return True
+    if "view_op=list_works" in lower or "view_op=search_authors" in lower:
+        return True
+    if "user=" in lower and "citation" in lower:
+        return True
+    return False
+
+
+def is_paper_landing_url(url: str) -> bool:
+    """True when URL likely points at a paper record, not a person/profile."""
+    if is_scholar_author_profile_url(url):
+        return False
+    lower = (url or "").lower()
+    if not lower.startswith("http"):
+        return False
+    markers = (
+        "doi.org",
+        "pubmed.ncbi.nlm.nih.gov",
+        "/pubmed/",
+        "ncbi.nlm.nih.gov/pmc/",
+        "springer.com",
+        "sciencedirect.com",
+        "wiley.com",
+        "nature.com",
+        "science.org",
+        "cell.com",
+        "plos.org",
+        "ieee.org",
+        "acm.org",
+        "arxiv.org",
+        "biorxiv.org",
+    )
+    if any(m in lower for m in markers):
+        return True
+    if "scholar.google" in lower and "/scholar?" in lower:
+        return True
+    return lower.endswith(".pdf")
+
+
+def paper_lookup_queries_for_finding(finding: dict) -> List[str]:
+    """Build paper-identified PubMed/Scholar queries — never author-only."""
+    title = (finding.get("title") or "").strip()
+    doi = normalize_paper_doi(finding)
+    year = (finding.get("year") or "").strip()
+    queries: List[str] = []
+
+    if doi.startswith("10."):
+        queries.append(f"{_PUBMED_SITE} {doi}")
+        queries.append(f"https://doi.org/{doi}")
+    if title and len(title) >= 10:
+        short = title if len(title) <= 120 else title[:120]
+        queries.append(f'{_PUBMED_SITE} "{short}"')
+        queries.append(f'{_SCHOLAR_SITE} intitle:"{short}"')
+        if year.isdigit():
+            queries.append(f'{_SCHOLAR_SITE} intitle:"{short}" {year}')
+    return queries
+
+
 def similar_paper_queries_from_findings(findings: List[dict], limit: int = 2) -> List[str]:
-    """Build similarity queries from gathered DOIs/titles (Phase 1a prep for Phase 2)."""
+    """Build PubMed / Google Scholar paper lookup queries from gathered papers."""
     queries: List[str] = []
     for f in findings or []:
-        doi = (f.get("doi_or_id") or "").strip()
-        if doi.startswith("10."):
-            queries.append(f"https://doi.org/{doi} cited by")
-        title = (f.get("title") or "").strip()
-        if title and len(queries) < limit:
-            queries.append(f'"{title}" related work')
-        if len(queries) >= limit:
+        for q in paper_lookup_queries_for_finding(f):
+            queries.append(q)
+            if len(queries) >= limit * 2:
+                break
+        if len(queries) >= limit * 2:
             break
     return apply_academic_query_templates(
         queries,
         search_kind="similar_papers",
     )
+
+
+def similar_paper_queries_from_seeds(
+    seed_findings: List[dict],
+    question: str = "",
+    *,
+    limit: int = 8,
+) -> List[str]:
+    """Paper-focused PubMed + Google Scholar queries from seed metadata."""
+    seen: set[str] = set()
+    raw_queries: List[str] = []
+
+    def _add(raw: str) -> None:
+        text = (raw or "").strip()
+        if len(text) < 8:
+            return
+        key = text.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        raw_queries.append(text)
+
+    seeds = [
+        f for f in seed_findings or []
+        if f.get("is_seed") or f.get("paper_key") or f.get("title")
+    ]
+    for seed in seeds:
+        for q in paper_lookup_queries_for_finding(seed):
+            _add(q)
+
+    if question:
+        q_short = question.strip()[:120]
+        _add(f"{_PUBMED_SITE} {q_short}")
+
+    return apply_academic_query_templates(raw_queries, search_kind="similar_papers")[: max(limit, 1)]
+
+
+def rank_similar_paper_search_results(query: str, results: List[dict]) -> List[dict]:
+    """Rank search hits for similar-paper discovery — prefer PubMed and paper pages."""
+    from src.research_relevance import score_search_result
+
+    def _score(row: dict) -> float:
+        url = (row.get("url") or "").lower()
+        if is_scholar_author_profile_url(url):
+            return -1.0
+        base = score_search_result(row, query)
+        bonus = 0.0
+        if "pubmed.ncbi.nlm.nih.gov" in url or "/pubmed/" in url:
+            bonus += 0.35
+        elif "doi.org" in url:
+            bonus += 0.28
+        elif "scholar.google" in url and is_paper_landing_url(url):
+            bonus += 0.2
+        elif "ncbi.nlm.nih.gov" in url:
+            bonus += 0.15
+        if "semanticscholar.org" in url or "openalex.org" in url:
+            bonus -= 0.2
+        return base + bonus
+
+    return sorted(results or [], key=_score, reverse=True)
+
+
+def similar_source_from_url(url: str) -> str:
+    """Label similar-paper provenance from a resolved URL."""
+    lower = (url or "").lower()
+    if "pubmed.ncbi.nlm.nih.gov" in lower or "/pubmed/" in lower:
+        return "pubmed"
+    if "scholar.google" in lower:
+        return "google_scholar"
+    if "doi.org" in lower:
+        return "doi"
+    if "semanticscholar.org" in lower:
+        return "semantic_scholar"
+    if "openalex.org" in lower:
+        return "openalex"
+    return "web"
 
 
 def research_web_search(

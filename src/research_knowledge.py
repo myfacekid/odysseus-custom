@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TYPES = ["paper", "document", "task", "collection"]
+_DEFAULT_TYPES = ["paper", "document"]
 
 
 @dataclass
@@ -210,6 +210,47 @@ def _collection_sibling_rows(
     return rows
 
 
+def _find_document_nodes_by_term(
+    owner: str,
+    term: str,
+    *,
+    limit: int = 3,
+    content_max_chars: int = 12000,
+) -> List[dict]:
+    """Find vault/library documents whose body mentions a distinctive anchor term."""
+    from src.knowledge_graph import load_nodes, read_knowledge_content
+
+    term_lc = (term or "").strip().lower()
+    if len(term_lc) < 3:
+        return []
+
+    nodes = load_nodes(owner) or {}
+    matches: List[dict] = []
+    for node in nodes.values():
+        ntype = (node.get("type") or "").lower()
+        if ntype not in ("document", "note"):
+            continue
+        title = (node.get("title") or "").lower()
+        snippet = (node.get("snippet") or "").lower()
+        if term_lc in title or term_lc in snippet:
+            matches.append(node)
+        else:
+            nid = (node.get("id") or "").strip()
+            if not nid:
+                continue
+            read = read_knowledge_content(
+                owner,
+                nid,
+                max_chars=content_max_chars,
+                include_pdf=False,
+            )
+            if read.get("exit_code") == 0 and term_lc in (read.get("body") or "").lower():
+                matches.append(node)
+        if len(matches) >= limit:
+            break
+    return matches
+
+
 def research_knowledge_findings(
     query: str,
     owner: str = "",
@@ -220,9 +261,17 @@ def research_knowledge_findings(
     expand_hops: int = 1,
     content_max_chars: int = 15000,
     types: Optional[List[str]] = None,
+    relevance_query: str = "",
+    min_node_score: float = 0.22,
 ) -> ResearchKnowledgeOutcome:
     """Gather internal evidence from the Links knowledge graph."""
     from src.knowledge_graph import get_node, node_id, search_knowledge
+    from src.research_relevance import (
+        min_node_score_for_graph_source,
+        score_node_relevance,
+        score_text_relevance,
+        seed_knowledge_queries,
+    )
 
     owner = (owner or "").strip()
     if not owner:
@@ -231,10 +280,46 @@ def research_knowledge_findings(
     limit = max(limit, 1)
     type_filter = types or _DEFAULT_TYPES
     seed_findings = seed_findings or []
+    relevance_query = (relevance_query or query or "").strip()
 
     candidates: List[Tuple[dict, str]] = []
     sources_used: Set[str] = set()
     seen_ids: Set[str] = set()
+
+    def _node_relevant(node: dict, source: str) -> bool:
+        if not relevance_query:
+            return True
+        threshold = min_node_score_for_graph_source(source, min_node_score)
+        if score_node_relevance(node, relevance_query) >= threshold:
+            return True
+        ntype = (node.get("type") or "").lower()
+        if ntype in ("document", "note"):
+            nid = (node.get("id") or "").strip()
+            if nid:
+                from src.knowledge_graph import read_knowledge_content
+                read = read_knowledge_content(
+                    owner,
+                    nid,
+                    max_chars=min(content_max_chars, 8000),
+                    include_pdf=False,
+                )
+                if read.get("exit_code") == 0:
+                    body = read.get("body") or ""
+                    if score_text_relevance(body, relevance_query) >= threshold:
+                        return True
+        return False
+
+    def _row_relevant(row: dict) -> bool:
+        if not relevance_query:
+            return True
+        preview = " ".join([
+            row.get("title") or "",
+            row.get("abstract") or "",
+            row.get("authors") or "",
+        ])
+        return score_text_relevance(preview, relevance_query) >= min_node_score_for_graph_source(
+            "collection", min_node_score,
+        )
 
     def _add_node(node: Optional[dict], source: str) -> None:
         if not node:
@@ -242,12 +327,14 @@ def research_knowledge_findings(
         nid = (node.get("id") or "").strip()
         if not nid or nid in seen_ids:
             return
+        if relevance_query and not _node_relevant(node, source):
+            return
         seen_ids.add(nid)
         candidates.append((node, source))
         sources_used.add(source)
 
     q = (query or "").strip()
-    if q or seed_graph:
+    if q:
         sk = search_knowledge(
             owner,
             q,
@@ -255,11 +342,29 @@ def research_knowledge_findings(
             limit=limit,
             expand_hops=expand_hops if q else 0,
         )
-        src_label = "graph_seed" if seed_graph and not q else "graph_search"
         for node in sk.get("hits") or []:
-            _add_node(node, src_label)
+            _add_node(node, "graph_search")
         for node in sk.get("neighbors") or []:
             _add_node(node, "graph_neighbor")
+
+    seed_rows = [
+        f for f in seed_findings
+        if f.get("is_seed") or f.get("paper_key") or f.get("zotero_key")
+    ]
+    if seed_rows:
+        for sq in seed_knowledge_queries(relevance_query or q, seed_rows, limit=limit):
+            sk = search_knowledge(
+                owner,
+                sq,
+                types=type_filter,
+                limit=max(2, limit),
+                expand_hops=0,
+            )
+            for node in sk.get("hits") or []:
+                _add_node(node, "graph_search")
+            for term in [sq] if len(sq) <= 32 else []:
+                for node in _find_document_nodes_by_term(owner, term, limit=2):
+                    _add_node(node, "graph_search")
 
     seed_paper_ids: List[str] = []
     exclude_paper_keys: Set[str] = set()
@@ -288,6 +393,8 @@ def research_knowledge_findings(
         for row in sibling_rows:
             zkey = (row.get("zotero_key") or "").strip()
             if not zkey:
+                continue
+            if relevance_query and not _row_relevant(row):
                 continue
             node = get_node(owner, node_id("paper", zkey))
             if node:

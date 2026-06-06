@@ -232,7 +232,13 @@ def _empty_result(url: str, error: str = "") -> dict:
 # ----------------------------------------------------------------------
 # Main content fetcher
 # ----------------------------------------------------------------------
-def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0) -> dict:
+def fetch_webpage_content(
+    url: str,
+    timeout: int = 5,
+    retry_attempt: int = 0,
+    *,
+    include_og_image: bool = True,
+) -> dict:
     """Fetch and extract meaningful content from a webpage with caching."""
     cache_key = generate_cache_key(url)
     cache_file = CONTENT_CACHE_DIR / f"{cache_key}.cache"
@@ -245,7 +251,10 @@ def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0) ->
             timestamp = datetime.fromisoformat(cached_data["timestamp"])
             if datetime.now() - timestamp < timedelta(hours=2):
                 logger.debug(f"Content cache hit for URL: {url}")
-                return cached_data["data"]
+                data = cached_data["data"]
+                if not include_og_image:
+                    data = {**data, "og_image": ""}
+                return data
             else:
                 cache_file.unlink(missing_ok=True)
                 content_cache_index.pop(cache_key, None)
@@ -313,7 +322,7 @@ def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0) ->
     title_tag = soup.find("title")
     title_text = title_tag.get_text(strip=True) if title_tag else ""
     meta_info = _extract_meta(soup)
-    og_image = _extract_og_image(soup)
+    og_image = _extract_og_image(soup) if include_og_image else ""
     js_rendered = _detect_js_frameworks(soup)
     js_message = "Page appears to be rendered by a JavaScript framework; content may be incomplete." if js_rendered else ""
 

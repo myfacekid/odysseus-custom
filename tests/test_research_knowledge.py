@@ -189,6 +189,158 @@ def test_research_knowledge_collection_siblings(tmp_path, monkeypatch):
     assert sib["graph_source"] == "collection"
 
 
+def test_research_knowledge_collection_siblings_require_topic_overlap(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    monkeypatch.setattr("src.zotero_catalog.ZOTERO_ROOT", tmp_path / "zotero")
+    owner = "tester"
+    _write_catalog(
+        tmp_path,
+        owner,
+        [
+            {
+                "zotero_key": "SEED1",
+                "title": "AlphaFold protein structure",
+                "abstract": "protein structure prediction",
+                "collection_keys": ["COL1"],
+                "collection_paths": ["Reading"],
+                "has_pdf": False,
+            },
+            {
+                "zotero_key": "SIB1",
+                "title": "Astronomy survey techniques",
+                "abstract": "telescope observing schedule",
+                "collection_keys": ["COL1"],
+                "collection_paths": ["Reading"],
+                "has_pdf": False,
+            },
+        ],
+        collections=[{"key": "COL1", "path": "Reading", "name": "Reading", "parent": ""}],
+    )
+
+    paper_seed = node_id("paper", "SEED1")
+    paper_sib = node_id("paper", "SIB1")
+    nodes = {
+        paper_seed: KnowledgeNode(
+            id=paper_seed,
+            type="paper",
+            title="AlphaFold protein structure",
+            snippet="protein structure prediction",
+            meta={"zotero_key": "SEED1", "collection_keys": ["COL1"], "collection_paths": ["Reading"]},
+        ).to_dict(),
+        paper_sib: KnowledgeNode(
+            id=paper_sib,
+            type="paper",
+            title="Astronomy survey techniques",
+            snippet="telescope observing schedule",
+            meta={"zotero_key": "SIB1", "collection_keys": ["COL1"], "collection_paths": ["Reading"]},
+        ).to_dict(),
+    }
+    save_graph(owner, nodes, [])
+
+    seed = [{
+        "paper_key": "SEED1",
+        "zotero_key": "SEED1",
+        "collection_keys": ["COL1"],
+        "collection_paths": ["Reading"],
+    }]
+
+    with patch(
+        "src.knowledge_graph.read_knowledge_content",
+        return_value={"exit_code": 0, "body": "Sibling abstract.", "meta": {"zotero_key": "SIB1"}},
+    ):
+        outcome = research_knowledge_findings(
+            "",
+            owner,
+            seed_findings=seed,
+            limit=5,
+            relevance_query="protein structure prediction alphafold",
+        )
+
+    keys = {f.get("paper_key") for f in outcome.findings}
+    assert "SIB1" not in keys
+    for finding in outcome.findings:
+        assert "astronomy" not in (finding.get("title") or "").lower()
+
+
+def test_research_knowledge_filters_unrelated_graph_hits(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    owner = "tester"
+    nodes = {
+        "document:astro": {
+            "id": "document:astro",
+            "type": "document",
+            "title": "Astronomy club notes",
+            "snippet": "telescope observing schedule",
+        },
+        "paper:PAPER1": {
+            "id": "paper:PAPER1",
+            "type": "paper",
+            "title": "AlphaFold protein structure prediction",
+            "snippet": "protein structure prediction benchmark",
+            "meta": {"zotero_key": "PAPER1"},
+        },
+    }
+    save_graph(owner, nodes, [])
+
+    with patch(
+        "src.knowledge_graph.read_knowledge_content",
+        return_value={"exit_code": 0, "body": "Body text.", "meta": {}},
+    ):
+        outcome = research_knowledge_findings(
+            "protein structure prediction alphafold",
+            owner,
+            limit=5,
+            relevance_query="protein structure prediction alphafold",
+        )
+
+    titles = {f["title"] for f in outcome.findings}
+    assert "AlphaFold protein structure prediction" in titles
+    assert "Astronomy club notes" not in titles
+
+
+def test_research_knowledge_finds_document_by_body_term(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    owner = "tester"
+    doc_id = node_id("document", "vault:notes.md")
+    nodes = {
+        doc_id: KnowledgeNode(
+            id=doc_id,
+            type="document",
+            title="Research notes",
+            snippet="General notes about methods",
+        ).to_dict(),
+    }
+    save_graph(owner, nodes, [])
+
+    seed = [{
+        "is_seed": True,
+        "paper_key": "SEED1",
+        "title": "Evolutionary-scale prediction with ESM3",
+        "summary": "ESM3 protein language model",
+    }]
+
+    def _read(owner_arg, nid, **kwargs):
+        if nid == doc_id:
+            return {
+                "exit_code": 0,
+                "body": "Detailed comparison of ESM3 vs AlphaFold on structure benchmarks.",
+                "meta": {},
+            }
+        return {"exit_code": 0, "body": "", "meta": {}}
+
+    with patch("src.knowledge_graph.read_knowledge_content", side_effect=_read):
+        outcome = research_knowledge_findings(
+            "Compare AlphaFold and ESM3",
+            owner,
+            seed_findings=seed,
+            limit=5,
+            relevance_query="compare alphafold esm3 protein structure prediction",
+        )
+
+    titles = {f["title"] for f in outcome.findings}
+    assert "Research notes" in titles
+
+
 def test_research_evidence_gatherer_delegates():
     gatherer = ResearchEvidenceGatherer()
     with patch("src.research_web_search.research_web_search") as mock_web:

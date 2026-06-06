@@ -1402,6 +1402,8 @@ async function initResearchSettings() {
   var tokensInput = el('set-researchMaxTokens');
   var extractTimeoutInput = el('set-researchExtractTimeout');
   var extractConcurrencyInput = el('set-researchExtractConcurrency');
+  var maxContentInput = el('set-researchMaxContent');
+  var synthesisWindowInput = el('set-researchSynthesisWindow');
   var runTimeoutInput = el('set-researchRunTimeout');
   var msg = el('set-researchMsg');
   var endpoints = [];
@@ -1425,6 +1427,8 @@ async function initResearchSettings() {
     if (settings.research_max_tokens) tokensInput.value = settings.research_max_tokens;
     if (settings.research_extraction_timeout_seconds) extractTimeoutInput.value = settings.research_extraction_timeout_seconds;
     if (settings.research_extraction_concurrency) extractConcurrencyInput.value = settings.research_extraction_concurrency;
+    if (settings.research_max_content_chars) maxContentInput.value = settings.research_max_content_chars;
+    if (settings.research_synthesis_window) synthesisWindowInput.value = settings.research_synthesis_window;
     if (settings.research_run_timeout_seconds !== undefined && settings.research_run_timeout_seconds !== null) {
       runTimeoutInput.value = settings.research_run_timeout_seconds;
     }
@@ -1445,6 +1449,12 @@ async function initResearchSettings() {
     }
     if (extractConcurrencyInput.value) {
       parts.push('Parallel: ' + extractConcurrencyInput.value);
+    }
+    if (maxContentInput.value) {
+      parts.push('Content: ' + maxContentInput.value + ' chars');
+    }
+    if (synthesisWindowInput.value) {
+      parts.push('Window: ' + synthesisWindowInput.value);
     }
     if (runTimeoutInput.value !== '') {
       var rtv = parseInt(runTimeoutInput.value, 10);
@@ -1473,6 +1483,10 @@ async function initResearchSettings() {
     if (et && et >= 15 && et <= 3600) payload.research_extraction_timeout_seconds = et;
     var ec = parseInt(extractConcurrencyInput.value, 10);
     if (ec && ec >= 1 && ec <= 12) payload.research_extraction_concurrency = ec;
+    var mc = parseInt(maxContentInput.value, 10);
+    if (mc && mc >= 2000 && mc <= 100000) payload.research_max_content_chars = mc;
+    var sw = parseInt(synthesisWindowInput.value, 10);
+    if (sw && sw >= 1 && sw <= 50) payload.research_synthesis_window = sw;
     if (runTimeoutInput.value !== '') {
       var rt = parseInt(runTimeoutInput.value, 10);
       // 0 = no limit (disables the hard timeout); otherwise 60s..86400s (24h)
@@ -1498,6 +1512,8 @@ async function initResearchSettings() {
   tokensInput.addEventListener('change', saveResearch);
   extractTimeoutInput.addEventListener('change', saveResearch);
   extractConcurrencyInput.addEventListener('change', saveResearch);
+  maxContentInput.addEventListener('change', saveResearch);
+  synthesisWindowInput.addEventListener('change', saveResearch);
   runTimeoutInput.addEventListener('change', saveResearch);
 
   _registerAiEndpointRefresh(function(nextEndpoints) {

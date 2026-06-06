@@ -20,11 +20,44 @@ from src.research_web_search import (
     annotate_search_results,
     apply_academic_query_templates,
     infer_search_kind,
+    is_scholar_author_profile_url,
+    rank_similar_paper_search_results,
     research_web_search,
     similar_paper_queries_from_findings,
+    similar_paper_queries_from_seeds,
+    similar_source_from_url,
 )
 from src.research_zotero import research_zotero_findings
 from src.research_knowledge import research_knowledge_findings
+from src.research_templates import (
+    ACADEMIC_REPORT_OVERRIDE,
+    RESEARCH_MODES,
+    build_final_report_prompt,
+    expansion_user_message,
+)
+from src.research_finding_enrich import enrich_web_finding, normalize_finding_fields
+from src.research_relevance import (
+    build_relevance_query,
+    filter_relevant_findings,
+    format_seed_context,
+    heuristic_relevance_decision,
+    is_extraction_irrelevant,
+    is_finding_relevant,
+    is_similar_paper_relevant,
+    parse_relevance_yes_no,
+    RELEVANCE_GATE_PROMPT,
+    RELEVANCE_GATE_WITH_SEEDS_PROMPT,
+    score_search_result,
+)
+from src.research_synthesis import (
+    build_evidence_table,
+    build_thematic_outline_prompt,
+    combine_final_context_blocks,
+    format_thematic_outline,
+    heuristic_thematic_outline,
+    should_cluster_thematically,
+    should_include_evidence_table,
+)
 
 from src.goal_based_extractor import EXTRACTOR_PROMPT
 
@@ -110,6 +143,8 @@ def _academic_result_score(result: Dict, include_preprints: bool) -> int:
     score = 0
     if "doi.org" in url or "pubmed" in url or "ncbi.nlm.nih.gov" in url:
         score += 12
+    if "scholar.google" in url:
+        score += 10
     if "systematic review" in title or "meta-analysis" in title or "meta analysis" in title:
         score += 10
     if "review" in title and "systematic" in title:
@@ -197,6 +232,8 @@ You are an academic research assistant planning scholarly web searches.
 
 Generate {num_queries} search queries to find scholarly sources (papers, reviews, guidelines).
 Prefer queries that surface: PubMed, Google Scholar, DOI pages, journal sites, university repositories.
+Use exact paper titles or DOIs when searching for seed papers or related work.
+Do NOT search author names alone — always pair identifiers with paper titles or DOIs.
 Use terms like "systematic review", "meta-analysis", "randomized controlled trial", or "peer-reviewed" when appropriate.
 Avoid blog, news, or SEO-oriented queries.
 {round_instruction}
@@ -219,11 +256,14 @@ You are updating an evolving **academic literature synthesis**.
 Integrate the new findings into the synthesis. Requirements:
 - Use ONLY the citation numbers from the source registry below — do not invent new numbers
 - Ground every factual claim in the cited sources — do not invent statistics or citations
+- **Never infer a paper's methods, results, or conclusions from its title alone**
+- For sources marked metadata-only or retrieval-failed: state only bibliographic facts (title, authors, year, DOI) and explicitly note that full text was unavailable — do not guess content
 - Use numbered inline citations like [1], [2] consistently (reuse numbers for the same source)
 - Note study design and evidence quality where relevant (RCT vs observational, review vs single study)
 - Flag conflicting results and preprints vs peer-reviewed sources
 - Resolve contradictions explicitly; do not gloss over disagreement
 - Maintain scholarly tone — precise, cautious, evidence-first
+- Track poorly sourced papers; **Limitations of This Report** must name any source that could not be fully retrieved
 
 Write only the updated synthesis — no preamble or meta-commentary.
 """
@@ -248,42 +288,6 @@ Reply with ONLY "YES" or "NO" followed by a brief one-sentence reason.
 Example: "YES — Major sub-questions are covered with multiple peer-reviewed sources and limitations noted."
 Example: "NO — We still lack primary evidence on the mechanism and long-term outcomes."
 """
-
-FINAL_REPORT_PROMPT = """\
-Write a rigorous **academic literature synthesis** answering this research question:
-
-**Question:** {question}
-
-**Collected evidence and draft synthesis:**
-{report}
-
-Requirements:
-- Write at MINIMUM {min_words} words — thorough but scientifically precise, not promotional
-- Structure with clear ## headings: Executive Summary, Background, Key Findings, Conflicting Evidence, \
-Limitations of the Evidence, Limitations of This Report, Conclusion, References
-- Use numbered inline citations [1], [2], etc. for every substantive claim
-- Include specific data (effect sizes, sample sizes, p-values) ONLY when present in the evidence — never invent numbers
-- Distinguish peer-reviewed sources from preprints where known
-- Note where evidence is strong, weak, or absent
-- End with a ## References section listing every cited source as:
-  [N] Author et al. (Year). Title. Venue/Journal. URL or DOI
-- Use cautious academic language — avoid overstating conclusions
-"""
-
-ACADEMIC_REPORT_OVERRIDE = """\
-IMPORTANT — this is exclusively an ACADEMIC research report:
-- Prioritize primary literature, systematic reviews, and meta-analyses over secondary summaries
-- Label preprints explicitly when used
-- Never cite a source not present in the collected evidence
-- The References section must match every [N] citation in the body
-"""
-
-RESEARCH_MODES = frozenset({
-    "literature_review",
-    "similar_papers",
-    "gap_analysis",
-    "compare",
-})
 
 MODE_PLAN_CONTEXT = {
     "literature_review": (
@@ -393,6 +397,21 @@ class DeepResearcher:
         """Request cooperative cancellation of the research loop."""
         self._cancelled = True
 
+    def _seed_findings(self) -> List[Dict]:
+        return [
+            f for f in (self.findings or [])
+            if f.get("is_seed") or f.get("paper_key") or f.get("zotero_key")
+        ]
+
+    def _relevance_query(self, question: str) -> str:
+        return build_relevance_query(question, seed_findings=self._seed_findings())
+
+    def _register_finding_if_new(self, item: dict, *, is_seed: bool = False) -> bool:
+        """Register a finding; return True only when a new registry source was created."""
+        before = len(self.evidence_registry)
+        self.evidence_registry.register(item, is_seed=is_seed)
+        return len(self.evidence_registry) > before
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -445,15 +464,20 @@ class DeepResearcher:
                     source="seed_papers",
                 )
                 if self.research_mode in ("literature_review", "similar_papers", "gap_analysis", "compare"):
-                    similar = await self._fetch_similar_paper_findings(user_seeds)
+                    similar = await self._fetch_similar_paper_findings(
+                        user_seeds,
+                        relevance_query=self._relevance_query(question),
+                    )
                     if similar:
+                        added_similar = []
                         for item in similar:
-                            self.evidence_registry.register(item)
-                        findings.extend(similar)
+                            if self._register_finding_if_new(item):
+                                added_similar.append(item)
+                        findings.extend(added_similar)
                         self.findings = findings
                         self._emit(
                             phase="reading",
-                            new_sources=len(similar),
+                            new_sources=len(added_similar),
                             total_sources=len(self.urls_fetched),
                             source="similar_papers",
                         )
@@ -486,7 +510,10 @@ class DeepResearcher:
                         )
                 except Exception:
                     pass
-            zotero_seed = await self._fetch_zotero_findings(question, limit=5, seed_library=True)
+            zotero_seed = await self._fetch_zotero_findings(
+                question, limit=5, seed_library=True,
+                relevance_query=self._relevance_query(question),
+            )
             if zotero_seed:
                 for item in zotero_seed:
                     item["is_seed"] = True
@@ -497,11 +524,14 @@ class DeepResearcher:
                            total_sources=len(self.urls_fetched), source="zotero")
 
         if self.include_knowledge and self.owner and not prior_report:
+            has_seeds = bool(self._seed_findings())
+            gate_q = self._relevance_query(question)
             graph_seed = await self._fetch_knowledge_findings(
                 question,
                 seed_findings=findings,
                 limit=5,
-                seed_graph=True,
+                seed_graph=has_seeds,
+                relevance_query=gate_q,
             )
             if graph_seed:
                 for item in graph_seed:
@@ -546,28 +576,35 @@ class DeepResearcher:
 
             # SEARCH + EXTRACT
             round_findings = await self._search_and_extract(
-                queries, question, search_kind=infer_search_kind(round_num),
+                queries, self._relevance_query(question), search_kind=infer_search_kind(round_num),
             )
             if self.include_zotero and round_num > 1:
                 for q in queries[:2]:
-                    zf = await self._fetch_zotero_findings(q, limit=2)
+                    zf = await self._fetch_zotero_findings(
+                        q, limit=2, relevance_query=self._relevance_query(question),
+                    )
                     if zf:
                         round_findings.extend(zf)
             if self.include_knowledge and round_num > 1:
                 for q in queries[:2]:
                     kf = await self._fetch_knowledge_findings(
-                        q, seed_findings=findings, limit=2,
+                        q,
+                        seed_findings=findings,
+                        limit=2,
+                        relevance_query=self._relevance_query(question),
                     )
                     if kf:
                         round_findings.extend(kf)
             if round_findings:
+                added_round = []
                 for item in round_findings:
-                    self.evidence_registry.register(item)
-                findings.extend(round_findings)
+                    if self._register_finding_if_new(item):
+                        added_round.append(item)
+                findings.extend(added_round)
                 consecutive_empty_rounds = 0
-                logger.info(f"Round {round_num}: extracted {len(round_findings)} findings")
+                logger.info(f"Round {round_num}: extracted {len(added_round)} findings")
                 self._emit(phase="reading", round=round_num,
-                           new_sources=len(round_findings),
+                           new_sources=len(added_round),
                            total_sources=len(self.urls_fetched),
                            total_findings=len(findings))
             else:
@@ -616,6 +653,7 @@ class DeepResearcher:
             return "No information could be gathered for this question."
 
         self.evolving_report = report  # preserve pre-synthesis report
+        self.findings = findings
         final = await self._final_report(question, report)
         final, repair_warnings = self.evidence_registry.validate_and_repair_report(final)
         for msg in repair_warnings:
@@ -645,6 +683,54 @@ class DeepResearcher:
             timeout=timeout,
         )
         return strip_thinking(response)
+
+    async def _llm_relevance_gate(
+        self,
+        question: str,
+        title: str,
+        preview: str,
+        *,
+        source_type: str = "web",
+    ) -> bool:
+        """Cheap YES/NO relevance check before heavy extraction."""
+        question = (question or "").strip()
+        if not question:
+            return True
+        title = (title or "Untitled").strip()
+        preview = (preview or "").strip()[:2000]
+        heuristic = heuristic_relevance_decision(title, preview, question)
+        if heuristic is not None:
+            return heuristic
+        seeds = self._seed_findings()
+        if seeds:
+            prompt = RELEVANCE_GATE_WITH_SEEDS_PROMPT.format(
+                question=question,
+                seed_context=format_seed_context(seeds),
+                title=title,
+                source_type=source_type,
+                preview=preview or "(no preview)",
+            )
+        else:
+            prompt = RELEVANCE_GATE_PROMPT.format(
+                question=question,
+                title=title,
+                source_type=source_type,
+                preview=preview or "(no preview)",
+            )
+        try:
+            response = await self._llm(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=8,
+                timeout=25,
+            )
+            decision = parse_relevance_yes_no(response)
+            if decision is None:
+                return heuristic_relevance_decision(title, preview, question) is not False
+            return decision
+        except Exception as exc:
+            logger.warning("Relevance gate LLM failed for %r: %s", title[:60], exc)
+            return heuristic_relevance_decision(title, preview, question) is not False
 
     # ------------------------------------------------------------------
     # PLAN: create research strategy
@@ -711,8 +797,9 @@ class DeepResearcher:
             mode = getattr(self, "research_mode", "literature_review")
             if mode == "similar_papers":
                 round_instruction = (
-                    "First round — generate similarity-focused queries: cited-by patterns, "
-                    "related work, title/author variants, DOI lookups, and 'papers like' phrasing."
+                    "First round — generate PubMed and Google Scholar queries for related papers. "
+                    "Use site:pubmed.ncbi.nlm.nih.gov, site:scholar.google.com intitle:\"…\", "
+                    "exact seed paper titles, and DOIs. Never query author names without a paper title."
                 )
             elif mode == "gap_analysis":
                 round_instruction = (
@@ -721,8 +808,9 @@ class DeepResearcher:
                 )
             elif mode == "compare":
                 round_instruction = (
-                    "First round — search for external benchmarks and independent replications "
-                    "relevant to comparing the seed papers' methods and conclusions."
+                    "First round — search PubMed and Google Scholar for external benchmarks, "
+                    "independent replications, and comparative studies relevant to the seed papers. "
+                    "Use site:pubmed.ncbi.nlm.nih.gov and site:scholar.google.com filters."
                 )
             else:
                 round_instruction = (
@@ -782,25 +870,52 @@ class DeepResearcher:
                                   question: str,
                                   search_kind: str = "discovery") -> List[Dict]:
         """Search each query and extract relevant info from top results."""
+        from src.research_finding_enrich import extract_doi
+        from src.research_evidence import normalize_doi
+
         all_findings: List[Dict] = []
 
         # Search all queries in parallel
         search_tasks = [self._search(q, search_kind=search_kind) for q in queries]
         search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
-        # Collect URLs to fetch from all search results
+        # Collect URLs to fetch from all search results (relevance-filtered).
         urls_to_fetch = []
+        min_snippet_score = 0.14
         for result in search_results:
             if isinstance(result, Exception):
                 logger.warning(f"Search error: {result}")
                 continue
             if not result:
                 continue
-            for r in result:
+            ranked = sorted(
+                result,
+                key=lambda r: score_search_result(r, question),
+                reverse=True,
+            )
+            for r in ranked:
                 url = r.get("url", "")
-                if url and url not in self.urls_fetched:
-                    urls_to_fetch.append(r)
+                if not url or url in self.urls_fetched:
+                    continue
+                doi = normalize_doi(extract_doi(url))
+                if doi and self.evidence_registry.has_doi(doi):
+                    logger.info(
+                        "Skipping web fetch for paper already in registry (DOI %s): %s",
+                        doi,
+                        (r.get("title") or url)[:80],
+                    )
                     self.urls_fetched.add(url)
+                    continue
+                rel = score_search_result(r, question)
+                if rel < min_snippet_score:
+                    logger.info(
+                        "Skipping low-relevance search hit (score=%.2f): %s",
+                        rel,
+                        (r.get("title") or url)[:80],
+                    )
+                    continue
+                urls_to_fetch.append(r)
+                self.urls_fetched.add(url)
                 if len(urls_to_fetch) >= self.max_urls_per_round * len(queries):
                     break
 
@@ -843,6 +958,7 @@ class DeepResearcher:
         query: str,
         limit: int = 5,
         seed_library: bool = False,
+        relevance_query: str = "",
     ) -> List[Dict]:
         """Pull matching items from the user's Zotero library (catalog first)."""
         if not self.owner:
@@ -879,9 +995,32 @@ class DeepResearcher:
                 )
 
             unique = []
+            gate_q = (relevance_query or query or "").strip()
             for f in outcome.findings:
                 zkey = f.get("zotero_key") or f.get("url", "")
                 if zkey in self._zotero_keys_seen:
+                    continue
+                if gate_q and not is_finding_relevant(f, gate_q):
+                    logger.info(
+                        "Skipping irrelevant Zotero item: %s",
+                        (f.get("title") or zkey)[:80],
+                    )
+                    continue
+                preview = " ".join([
+                    f.get("title") or "",
+                    (f.get("summary") or "")[:1200],
+                    (f.get("evidence") or "")[:800],
+                ])
+                if gate_q and not await self._llm_relevance_gate(
+                    gate_q,
+                    f.get("title") or "",
+                    preview,
+                    source_type="zotero",
+                ):
+                    logger.info(
+                        "Relevance gate rejected Zotero item: %s",
+                        (f.get("title") or zkey)[:80],
+                    )
                     continue
                 self._zotero_keys_seen.add(zkey)
                 url = f.get("url", "")
@@ -899,11 +1038,13 @@ class DeepResearcher:
         limit: int = 5,
         seed_findings: Optional[List[Dict]] = None,
         seed_graph: bool = False,
+        relevance_query: str = "",
     ) -> List[Dict]:
         """Pull matching items from the Links knowledge graph."""
         if not self.owner:
             return []
         try:
+            gate_q = (relevance_query or query or "").strip()
             outcome = await asyncio.to_thread(
                 research_knowledge_findings,
                 query,
@@ -913,6 +1054,7 @@ class DeepResearcher:
                 seed_graph=seed_graph,
                 expand_hops=1,
                 content_max_chars=self.max_content_chars,
+                relevance_query=gate_q,
             )
             if outcome.note:
                 logger.info("Links graph research: %s", outcome.note)
@@ -927,6 +1069,28 @@ class DeepResearcher:
             for f in outcome.findings:
                 gid = (f.get("graph_node_id") or "").strip()
                 if gid in self._graph_nodes_seen:
+                    continue
+                if gate_q and not is_finding_relevant(f, gate_q):
+                    logger.info(
+                        "Skipping irrelevant Links item: %s",
+                        (f.get("title") or gid)[:80],
+                    )
+                    continue
+                preview = " ".join([
+                    f.get("title") or "",
+                    (f.get("summary") or "")[:1200],
+                    (f.get("evidence") or "")[:800],
+                ])
+                if gate_q and not await self._llm_relevance_gate(
+                    gate_q,
+                    f.get("title") or "",
+                    preview,
+                    source_type=f.get("node_type") or "knowledge",
+                ):
+                    logger.info(
+                        "Relevance gate rejected Links item: %s",
+                        (f.get("title") or gid)[:80],
+                    )
                     continue
                 self._graph_nodes_seen.add(gid)
                 zkey = (f.get("zotero_key") or f.get("paper_key") or "").strip()
@@ -948,7 +1112,7 @@ class DeepResearcher:
         if not self.owner or not self.seed_papers:
             return []
         try:
-            from src.research_seeds import seed_findings_from_refs
+            from src.research_seeds import enrich_seed_findings_from_web, seed_findings_from_refs
 
             outcome = await asyncio.to_thread(
                 seed_findings_from_refs,
@@ -956,6 +1120,18 @@ class DeepResearcher:
                 self.seed_papers,
                 extract_pdfs=True,
                 pdf_max_chars=self.max_content_chars,
+            )
+            enriched = await asyncio.to_thread(
+                enrich_seed_findings_from_web,
+                outcome.findings,
+                owner=self.owner,
+                max_chars=self.max_content_chars,
+            )
+            outcome = type(outcome)(
+                enriched,
+                outcome.resolved_keys,
+                outcome.missing,
+                outcome.note,
             )
             if outcome.note:
                 logger.info("Seed papers: %s", outcome.note)
@@ -980,18 +1156,131 @@ class DeepResearcher:
             logger.warning("Seed paper load failed: %s", e)
             return []
 
-    async def _fetch_similar_paper_findings(self, seed_findings: List[Dict]) -> List[Dict]:
-        """OpenAlex + Semantic Scholar similar-paper pass (Phase 2)."""
+    async def _fetch_similar_paper_findings(
+        self,
+        seed_findings: List[Dict],
+        *,
+        relevance_query: str = "",
+    ) -> List[Dict]:
+        """Find related papers via PubMed/Google Scholar; API fallback if sparse."""
+        gate_q = (relevance_query or self._relevance_query("")).strip()
+        unique: List[Dict] = []
+        api_fallback_min = 3
+        max_web_urls = 8
+
+        async def _accept_similar(finding: Dict) -> bool:
+            url = (finding.get("url") or "").strip()
+            if url and url in self.urls_fetched:
+                return False
+            if gate_q and not is_similar_paper_relevant(finding, gate_q, seed_findings):
+                logger.info(
+                    "Skipping unrelated similar paper: %s",
+                    (finding.get("title") or url)[:80],
+                )
+                return False
+            preview = " ".join([
+                finding.get("title") or "",
+                (finding.get("summary") or "")[:1200],
+                (finding.get("evidence") or "")[:800],
+            ])
+            if gate_q and not await self._llm_relevance_gate(
+                gate_q,
+                finding.get("title") or "",
+                preview,
+                source_type="similar_paper",
+            ):
+                logger.info(
+                    "Relevance gate rejected similar paper: %s",
+                    (finding.get("title") or url)[:80],
+                )
+                return False
+            if url:
+                self.urls_fetched.add(url)
+            return True
+
+        # Primary: targeted PubMed + Google Scholar searches
+        try:
+            queries = similar_paper_queries_from_seeds(seed_findings, gate_q, limit=6)
+            if queries:
+                search_results = await asyncio.gather(
+                    *[self._search(q, search_kind="similar_papers") for q in queries],
+                    return_exceptions=True,
+                )
+                pooled: List[Dict] = []
+                for result in search_results:
+                    if isinstance(result, Exception):
+                        logger.warning("Similar-paper search error: %s", result)
+                        continue
+                    if result:
+                        pooled.extend(result)
+
+                ranked = rank_similar_paper_search_results(gate_q, pooled)
+                urls_to_fetch: List[Dict] = []
+                seen_urls: Set[str] = set()
+                for row in ranked:
+                    url = row.get("url", "")
+                    if is_scholar_author_profile_url(url):
+                        logger.info(
+                            "Skipping Scholar author profile: %s",
+                            url[:80],
+                        )
+                        continue
+                    if not url or url in self.urls_fetched or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    urls_to_fetch.append(row)
+                    if len(urls_to_fetch) >= max_web_urls:
+                        break
+
+                for row in urls_to_fetch:
+                    finding = await self._fetch_and_extract(
+                        row["url"], gate_q, row.get("title", ""),
+                    )
+                    if not finding:
+                        continue
+                    finding["source_type"] = "similar_paper"
+                    finding["similar_source"] = similar_source_from_url(
+                        finding.get("url") or row.get("url") or "",
+                    )
+                    for key in (
+                        "search_query", "search_provider", "search_kind",
+                        "search_time_filter",
+                    ):
+                        if row.get(key) and not finding.get(key):
+                            finding[key] = row[key]
+                    if await _accept_similar(finding):
+                        unique.append(finding)
+
+                if unique:
+                    logger.info(
+                        "Similar papers (PubMed/Scholar): %d item(s) from %d queries",
+                        len(unique),
+                        len(queries),
+                    )
+                    self._emit(
+                        phase="reading",
+                        source="similar_papers",
+                        message=f"Similar papers (PubMed/Scholar): {len(unique)}",
+                    )
+        except Exception as e:
+            logger.warning("Similar-paper web search failed: %s", e)
+
+        # Fallback: OpenAlex + Semantic Scholar when scholarly web search is sparse
+        if len(unique) >= api_fallback_min:
+            return unique
+
         try:
             from src.research_similar_papers import similar_papers_from_seeds
 
             exclude = set(self._zotero_keys_seen)
+            remaining = max(api_fallback_min - len(unique), 2)
             outcome = await asyncio.to_thread(
                 similar_papers_from_seeds,
                 seed_findings,
-                limit_per_seed=5,
-                total_limit=12,
+                limit_per_seed=3,
+                total_limit=remaining,
                 exclude_keys=exclude,
+                relevance_query=gate_q,
             )
             if outcome.note:
                 logger.info(outcome.note)
@@ -1000,18 +1289,13 @@ class DeepResearcher:
                     source="similar_papers",
                     message=outcome.note,
                 )
-            unique = []
             for f in outcome.findings:
-                url = (f.get("url") or "").strip()
-                if url and url in self.urls_fetched:
-                    continue
-                if url:
-                    self.urls_fetched.add(url)
-                unique.append(f)
-            return unique
+                if await _accept_similar(f):
+                    unique.append(f)
         except Exception as e:
-            logger.warning("Similar-paper fetch failed: %s", e)
-            return []
+            logger.warning("Similar-paper API fallback failed: %s", e)
+
+        return unique
 
     async def _search(self, query: str, search_kind: str = "discovery") -> List[Dict]:
         """Run a search via the shared web_search provider layer (Phase 1a)."""
@@ -1057,7 +1341,9 @@ class DeepResearcher:
                    total_sources=len(self.urls_fetched))
         try:
             from src.search import fetch_webpage_content
-            page = await asyncio.to_thread(fetch_webpage_content, url, 10)
+            page = await asyncio.to_thread(
+                fetch_webpage_content, url, 10, 0, include_og_image=False,
+            )
         except Exception as e:
             logger.warning(f"Failed to fetch {url}: {e}")
             return None
@@ -1066,6 +1352,16 @@ class DeepResearcher:
             return None
 
         content = page["content"]
+        page_title = title or page.get("title", "")
+        if not await self._llm_relevance_gate(
+            question,
+            page_title,
+            content[:2000],
+            source_type="web",
+        ):
+            logger.info("Relevance gate rejected web page: %s", url)
+            return None
+
         # Truncate to avoid blowing up context, preferring paragraph boundary
         if len(content) > self.max_content_chars:
             truncated = content[:self.max_content_chars]
@@ -1088,23 +1384,25 @@ class DeepResearcher:
             if parsed:
                 parsed["url"] = url
                 parsed["title"] = title or page.get("title", "")
-                parsed["og_image"] = page.get("og_image", "")
                 parsed.setdefault("source_type", "web")
+                parsed = enrich_web_finding(parsed, url=url, content=content)
+                if is_extraction_irrelevant(parsed):
+                    logger.info("Skipping irrelevant extraction from %s", url)
+                    return None
                 # Skip findings where the LLM says the page is useless
                 if is_low_quality(parsed.get("summary", "")):
                     logger.info(f"Skipping low-quality extraction from {url}")
                     return None
                 return parsed
             # If JSON parsing fails, treat entire response as evidence
-            return {
+            return normalize_finding_fields(enrich_web_finding({
                 "url": url,
                 "title": title or page.get("title", ""),
-                "og_image": page.get("og_image", ""),
                 "source_type": "web",
                 "rational": "LLM extraction (raw)",
                 "evidence": response[:3000],
                 "summary": response[:500],
-            }
+            }, url=url, content=content))
         except Exception as e:
             logger.warning(f"LLM extraction failed for {url}: {e}")
             return None
@@ -1136,6 +1434,9 @@ class DeepResearcher:
         )
         if registry_block:
             prompt += f"\n\n{registry_block}\n"
+        sourcing_block = self.evidence_registry.sourcing_limitations_block()
+        if sourcing_block:
+            prompt += f"\n\n{sourcing_block}\n"
 
         try:
             return await self._llm(
@@ -1187,20 +1488,56 @@ class DeepResearcher:
     # ------------------------------------------------------------------
     # FINAL REPORT
     # ------------------------------------------------------------------
+    async def _build_pre_final_context(self, question: str) -> str:
+        """Thematic outline + evidence table blocks for the final report prompt."""
+        registry = self.evidence_registry
+        outline = ""
+        if should_cluster_thematically(registry):
+            self._emit(phase="analyzing", message="Clustering findings by theme...")
+            prompt = build_thematic_outline_prompt(question, registry, self.findings)
+            try:
+                raw = await self._llm(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    max_tokens=1536,
+                    timeout=90,
+                )
+                outline = format_thematic_outline(raw)
+            except Exception as exc:
+                logger.warning("Thematic clustering failed: %s", exc)
+            if not outline:
+                outline = heuristic_thematic_outline(registry, self.findings)
+
+        table = ""
+        if should_include_evidence_table(registry):
+            table = build_evidence_table(registry)
+
+        return combine_final_context_blocks(outline, table)
+
     async def _final_report(self, question: str, report: str) -> str:
         """LLM writes a polished academic synthesis, retrying if too short."""
         length_spec = REPORT_LENGTH_SPECS.get(self.report_length, REPORT_LENGTH_SPECS["standard"])
         min_words = length_spec["min_words"]
         expand_threshold = length_spec["expand_threshold"]
-        prompt = FINAL_REPORT_PROMPT.format(
+        prompt = build_final_report_prompt(
             question=question,
             report=report,
             min_words=min_words,
+            mode=self.research_mode,
         )
         prompt += "\n\n" + ACADEMIC_REPORT_OVERRIDE
         registry_block = self.evidence_registry.registry_prompt_block()
         if registry_block:
             prompt += f"\n\n{registry_block}\n"
+        quant_block = self.evidence_registry.quantitative_evidence_block()
+        if quant_block:
+            prompt += f"\n\n{quant_block}\n"
+        sourcing_block = self.evidence_registry.sourcing_limitations_block()
+        if sourcing_block:
+            prompt += f"\n\n{sourcing_block}\n"
+        synthesis_block = await self._build_pre_final_context(question)
+        if synthesis_block:
+            prompt += f"\n\n{synthesis_block}\n"
 
         try:
             result = await self._llm(
@@ -1218,15 +1555,7 @@ class DeepResearcher:
                     [
                         {"role": "user", "content": prompt},
                         {"role": "assistant", "content": result},
-                        {"role": "user", "content":
-                            "This academic synthesis is too brief. Expand it significantly:\n"
-                            "- Add detailed paragraphs for Background and Key Findings\n"
-                            "- Include specific data from the evidence only — do not invent statistics\n"
-                            "- Add Limitations of the Evidence and Limitations of This Report sections\n"
-                            "- Use numbered citations [1], [2] and a complete ## References section\n"
-                            "- Target at least 1000 words\n"
-                            "Write the full expanded synthesis now."
-                        },
+                        {"role": "user", "content": expansion_user_message(min_words)},
                     ],
                     temperature=0.4,
                     max_tokens=self.max_report_tokens,

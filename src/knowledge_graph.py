@@ -22,7 +22,7 @@ SCHEMA_VERSION = 1
 KNOWLEDGE_ROOT = Path(DATA_DIR) / "knowledge"
 DEBOUNCE_SEC = 0.45
 
-_NODE_TYPES = frozenset({"task", "document", "memory", "skill", "note", "paper", "collection"})
+_NODE_TYPES = frozenset({"task", "document", "memory", "skill", "note", "paper", "collection", "research"})
 _EDGE_KINDS = frozenset({"parent", "link", "wikilink", "related", "supports", "in_collection"})
 _MANUAL_EDGE_KINDS = frozenset({"link", "related", "supports"})
 _INFERRED_EDGE_KINDS = frozenset({"parent", "wikilink", "in_collection"})
@@ -660,6 +660,13 @@ def rebuild_owner_graph(owner: str) -> dict:
                     add_edge(pid, cid, "in_collection")
     except Exception as e:
         logger.debug(f"Zotero catalog index skipped for {owner}: {e}")
+
+    try:
+        from src.research_graph import index_research_nodes
+
+        index_research_nodes(owner, nodes)
+    except Exception as e:
+        logger.debug(f"Research index skipped for {owner}: {e}")
 
     manual = load_manual_edges(owner)
     all_edges = _merge_edge_lists(edges, manual)

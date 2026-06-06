@@ -605,7 +605,7 @@ class ZoteroClient:
         self,
         attachment_key: str,
         fallback_url: str = "",
-        max_bytes: int = 8_000_000,
+        max_bytes: int = 16_000_000,
     ) -> str:
         """Download a PDF attachment and extract text.
 
@@ -624,38 +624,54 @@ class ZoteroClient:
             )
             return ""
 
-        data = b""
-        if link_mode in ("imported_file", "imported_url", "linked_url", ""):
+        def _download(url: str, *, use_api_headers: bool) -> bytes:
+            if not url:
+                return b""
             try:
-                with httpx.Client(timeout=60, headers=self._headers, follow_redirects=True) as client:
-                    r = client.get(self._url(f"/items/{attachment_key}/file"))
-                    if r.status_code == 200 and r.content:
-                        ctype = (r.headers.get("content-type") or "").lower()
-                        if r.content.startswith(b"%PDF") or "pdf" in ctype:
-                            data = r.content
-            except Exception as e:
-                logger.warning(f"Zotero PDF download failed: {e}")
-
-        if not data and fallback_url:
-            try:
-                headers = {
+                headers = self._headers if use_api_headers else {
                     "User-Agent": "Nobody/1.0 (Zotero research integration; +https://github.com/)",
                     "Accept": "application/pdf,*/*",
                 }
                 with httpx.Client(timeout=60, follow_redirects=True, headers=headers) as client:
-                    r = client.get(fallback_url.strip())
+                    r = client.get(url.strip())
                     if r.status_code == 200 and r.content:
                         ctype = (r.headers.get("content-type") or "").lower()
                         if r.content.startswith(b"%PDF") or "pdf" in ctype:
-                            data = r.content
+                            return r.content
             except Exception as e:
-                logger.warning(f"Zotero linked PDF fetch failed: {e}")
+                logger.warning(f"Zotero PDF download failed ({url[:80]}): {e}")
+            return b""
 
-        if not data:
-            return ""
-        if len(data) > max_bytes:
-            data = data[:max_bytes]
-        return _extract_pdf_text(data)
+        candidates: List[Tuple[str, bool]] = []
+        if link_mode in ("imported_file", "imported_url", "linked_url", ""):
+            candidates.append((self._url(f"/items/{attachment_key}/file"), True))
+        if fallback_url:
+            candidates.append((fallback_url, False))
+
+        seen_urls: set[str] = set()
+        for url, use_api in candidates:
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            data = _download(url, use_api_headers=use_api)
+            if not data:
+                continue
+            if len(data) > max_bytes:
+                logger.info(
+                    "Zotero PDF %s is %d bytes; extracting text before truncation",
+                    attachment_key,
+                    len(data),
+                )
+            text = _extract_pdf_text(data, max_chars=15000)
+            if text:
+                return text
+            logger.info(
+                "PDF bytes fetched for %s (%d bytes) but text extraction failed; trying next source",
+                attachment_key,
+                len(data),
+            )
+
+        return ""
 
     def create_items(self, items: List[dict]) -> Tuple[int, Optional[str]]:
         """Create up to 50 items in the library. Returns (created_count, error)."""
@@ -687,7 +703,7 @@ def _extract_pdf_text(data: bytes, max_chars: int = 15000) -> str:
     text = ""
     try:
         from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(data))
+        reader = PdfReader(io.BytesIO(data), strict=False)
         parts = []
         for page in reader.pages:
             parts.append(page.extract_text() or "")
@@ -1178,6 +1194,13 @@ def fetch_paper_pdf_text(
             pdf_text = pdf_text[:max_chars] + "\n… [PDF truncated]"
         return pdf_text, ""
 
+    att_keys = _pdf_attachment_keys_for_item(client, key, item, catalog_row=row)
+    if att_keys:
+        return "", (
+            "A PDF is attached but text could not be extracted. "
+            "The file may be an HTML snapshot, corrupted, or larger than the extractor limit. "
+            "In Zotero use “Store Copy of File” on a real PDF and sync to Zotero Cloud."
+        )
     if row and row.get("has_pdf"):
         return "", (
             "A PDF is attached but text could not be downloaded. "

@@ -15,6 +15,7 @@ const TYPE_LABELS = {
   skill: 'Skill',
   paper: 'Paper',
   collection: 'Collection',
+  research: 'Research',
   note: 'Document', // legacy index rows
 };
 
@@ -299,6 +300,14 @@ async function _showDetail(nodeId) {
       if (meta.has_pdf) {
         metaHtml += '<div class="kg-meta">PDF attached — read via search_knowledge on this paper id extracts full text</div>';
       }
+    } else if (node.type === 'research') {
+      const bits = [];
+      if (meta.research_mode_label) bits.push(meta.research_mode_label);
+      else if (meta.research_mode) bits.push(meta.research_mode.replace(/_/g, ' '));
+      const br = meta.source_breakdown || {};
+      if (br.total) bits.push(`${br.total} sources`);
+      if (meta.seed_count) bits.push(`${meta.seed_count} seed(s)`);
+      if (bits.length) metaHtml = `<div class="kg-meta">${esc(bits.join(' · '))}</div>`;
     } else if (node.type === 'collection') {
       metaHtml = `<div class="kg-meta">Zotero folder${meta.path ? ` · ${esc(meta.path)}` : ''}</div>`;
     }
@@ -306,6 +315,12 @@ async function _showDetail(nodeId) {
     for (const row of [...(nb.outgoing || []), ...(nb.incoming || [])]) {
       if (row?.node?.id) linked.add(row.node.id);
     }
+    const paperSeedBtn = node.type === 'paper'
+      ? `<button type="button" class="admin-btn-sm kg-seed-btn" data-node-id="${esc(nodeId)}">Use as research seed</button>`
+      : '';
+    const researchOpenBtn = node.type === 'research'
+      ? `<button type="button" class="admin-btn-sm kg-research-report-btn" data-session-id="${esc(meta.session_id || nodeId.replace(/^research:/i, ''))}">Open report</button>`
+      : '';
     detail.innerHTML = `
       <div class="kg-detail-head">
         ${_typeBadge(node)}
@@ -313,6 +328,8 @@ async function _showDetail(nodeId) {
         ${metaHtml}
         <div class="kg-detail-actions">
           <button type="button" class="admin-btn-sm kg-open-btn" data-node-id="${esc(nodeId)}">Open</button>
+          ${paperSeedBtn}
+          ${researchOpenBtn}
         </div>
       </div>
       <div class="kg-detail-snippet">${esc((node.snippet || '').slice(0, 420))}</div>
@@ -324,8 +341,49 @@ async function _showDetail(nodeId) {
       ${_renderLinkSection('Linked from', nb.incoming, { nodeId, direction: 'in' })}
     `;
     await _wireAddLinkPicker(detail.querySelector('.kg-add-link'), nodeId, () => _showDetail(nodeId));
+    detail.querySelector('.kg-seed-btn')?.addEventListener('click', () => {
+      void _usePaperAsResearchSeed(nodeId, node);
+    });
+    detail.querySelector('.kg-research-report-btn')?.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const sid = ev.currentTarget?.dataset?.sessionId || nodeId.replace(/^research:/i, '');
+      if (sid) window.open(`${API_BASE}/api/research/report/${encodeURIComponent(sid)}`, '_blank', 'noopener,noreferrer');
+    });
   } catch (e) {
     detail.innerHTML = `<div class="kg-error">${esc(e.message || e)}</div>`;
+  }
+}
+
+async function _usePaperAsResearchSeed(nodeId, node) {
+  const meta = node?.meta || {};
+  const [, rawKey] = nodeId.includes(':') ? nodeId.split(':', 2) : ['paper', nodeId];
+  const zoteroKey = (meta.zotero_key || rawKey || '').trim();
+  const doi = (meta.doi || '').trim();
+  if (!zoteroKey && !doi) {
+    uiModule.showToast?.('No Zotero key or DOI for this paper', 3500);
+    return;
+  }
+  try {
+    const mod = await import('./research/panel.js');
+    const addSeed = mod.addSeedPaper;
+    if (!addSeed) {
+      uiModule.showToast?.('Research panel unavailable', 3000);
+      return;
+    }
+    const added = addSeed({
+      zotero_key: zoteroKey,
+      title: _nodeTitle(node),
+      authors: meta.authors || '',
+      year: meta.year || '',
+      doi,
+      has_pdf: !!meta.has_pdf,
+    });
+    uiModule.showToast?.(
+      added ? 'Added as research seed' : 'Already in seed list — opened research panel',
+      3500,
+    );
+  } catch (e) {
+    uiModule.showToast?.(e.message || 'Could not add research seed', 4000);
   }
 }
 
@@ -553,7 +611,7 @@ export function handleLinkSuggestion(data) {
   _showNextLinkSuggestion();
 }
 
-async function openKnowledgeNode(nodeId) {
+async function openKnowledgeNode(nodeId, opts = {}) {
   if (!nodeId) return;
   const [type, raw] = nodeId.includes(':') ? nodeId.split(':', 2) : ['document', nodeId];
   const effective = type === 'note' ? 'document' : type;
@@ -598,6 +656,23 @@ async function openKnowledgeNode(nodeId) {
       return;
     }
     uiModule.showToast?.('No URL for this paper', 3000);
+    return;
+  }
+  if (effective === 'research') {
+    if (opts.navigate) {
+      openKnowledgeModal();
+      _activeType = 'research';
+      document.querySelectorAll('.kg-type-filter').forEach((btn) => {
+        btn.classList.toggle('active', (btn.dataset.type || '') === 'research');
+      });
+      await _renderList({ type: 'research' });
+      await _showDetail(nodeId);
+      return;
+    }
+    const sid = raw || nodeId.replace(/^research:/i, '');
+    if (sid) {
+      window.open(`${API_BASE}/api/research/report/${encodeURIComponent(sid)}`, '_blank', 'noopener,noreferrer');
+    }
     return;
   }
   if (effective === 'collection') {
@@ -708,6 +783,15 @@ export function closeKnowledgeModal() {
 
 export function isKnowledgeOpen() {
   return _open;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('message', (e) => {
+    if (e.origin !== window.location.origin) return;
+    const data = e.data;
+    if (!data || data.type !== 'odysseus-open-knowledge' || !data.nodeId) return;
+    openKnowledgeNode(data.nodeId);
+  });
 }
 
 export default {

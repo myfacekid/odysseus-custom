@@ -3888,6 +3888,8 @@ async def do_trigger_research(content: str, owner: Optional[str] = None) -> Dict
         except (ValueError, TypeError): pass
     if args.get("include_zotero") is not None:
         payload["include_zotero"] = bool(args["include_zotero"])
+    if args.get("include_knowledge") is not None:
+        payload["include_knowledge"] = bool(args["include_knowledge"])
     if args.get("include_preprints") is not None:
         payload["include_preprints"] = bool(args["include_preprints"])
     if args.get("seed_papers"):
