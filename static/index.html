@@ -1027,29 +1027,49 @@
         </div>
       </div>
       <div class="project-workspace-body">
-        <div class="project-workspace-grid">
-          <div class="project-region project-region-tree" id="project-file-tree-region">
-            <div class="project-region-label">File tree · depth</div>
-            <div id="project-file-tree" class="project-file-tree"></div>
-          </div>
-          <div class="project-region project-region-editor" id="project-editor-region">
-            <div class="project-region-label">Editor · depth</div>
-            <div id="project-editor-pane" class="project-editor-pane"></div>
-          </div>
-          <div class="project-region project-region-run">
-            <div class="project-region-label">Run · depth</div>
-            <div id="project-run-pane" class="project-run-pane"></div>
-          </div>
-          <div class="project-region project-region-chat" id="project-chat-region">
-            <div class="project-region-label">Chat · both boundaries</div>
-            <div id="project-chat-pane" class="project-chat-pane"></div>
-          </div>
-          <div class="project-region project-region-links" id="project-links-rail">
-            <div class="project-region-label">Links · breadth</div>
-            <div id="project-links-mount" class="project-links-mount">
-              <div class="project-region-placeholder">Loading links…</div>
+        <div class="project-workspace-grid" id="project-workspace-grid">
+          <aside class="project-workspace-left" id="project-workspace-left">
+            <div class="project-tab-bar project-left-tab-bar" role="tablist" aria-label="Project sidebar">
+              <button type="button" role="tab" class="project-left-tab project-left-tab--links active" data-left-tab="links" aria-selected="true">Links</button>
+              <button type="button" role="tab" class="project-left-tab project-left-tab--files" data-left-tab="files" aria-selected="false">Files</button>
             </div>
-          </div>
+            <div class="project-left-pane" id="project-left-pane-links" data-left-pane="links">
+              <div id="project-links-mount" class="project-links-mount">
+                <div class="project-pane-placeholder">Loading links…</div>
+              </div>
+            </div>
+            <div class="project-left-pane hidden" id="project-left-pane-files" data-left-pane="files">
+              <div id="project-file-tree" class="project-file-tree"></div>
+            </div>
+            <div class="project-resize-handle project-resize-handle--col" id="project-resize-col" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
+          </aside>
+          <section class="project-workspace-center" id="project-workspace-center">
+            <div class="project-center-chrome">
+              <div class="project-center-tab-bar" id="project-center-tab-bar" role="tablist" aria-label="Open items"></div>
+              <button type="button" class="admin-btn-sm project-split-toggle" id="project-split-toggle" title="Split view — link and file side by side" aria-pressed="false">Split</button>
+            </div>
+            <div class="project-center-well" id="project-center-well">
+              <div id="project-center-empty" class="project-center-empty">
+                <p class="project-center-empty-title">Select a link or file</p>
+                <p class="project-center-empty-sub"><span class="project-breadth-hint">◆ Links</span> — graph papers, research, documents. <span class="project-depth-hint">◇ Files</span> — code under your project folder.</p>
+              </div>
+              <div id="project-link-viewer-pane" class="project-link-viewer-pane hidden"></div>
+              <div id="project-editor-pane" class="project-editor-pane hidden"></div>
+            </div>
+          </section>
+          <footer class="project-workspace-footer" id="project-workspace-footer">
+            <div class="project-resize-handle project-resize-handle--row" id="project-resize-row" role="separator" aria-orientation="horizontal" aria-label="Resize chat and run panel"></div>
+            <div class="project-tab-bar project-bottom-tab-bar" role="tablist" aria-label="Chat and run">
+              <button type="button" role="tab" class="project-bottom-tab active" data-bottom-tab="chat" aria-selected="true">Chat</button>
+              <button type="button" role="tab" class="project-bottom-tab project-bottom-tab--run" data-bottom-tab="run" aria-selected="false">Run</button>
+            </div>
+            <div class="project-bottom-pane" id="project-bottom-pane-chat" data-bottom-pane="chat">
+              <div id="project-chat-pane" class="project-chat-pane"></div>
+            </div>
+            <div class="project-bottom-pane hidden" id="project-bottom-pane-run" data-bottom-pane="run">
+              <div id="project-run-pane" class="project-run-pane"></div>
+            </div>
+          </footer>
         </div>
       </div>
     </div>

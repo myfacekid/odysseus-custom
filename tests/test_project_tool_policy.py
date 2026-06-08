@@ -76,6 +76,15 @@ def test_session_is_project(policy_env):
     assert session_is_project(None) is False
 
 
+def test_session_is_project_after_agent_mode(policy_env):
+    """Chat send persists mode=agent; project sessions must still match via project_id."""
+    from core.database import set_session_mode
+
+    pid = policy_env["project_session_id"]
+    set_session_mode(pid, "agent")
+    assert session_is_project(pid) is True
+
+
 def test_depth_denied_tools_include_escape_hatches():
     assert "bash" in PROJECT_DEPTH_DENIED_TOOLS
     assert "python" in PROJECT_DEPTH_DENIED_TOOLS

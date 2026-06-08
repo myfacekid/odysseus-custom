@@ -260,7 +260,7 @@ function _bindEvents() {
 function _renderChrome() {
   if (!_container) return;
   _container.innerHTML =
-    '<div id="project-run-empty" class="project-region-placeholder">Select a <code>.py</code> file and click Run</div>' +
+    '<div id="project-run-empty" class="project-pane-placeholder">Select a <code>.py</code> file and click Run</div>' +
     '<div id="project-run-shell" class="project-run-shell hidden">' +
       '<div id="project-run-intro" class="project-run-intro hidden">' +
         '<span>Runs use the saved file on disk (project cwd only — not admin shell).</span>' +

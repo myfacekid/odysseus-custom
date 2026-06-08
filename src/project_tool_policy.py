@@ -57,9 +57,18 @@ def session_is_project(session_id: Optional[str]) -> bool:
     if not session_id:
         return False
     try:
-        from core.database import get_session_mode
+        from core.database import Session, get_db_session, is_project_workspace_session
 
-        return get_session_mode(session_id) == "project"
+        with get_db_session() as db:
+            row = (
+                db.query(Session.mode, Session.project_id)
+                .filter(Session.id == session_id)
+                .first()
+            )
+            if not row:
+                return False
+            mode, project_id = row
+            return is_project_workspace_session(mode, project_id)
     except Exception:
         return False
 

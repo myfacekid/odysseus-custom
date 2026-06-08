@@ -156,6 +156,37 @@ function hslToHex(h, s, l) {
   return '#' + toHex(f(0)) + toHex(f(8)) + toHex(f(4));
 }
 
+let _projectAccentGuardLogged = false;
+
+function _hueDelta(h1, h2) {
+  const d = Math.abs(h1 - h2);
+  return Math.min(d, 360 - d);
+}
+
+function _applyProjectAccentTokens(s, depthHex, breadthHex, accentPrimary) {
+  let breadth = breadthHex;
+  const depth = depthHex;
+  const [dH] = hexToHSL(depth);
+  const [bH, bS, bL] = hexToHSL(breadth);
+  const [pH, pS] = hexToHSL(accentPrimary);
+  const sameHex = depth.toLowerCase() === breadth.toLowerCase();
+  if (sameHex || _hueDelta(dH, bH) < 45) {
+    breadth = hslToHex(pH, Math.max(bS, pS, 35), bL);
+    const [nH] = hexToHSL(breadth);
+    if (depth.toLowerCase() === breadth.toLowerCase() || _hueDelta(dH, nH) < 45) {
+      breadth = hslToHex((pH + 120) % 360, Math.max(bS, 45), bL);
+    }
+    if (!_projectAccentGuardLogged) {
+      console.info('[theme] Project accent hue guard adjusted breadth for depth/breadth separation');
+      _projectAccentGuardLogged = true;
+    }
+  }
+  s.setProperty('--project-depth-accent', depth);
+  s.setProperty('--project-breadth-accent', breadth);
+  s.setProperty('--project-depth-surface', 'color-mix(in srgb, var(--project-depth-accent) 12%, var(--panel))');
+  s.setProperty('--project-breadth-surface', 'color-mix(in srgb, var(--project-breadth-accent) 12%, var(--panel))');
+}
+
 function deriveSyntaxColors(colors) {
   const [fgH, fgS, fgL] = hexToHSL(colors.fg);
   const [bgH, bgS, bgL] = hexToHSL(colors.bg);
@@ -286,6 +317,8 @@ export function applyColors(colors) {
   s.setProperty('--accent', accentPrimary);
   s.setProperty('--accent-warm', accentWarm);
   if (adv.accentError) s.setProperty('--accent-error', adv.accentError);
+
+  _applyProjectAccentTokens(s, syn.function, accentWarm, accentPrimary);
 
   // Keep the mobile browser toolbar / status bar matched to the theme bg
   // (same as the early head-script does on first paint).

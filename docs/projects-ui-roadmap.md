@@ -8,7 +8,7 @@ Use this doc when starting future chats: *"Follow docs/projects-ui-roadmap.md Ph
 
 **Last updated:** 2026-06-01
 
-**Status:** Not started — draft for review.
+**Status:** G1–G7 implemented (uncommitted). Optional future: center split ratio drag, tab reorder polish.
 
 **Prerequisite:** Phases A–E feature-complete (file tree, editor, run, chat, links rail, tool policy). Backend/API changes should be minimal.
 
@@ -294,10 +294,10 @@ Estimate **3–4 weeks** focused UI work after E sign-off. Each phase is shippab
 
 ### G7 — Optional follow-ups (not v1)
 
-- Drag-resize left column and footer height (Phase D v2 from main roadmap)
-- Split center (side-by-side link + file)
-- Markdown/HTML preview for cwd files
-- Pin tab / tab reorder
+- Drag-resize left column and footer height (Phase D v2 from main roadmap) — **done** (`workspaceResize.js`)
+- Split center (side-by-side link + file) — **done** (`workspaceSplit.js`, Split toggle)
+- Markdown/HTML preview for cwd files — **done** (editor Preview button)
+- Pin tab / tab reorder — **done** (pin control + drag reorder on center tabs)
 
 ---
 
@@ -335,9 +335,9 @@ Estimate **3–4 weeks** focused UI work after E sign-off. Each phase is shippab
 
 | # | Question | Default lean |
 |---|----------|--------------|
-| 1 | Single editor instance vs tab-per-file? | **Single instance** v1 (lower risk); tab switch swaps path + buffer |
-| 2 | Link viewer: full research report inline or excerpt + “Open full report”? | **Excerpt + actions** v1 — avoid multi-MB DOM |
-| 3 | Max open center tabs? | **8** with LRU close or “close others” menu |
+| 1 | Single editor instance vs tab-per-file? | **Single instance** v1 (lower risk); tab switch swaps path + buffer section should have tabs, but only one can be edited at a time |
+| 2 | Link viewer: full research report inline or excerpt + “Open full report”? | **Excerpt + actions** v1 — avoid multi-MB DOM excerpt only|
+| 3 | Max open center tabs? | **10** with LRU close or “close others” menu |
 | 4 | Bottom default tab on project open? | **Chat** (agent workflow); remember last |
 | 5 | Left default tab for returning users? | **Links** first visit; persist last thereafter |
 | 6 | Keep “Browse in Links” modal? | **Yes** as overflow; inline tab is primary |
@@ -377,4 +377,7 @@ Estimate **3–4 weeks** focused UI work after E sign-off. Each phase is shippab
 | Date | Change |
 |------|--------|
 | 2026-06-01 | Initial draft: tabbed left/center/bottom layout, color system, phases G1–G7 |
+| 2026-06-01 | G1–G3 + G5: tabbed shell, inline link viewer, center tabs, theme accent tokens |
+| 2026-06-01 | G4 + G6: viewer/editor chrome, stale link tabs, center tab restore, shortcuts, legacy CSS cleanup |
+| 2026-06-01 | G7: panel resize, split view, md/html preview, pin + tab reorder |
 | 2026-06-01 | Theme-aware color system: `--project-depth-accent` / `--project-breadth-accent`, hue guard, theme matrix QA |

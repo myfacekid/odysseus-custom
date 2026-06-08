@@ -729,8 +729,7 @@ import createResearchSynapse from './researchSynapse.js';
 
       // Project workspace: save open cwd file so agent tools match disk
       const _chatContainer = document.getElementById('chat-container');
-      const _inProjectWs = _chatContainer?.classList.contains('project-active')
-        && _chatContainer?.classList.contains('project-chat-docked');
+      const _inProjectWs = _chatContainer?.classList.contains('project-active');
       let _activeProjectFile = null;
       if (_inProjectWs && typeof window.saveActiveProjectFile === 'function') {
         try { await window.saveActiveProjectFile({ silent: true }); } catch (e) {

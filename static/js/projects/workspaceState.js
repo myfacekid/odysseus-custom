@@ -40,6 +40,97 @@ export function saveActiveChat(projectId, sessionId) {
   saveState(projectId, { activeChatId: sessionId || null });
 }
 
+export function getLeftTab(projectId) {
+  const tab = loadState(projectId).leftTab;
+  return tab === 'files' ? 'files' : 'links';
+}
+
+export function saveLeftTab(projectId, tab) {
+  saveState(projectId, { leftTab: tab === 'files' ? 'files' : 'links' });
+}
+
+export function getBottomTab(projectId) {
+  const tab = loadState(projectId).bottomTab;
+  return tab === 'run' ? 'run' : 'chat';
+}
+
+export function saveBottomTab(projectId, tab) {
+  saveState(projectId, { bottomTab: tab === 'run' ? 'run' : 'chat' });
+}
+
+export function getCenterTabs(projectId) {
+  const raw = loadState(projectId).centerTabs;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((t) => t && typeof t.id === 'string' && (t.kind === 'depth' || t.kind === 'breadth'))
+    .map((t) => ({
+      id: t.id,
+      kind: t.kind,
+      label: typeof t.label === 'string' ? t.label : t.id,
+      shortLabel: typeof t.shortLabel === 'string' ? t.shortLabel : undefined,
+      meta: t.meta && typeof t.meta === 'object' ? t.meta : undefined,
+      pinned: !!t.pinned,
+    }));
+}
+
+export function saveCenterTabs(projectId, tabs) {
+  if (!Array.isArray(tabs)) return;
+  saveState(projectId, { centerTabs: tabs });
+}
+
+export function getActiveCenterTab(projectId) {
+  const id = loadState(projectId).activeCenterTab;
+  return typeof id === 'string' && id.trim() ? id.trim() : null;
+}
+
+export function saveActiveCenterTab(projectId, tabId) {
+  saveState(projectId, { activeCenterTab: tabId || null });
+}
+
+export function getLayoutSizes(projectId) {
+  const s = loadState(projectId).layout || {};
+  return {
+    leftWidth: typeof s.leftWidth === 'number' ? s.leftWidth : null,
+    footerHeight: typeof s.footerHeight === 'number' ? s.footerHeight : null,
+  };
+}
+
+export function saveLayoutSizes(projectId, { leftWidth, footerHeight } = {}) {
+  const prev = loadState(projectId).layout || {};
+  saveState(projectId, {
+    layout: {
+      ...prev,
+      ...(typeof leftWidth === 'number' ? { leftWidth } : {}),
+      ...(typeof footerHeight === 'number' ? { footerHeight } : {}),
+    },
+  });
+}
+
+export function getCenterSplit(projectId) {
+  return !!loadState(projectId).centerSplit;
+}
+
+export function saveCenterSplit(projectId, enabled) {
+  saveState(projectId, { centerSplit: !!enabled });
+}
+
+export function getSplitDepthTab(projectId) {
+  const id = loadState(projectId).splitDepthTab;
+  return typeof id === 'string' && id.trim() ? id.trim() : null;
+}
+
+export function getSplitBreadthTab(projectId) {
+  const id = loadState(projectId).splitBreadthTab;
+  return typeof id === 'string' && id.trim() ? id.trim() : null;
+}
+
+export function saveSplitTabs(projectId, { depthId, breadthId } = {}) {
+  saveState(projectId, {
+    splitDepthTab: depthId || null,
+    splitBreadthTab: breadthId || null,
+  });
+}
+
 export function saveLastOpenProject(projectId) {
   if (!projectId) return;
   try {
@@ -62,6 +153,21 @@ export default {
   saveOpenFile,
   getActiveChat,
   saveActiveChat,
+  getLeftTab,
+  saveLeftTab,
+  getBottomTab,
+  saveBottomTab,
+  getCenterTabs,
+  saveCenterTabs,
+  getActiveCenterTab,
+  saveActiveCenterTab,
+  getLayoutSizes,
+  saveLayoutSizes,
+  getCenterSplit,
+  saveCenterSplit,
+  getSplitDepthTab,
+  getSplitBreadthTab,
+  saveSplitTabs,
   saveLastOpenProject,
   getLastOpenProject,
 };

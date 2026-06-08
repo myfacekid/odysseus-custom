@@ -4,12 +4,16 @@
  */
 import uiModule, { styledChoice } from '../ui.js';
 import { langIcon } from '../langIcons.js';
+import markdownModule from '../markdown.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
 const AUTO_SAVE_MS = 2000;
 const DISK_POLL_MS = 15000;
 const MAX_FILE_BYTES = 2_000_000;
+const _RUN_PLAY_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">' +
+  '<polygon points="5 3 19 12 5 21 5 3"/></svg>';
 
 const EXT_TO_LANG = {
   py: 'python',
@@ -57,6 +61,7 @@ let _pendingDiskPayload = null;
 let _lineNumberResizeRaf = null;
 let _lineNumberResizeObserver = null;
 let _lineNumberObservedTextarea = null;
+let _previewMode = null;
 
 function _els() {
   return {
@@ -75,7 +80,77 @@ function _els() {
     shell: _pane?.querySelector('#project-editor-shell'),
     diskBanner: _pane?.querySelector('#project-editor-disk-banner'),
     diskBannerMsg: _pane?.querySelector('#project-editor-disk-banner-msg'),
+    previewBtn: _pane?.querySelector('#project-editor-preview-btn'),
+    mdPreview: _pane?.querySelector('#project-editor-md-preview'),
+    htmlPreview: _pane?.querySelector('#project-editor-html-preview'),
   };
+}
+
+function _canPreview() {
+  return _language === 'markdown' || _language === 'html';
+}
+
+function _updatePreviewButton() {
+  const { previewBtn } = _els();
+  if (!previewBtn) return;
+  const show = _canPreview() && !!_path;
+  previewBtn.classList.toggle('hidden', !show);
+  previewBtn.textContent = _previewMode ? 'Edit' : 'Preview';
+  previewBtn.setAttribute('aria-pressed', _previewMode ? 'true' : 'false');
+}
+
+function _exitPreview() {
+  _previewMode = null;
+  const { wrap, mdPreview, htmlPreview } = _els();
+  if (mdPreview) {
+    mdPreview.style.display = 'none';
+    mdPreview.innerHTML = '';
+  }
+  if (htmlPreview) {
+    htmlPreview.style.display = 'none';
+    htmlPreview.srcdoc = '';
+  }
+  if (wrap) wrap.style.display = '';
+  _updatePreviewButton();
+}
+
+function _syncPreviewContent() {
+  if (!_previewMode) return;
+  const { textarea, mdPreview, htmlPreview } = _els();
+  const text = textarea?.value || '';
+  if (_previewMode === 'markdown' && mdPreview) {
+    mdPreview.innerHTML = markdownModule.mdToHtml ? markdownModule.mdToHtml(text) : esc(text);
+    if (window.hljs) {
+      mdPreview.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+    }
+  } else if (_previewMode === 'html' && htmlPreview) {
+    htmlPreview.srcdoc = text;
+  }
+}
+
+function _setPreviewActive(active) {
+  const { wrap, mdPreview, htmlPreview, textarea } = _els();
+  if (!wrap || !textarea || !_canPreview()) return;
+  if (!active) {
+    _exitPreview();
+    return;
+  }
+  _previewMode = _language === 'html' ? 'html' : 'markdown';
+  if (_previewMode === 'markdown' && mdPreview) {
+    _syncPreviewContent();
+    mdPreview.style.display = '';
+    if (htmlPreview) htmlPreview.style.display = 'none';
+  } else if (_previewMode === 'html' && htmlPreview) {
+    _syncPreviewContent();
+    htmlPreview.style.display = '';
+    if (mdPreview) mdPreview.style.display = 'none';
+  }
+  wrap.style.display = 'none';
+  _updatePreviewButton();
+}
+
+export function togglePreview() {
+  _setPreviewActive(!_previewMode);
 }
 
 function _langFromPath(path) {
@@ -295,6 +370,8 @@ function _updateRunButton() {
   runBtn.disabled = !isPy;
   runBtn.title = isPy ? 'Run script in project folder (Ctrl+Enter)' : 'Only .py files can be run';
   runBtn.classList.toggle('project-editor-run-ready', isPy);
+  runBtn.classList.toggle('active', isPy);
+  runBtn.style.opacity = isPy ? '0.85' : '0.3';
 }
 
 function _updateLangBadge() {
@@ -474,6 +551,8 @@ async function _applyPayload(payload, { fromDisk = false } = {}) {
   _updatePathDisplay();
   _updateLangBadge();
   _updateRunButton();
+  _exitPreview();
+  _updatePreviewButton();
   _showEditor(true);
   if (textarea) {
     textarea.value = _lastSavedContent;
@@ -548,6 +627,7 @@ function _bindEditorEvents() {
   textarea.addEventListener('input', () => {
     _scheduleHighlight();
     _scheduleAutoSave();
+    _syncPreviewContent();
   });
   textarea.addEventListener('scroll', () => {
     const { pre } = _els();
@@ -576,6 +656,7 @@ function _bindEditorEvents() {
     if (_onRun) void _onRun();
   });
   reloadBtn?.addEventListener('click', () => void reloadFromDisk());
+  _els().previewBtn?.addEventListener('click', () => togglePreview());
 
   diskBanner?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-disk-action]');
@@ -600,7 +681,7 @@ function _bindEditorEvents() {
 function _renderChrome() {
   if (!_pane) return;
   _pane.innerHTML =
-    '<div id="project-editor-empty" class="project-region-placeholder">Select a file from the tree</div>' +
+    '<div id="project-editor-empty" class="project-pane-placeholder">Select a file from the Files tab</div>' +
     '<div id="project-editor-shell" class="project-editor-shell hidden">' +
       '<div id="project-editor-disk-banner" class="project-editor-disk-banner hidden" role="status">' +
         '<span id="project-editor-disk-banner-msg"></span>' +
@@ -610,18 +691,31 @@ function _renderChrome() {
           '<button type="button" class="admin-btn-sm" data-disk-action="close">Close</button>' +
         '</span>' +
       '</div>' +
-      '<div class="project-editor-toolbar">' +
+      '<div class="project-editor-head project-editor-head--depth">' +
+        '<span class="project-editor-boundary">Depth</span>' +
         '<span id="project-editor-path" class="project-editor-path" title=""></span>' +
         '<span id="project-editor-lang" class="project-editor-lang"></span>' +
-        '<span id="project-editor-save-status" class="project-editor-save-status"></span>' +
-        '<button type="button" id="project-editor-run-btn" class="admin-btn-sm project-editor-run-btn" disabled title="Run script">Run</button>' +
+        '<span class="project-editor-head-actions">' +
+          '<button type="button" id="project-editor-run-btn" class="doc-action-icon-btn project-editor-run-btn" disabled title="Run script">' +
+            _RUN_PLAY_SVG +
+          '</button>' +
+        '</span>' +
+      '</div>' +
+      '<div class="project-editor-toolbar">' +
         '<button type="button" id="project-editor-reload-btn" class="admin-btn-sm" title="Reload from disk">Reload</button>' +
         '<button type="button" id="project-editor-save-btn" class="admin-btn-sm">Save</button>' +
+        '<button type="button" id="project-editor-preview-btn" class="admin-btn-sm hidden" title="Preview markdown or HTML">Preview</button>' +
       '</div>' +
+      '<div id="project-editor-md-preview" class="doc-md-preview project-editor-md-preview" style="display:none"></div>' +
+      '<iframe id="project-editor-html-preview" class="doc-html-preview project-editor-html-preview" sandbox="allow-scripts allow-modals" style="display:none"></iframe>' +
       '<div id="project-editor-wrap" class="doc-editor-wrap project-editor-wrap">' +
         '<div id="project-editor-line-numbers" class="doc-line-numbers"><div class="doc-line-number-content"><span class="doc-line-number-label">1</span></div></div>' +
         '<pre id="project-editor-highlight" class="doc-editor-highlight"><code id="project-editor-code"></code></pre>' +
         '<textarea id="project-editor-textarea" class="doc-editor-textarea" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>' +
+      '</div>' +
+      '<div class="project-editor-footer">' +
+        '<span class="project-editor-hints">Ctrl+S save · Ctrl+Enter run · Ctrl+W close tab</span>' +
+        '<span id="project-editor-save-status" class="project-editor-save-status"></span>' +
       '</div>' +
     '</div>';
   _bindEditorEvents();
@@ -653,6 +747,7 @@ export function closeFile() {
   clearTimeout(_hlDebounce);
   _stopDiskPoll();
   _hideDiskBanner();
+  _exitPreview();
   _path = null;
   _diskModifiedAt = null;
   _lastSavedContent = '';
@@ -673,6 +768,7 @@ export function handlePathChange(from, to) {
   _updatePathDisplay();
   _updateLangBadge();
   _updateRunButton();
+  _updatePreviewButton();
 }
 
 export async function reloadFromDisk() {
@@ -772,4 +868,5 @@ export default {
   handlePathChange,
   reloadFromDisk,
   reconcileWithDisk,
+  togglePreview,
 };

@@ -12,6 +12,12 @@ import editorModule from './editor.js';
 import runPanelModule from './runPanel.js';
 import chatSidebarModule from './chatSidebar.js';
 import workspaceState from './workspaceState.js';
+import workspaceShell from './workspaceShell.js';
+import tabHost from './tabHost.js';
+import linkViewerModule from './linkViewer.js';
+import workspaceShortcuts from './workspaceShortcuts.js';
+import workspaceResize from './workspaceResize.js';
+import workspaceSplit from './workspaceSplit.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
@@ -28,24 +34,200 @@ function _workspaceRoot() {
   return document.getElementById('project-workspace-panel');
 }
 
+function _fileTabId(path) {
+  return `file:${path}`;
+}
+
+function _resolveActiveProjectFile() {
+  const panel = document.getElementById('project-workspace-panel');
+  if (!panel || panel.classList.contains('hidden')) return null;
+
+  const open = editorModule.getOpenPath?.();
+  if (open) return open;
+
+  const tabs = tabHost.getTabs();
+  let depthId = null;
+  if (workspaceSplit.isEnabled() && workspaceSplit.canSplit(() => tabs)) {
+    depthId = workspaceSplit.getSplitTabIds(() => tabs).depthId;
+  }
+  if (!depthId) {
+    const active = tabHost.getActiveTab();
+    if (active?.kind === 'depth' && active.id.startsWith('file:')) {
+      depthId = active.id;
+    }
+  }
+  if (!depthId) {
+    const depthTab = tabs.find((t) => t.kind === 'depth' && t.id.startsWith('file:'));
+    depthId = depthTab?.id || null;
+  }
+  if (depthId?.startsWith('file:')) return depthId.slice(5);
+  return _openProjectFile || null;
+}
+
+function _persistCenterTabs(tabs, activeId) {
+  if (!_openProjectId) return;
+  const list = (tabs || tabHost.getTabs()).map(({ id, kind, label, shortLabel, meta, pinned }) => ({
+    id,
+    kind,
+    label,
+    shortLabel,
+    ...(meta ? { meta } : {}),
+    ...(pinned ? { pinned: true } : {}),
+  }));
+  workspaceState.saveCenterTabs(_openProjectId, list);
+  workspaceState.saveActiveCenterTab(
+    _openProjectId,
+    activeId ?? tabHost.getActiveTab()?.id ?? null,
+  );
+}
+
+function _updateCenterView(tab) {
+  if (tab) workspaceSplit.noteTab(tab);
+
+  const empty = document.getElementById('project-center-empty');
+  const editorPane = document.getElementById('project-editor-pane');
+  const linkPane = document.getElementById('project-link-viewer-pane');
+  const well = document.getElementById('project-center-well');
+
+  if (workspaceSplit.isEnabled() && workspaceSplit.canSplit(() => tabHost.getTabs())) {
+    const { depthId, breadthId } = workspaceSplit.getSplitTabIds(() => tabHost.getTabs());
+    const breadthTab = tabHost.getTabs().find((t) => t.id === breadthId);
+    empty?.classList.add('hidden');
+    well?.classList.add('project-center-well--split');
+    editorPane?.classList.remove('hidden');
+    linkPane?.classList.remove('hidden');
+    void linkViewerModule.show(breadthId, breadthTab?.meta);
+    if (depthId?.startsWith('file:')) {
+      const path = depthId.slice(5);
+      if (editorModule.getOpenPath?.() !== path) {
+        void fileTreeModule.openPath(path);
+      }
+    }
+    return;
+  }
+
+  well?.classList.remove('project-center-well--split');
+
+  if (!tab) {
+    empty?.classList.remove('hidden');
+    editorPane?.classList.add('hidden');
+    linkPane?.classList.add('hidden');
+    linkViewerModule.hide();
+    return;
+  }
+  empty?.classList.add('hidden');
+  if (tab.kind === 'depth') {
+    editorPane?.classList.remove('hidden');
+    linkPane?.classList.add('hidden');
+    linkViewerModule.hide();
+  } else {
+    editorPane?.classList.add('hidden');
+    linkPane?.classList.remove('hidden');
+    void linkViewerModule.show(tab.id, tab.meta);
+  }
+}
+
+function _initCenterTabs() {
+  const strip = document.getElementById('project-center-tab-bar');
+  if (!strip) return;
+  tabHost.init(strip, {
+    onSelect: (tab, opts) => {
+      if (!opts?.restored && tab?.kind === 'depth' && tab.id.startsWith('file:')) {
+        const path = tab.id.slice(5);
+        if (editorModule.getOpenPath?.() !== path) {
+          void fileTreeModule.openPath(path);
+        }
+      }
+      _updateCenterView(tab);
+    },
+    onClose: (tab) => {
+      if (tab?.kind === 'depth' && tab.id.startsWith('file:')) {
+        const path = tab.id.slice(5);
+        if (editorModule.getOpenPath?.() === path) {
+          const active = tabHost.getActiveTab();
+          if (!(active?.kind === 'depth' && active.id.startsWith('file:') && active.id !== tab.id)) {
+            editorModule.closeFile();
+          }
+        }
+      }
+      if (!tabHost.getActiveTab()) _updateCenterView(null);
+    },
+    onChange: (tabs, activeId) => _persistCenterTabs(tabs, activeId),
+  });
+  linkViewerModule.mount(document.getElementById('project-link-viewer-pane'), {
+    onLinkRemoved: () => {
+      if (_openProjectId) void _reloadWorkspaceLinks(_openProjectId);
+    },
+    onCloseTab: (nodeId) => {
+      tabHost.closeTab(nodeId);
+    },
+  });
+}
+
+function _openLinkTab(nodeId, meta) {
+  const tab = tabHost.openTab({
+    id: nodeId,
+    kind: 'breadth',
+    label: meta?.label || nodeId,
+    shortLabel: (meta?.label || nodeId).replace(/^[^:]+:/, ''),
+    meta,
+  });
+  if (!tab) uiModule.showToast?.('Close or unpin a tab to open more items', 3000);
+}
+
+function _openFileTab(path) {
+  if (!path) return;
+  const tab = tabHost.openTab({
+    id: _fileTabId(path),
+    kind: 'depth',
+    label: path,
+    shortLabel: path.split('/').pop() || path,
+  });
+  if (!tab) uiModule.showToast?.('Close or unpin a tab to open more items', 3000);
+}
+
+function _bindSplitToggle() {
+  const btn = document.getElementById('project-split-toggle');
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = '1';
+  btn.addEventListener('click', () => {
+    if (!workspaceSplit.isEnabled() && !workspaceSplit.canSplit(() => tabHost.getTabs())) {
+      uiModule.showToast?.('Open a link and a file to use split view', 3000);
+      return;
+    }
+    workspaceSplit.toggle();
+    _updateCenterView(tabHost.getActiveTab());
+  });
+}
+
 function _onProjectFileSelect(payload) {
   if (payload?.path) {
-    void editorModule.openFile(payload);
-    _openProjectFile = payload.path;
-    if (_openProjectId) workspaceState.saveOpenFile(_openProjectId, payload.path);
-  } else {
-    editorModule.closeFile();
-    _openProjectFile = null;
-    if (_openProjectId) workspaceState.saveOpenFile(_openProjectId, null);
+    void editorModule.openFile(payload).then(() => {
+      if (editorModule.getOpenPath?.() !== payload.path) return;
+      _openProjectFile = payload.path;
+      if (_openProjectId) workspaceState.saveOpenFile(_openProjectId, payload.path);
+      _openFileTab(payload.path);
+      runPanelModule.syncPath(payload.path);
+    });
+    return;
   }
-  runPanelModule.syncPath(payload?.path || null);
+  const open = editorModule.getOpenPath?.();
+  if (open) tabHost.closeTab(_fileTabId(open));
+  editorModule.closeFile();
+  _openProjectFile = null;
+  if (_openProjectId) workspaceState.saveOpenFile(_openProjectId, null);
+  if (!tabHost.getActiveTab()) _updateCenterView(null);
+  runPanelModule.syncPath(null);
 }
 
 function _mountEditor(project) {
   const pane = document.getElementById('project-editor-pane');
   if (!pane || !project?.id) return;
   editorModule.mount(pane, project.id, {
-    onRun: () => runPanelModule.runCurrent(),
+    onRun: () => {
+      workspaceShell.focusRunTab();
+      void runPanelModule.runCurrent();
+    },
   });
 }
 
@@ -741,7 +923,11 @@ function _renderLinksRail(project, linksData) {
     const title = _projectLinkTitle(n, linkedId);
     const badge = n ? _projectTypeBadge(n) : `<span class="kg-type kg-type-research">?</span>`;
     return `<div class="kg-link-row-wrap project-link-row-wrap${stale ? ' project-link-row-stale' : ''}">
-      <button type="button" class="kg-link-row project-link-row" data-node-id="${esc(linkedId)}">
+      <button type="button" class="kg-link-row project-link-row" data-node-id="${esc(linkedId)}"${
+        stale
+          ? ` data-stale="1" data-remove-from="${esc(removeFrom)}" data-remove-to="${esc(removeTo)}" data-edge-kind="${esc(kind)}"`
+          : ''
+      }>
         <span class="kg-link-kind">${esc(kind)}</span>
         ${badge}
         <span class="kg-node-title">${esc(title)}</span>
@@ -806,11 +992,16 @@ function _renderLinksRail(project, linksData) {
     btn.addEventListener('click', () => {
       const id = btn.dataset.nodeId;
       if (!id) return;
-      if (btn.closest('.project-link-row-stale')) {
-        uiModule.showToast?.('Graph node missing — remove this stale link or rebuild Links.', 4000);
-        return;
-      }
-      void knowledgeModule.openKnowledgeAtNode(id);
+      const meta = btn.dataset.stale
+        ? {
+            stale: true,
+            removeFrom: btn.dataset.removeFrom,
+            removeTo: btn.dataset.removeTo,
+            edgeKind: btn.dataset.edgeKind || 'related',
+            label: btn.querySelector('.kg-node-title')?.textContent?.trim() || id,
+          }
+        : { label: btn.querySelector('.kg-node-title')?.textContent?.trim() || id };
+      _openLinkTab(id, meta);
     });
   });
 
@@ -907,10 +1098,39 @@ function _renderWorkspaceShell(project) {
 }
 
 async function _restoreWorkspaceState(projectId) {
+  const savedTabs = workspaceState.getCenterTabs(projectId);
+  const activeId = workspaceState.getActiveCenterTab(projectId);
   const openPath = workspaceState.getOpenFile(projectId);
+
+  if (savedTabs.length) {
+    tabHost.restoreTabs(savedTabs, activeId);
+    const active = tabHost.getActiveTab();
+    if (active?.kind === 'depth' && active.id.startsWith('file:')) {
+      const path = active.id.slice(5);
+      const ok = await fileTreeModule.openPath(path);
+      if (!ok) {
+        tabHost.closeTab(active.id);
+        workspaceState.saveOpenFile(projectId, null);
+        _openProjectFile = null;
+      } else {
+        _openProjectFile = path;
+      }
+    } else if (openPath) {
+      _openProjectFile = openPath;
+    }
+    _persistCenterTabs();
+    return;
+  }
+
   if (!openPath) return;
   const ok = await fileTreeModule.openPath(openPath);
-  if (!ok) workspaceState.saveOpenFile(projectId, null);
+  if (!ok) {
+    workspaceState.saveOpenFile(projectId, null);
+    return;
+  }
+  _openProjectFile = openPath;
+  _openFileTab(openPath);
+  _persistCenterTabs();
 }
 
 export async function openProjectWorkspace(projectId) {
@@ -939,10 +1159,16 @@ export async function openProjectWorkspace(projectId) {
   _renderProjectList();
   _renderWorkspaceShell(project);
   _setProjectMainVisible(true);
+  _initCenterTabs();
+  workspaceShell.mount(projectId);
+  workspaceResize.mount(projectId);
+  workspaceSplit.mount(projectId);
+  _bindSplitToggle();
   _mountEditor(project);
   _mountFileTree(project);
   _mountRunPanel(project);
   _mountChatSidebar(project);
+  workspaceShortcuts.mount();
   await _restoreWorkspaceState(projectId);
   await _reloadWorkspaceLinks(projectId);
 }
@@ -963,6 +1189,13 @@ function _doCloseProjectWorkspace({ restoreChat = true, wasOpen = false } = {}) 
   fileTreeModule.unmount();
   editorModule.unmount();
   runPanelModule.unmount();
+  linkViewerModule.unmount();
+  tabHost.reset();
+  workspaceShell.unmount();
+  workspaceResize.unmount();
+  workspaceSplit.unmount();
+  workspaceShortcuts.unmount();
+  _updateCenterView(null);
   _openProjectFile = null;
   _setProjectMainVisible(false);
   _openProjectId = null;
@@ -1106,6 +1339,10 @@ if (typeof window !== 'undefined') {
   window.openProjectWorkspace = openProjectWorkspace;
   window.closeProjectWorkspace = closeProjectWorkspace;
   window.refreshProjectWorkspaceLinks = refreshProjectWorkspaceLinks;
-  window.getActiveProjectFile = () => editorModule.getOpenPath?.() || _openProjectFile || null;
+  window.getActiveProjectFile = () => _resolveActiveProjectFile();
+  window.isProjectWorkspaceOpen = () => {
+    const panel = document.getElementById('project-workspace-panel');
+    return !!(panel && !panel.classList.contains('hidden'));
+  };
   window.saveActiveProjectFile = (opts) => editorModule.save?.(opts || { silent: true });
 }
