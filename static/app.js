@@ -39,6 +39,7 @@ import themeModule from './js/theme.js';
 import cookbookModule from './js/cookbook.js';
 import groupModule from './js/group.js';
 import * as researchPanelModule from './js/research/panel.js';
+import projectsModule from './js/projects/index.js';
 import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
@@ -2397,6 +2398,7 @@ function initializeEventListeners() {
     'sidebar-new-chat':    '#sidebar-new-chat-btn',
     'sidebar-search':      '#sidebar-search-btn',
     'sessions-section':    '#sessions-section',
+    'projects-section':    '#projects-section',
     'models-section':      '#models-section',
     'tools-section':       '#tools-section',
     // Per-tool visibility — fine-grained control over which entries show
@@ -3091,6 +3093,10 @@ function initializeEventListeners() {
     railNewSession.addEventListener('click', async () => {
       if (!sessionModule) return;
       if (_closeCompareIfActive()) return;
+      if (window.closeProjectWorkspace) {
+        const closed = await window.closeProjectWorkspace({ restoreChat: false });
+        if (!closed) return;
+      }
       _deactivateIncognito();
       // Clear character on new chat
       if (presetsModule && presetsModule.deactivateCharacter) presetsModule.deactivateCharacter();
@@ -3118,9 +3124,13 @@ function initializeEventListeners() {
   // the default model attaches when they hit send.
   const mobileNewChat = el('mobile-new-chat-btn');
   if (mobileNewChat) {
-    mobileNewChat.addEventListener('click', () => {
+    mobileNewChat.addEventListener('click', async () => {
       if (!sessionModule) return;
       if (_closeCompareIfActive()) return;
+      if (window.closeProjectWorkspace) {
+        const closed = await window.closeProjectWorkspace({ restoreChat: false });
+        if (!closed) return;
+      }
       _deactivateIncognito();
       _startFreshChat();
       document.querySelectorAll('.session-item.active').forEach(s => s.classList.remove('active'));
@@ -3138,6 +3148,10 @@ function initializeEventListeners() {
     brandBtn.addEventListener('click', async () => {
       if (!sessionModule) return;
       if (_closeCompareIfActive()) return;
+      if (window.closeProjectWorkspace) {
+        const closed = await window.closeProjectWorkspace({ restoreChat: false });
+        if (!closed) return;
+      }
       _deactivateIncognito();
       if (presetsModule && presetsModule.deactivateCharacter) presetsModule.deactivateCharacter();
       // Clear research toggle when starting a fresh chat (not via research button)
@@ -4081,6 +4095,7 @@ function startNobodyApp() {
   // Section collapse/expand + drag reorder (extracted to js/section-management.js)
   initSectionCollapse(Storage);
   initSectionDrag(Storage, loadUIVis);
+  projectsModule.initProjects();
   
   // Handle drag over and out for individual sections
   const sections = document.querySelectorAll('.section[draggable="true"]');

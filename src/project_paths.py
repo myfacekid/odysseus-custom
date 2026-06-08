@@ -119,3 +119,75 @@ def resolve_project_path(
 ) -> Path:
     """Resolve *rel_path* within a project's working directory."""
     return resolve_path_under_root(working_dir, rel_path, must_exist=must_exist)
+
+
+def find_dirs_named_under_root(
+    root: str,
+    name: str,
+    *,
+    max_depth: int = 7,
+    limit: int = 20,
+) -> list[str]:
+    """Find directories with basename *name* under *root* (BFS, depth-limited)."""
+    target = (name or "").strip()
+    if not target or target in {".", ".."} or "/" in target or "\\" in target:
+        return []
+
+    try:
+        root_real = os.path.realpath(os.path.expanduser(root))
+    except OSError:
+        return []
+
+    matches: list[str] = []
+    queue: list[tuple[str, int]] = [(root_real, 0)]
+    seen: set[str] = {root_real}
+
+    while queue and len(matches) < limit:
+        current, depth = queue.pop(0)
+        if depth > max_depth:
+            continue
+        try:
+            entries = os.listdir(current)
+        except (OSError, PermissionError):
+            continue
+        for entry in sorted(entries):
+            if entry.startswith("."):
+                continue
+            full = os.path.join(current, entry)
+            try:
+                resolved = os.path.realpath(full)
+            except OSError:
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if not os.path.isdir(resolved):
+                continue
+            if not os.access(resolved, os.R_OK | os.X_OK):
+                continue
+            if not is_path_under_root(resolved, root_real):
+                continue
+            if entry == target:
+                matches.append(resolved)
+                if len(matches) >= limit:
+                    return matches
+            if depth < max_depth:
+                queue.append((resolved, depth + 1))
+    return matches
+
+
+def working_dir_warning(canonical_path: str) -> str | None:
+    """Return a UX warning when the working dir is overly broad."""
+    text = (canonical_path or "").strip()
+    if not text:
+        return None
+    try:
+        resolved = os.path.realpath(os.path.expanduser(text))
+    except OSError:
+        return None
+    home = os.path.realpath(os.path.expanduser("~"))
+    if resolved in ("/", os.path.realpath("/")):
+        return "Root filesystem paths are overly broad for a project workspace."
+    if resolved == home:
+        return "Your home directory is very broad — prefer a dedicated project folder."
+    return None

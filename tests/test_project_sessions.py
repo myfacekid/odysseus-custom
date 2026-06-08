@@ -12,7 +12,7 @@ from sqlalchemy.pool import NullPool
 
 import core.database as cdb
 import core.session_manager as SM
-from core.database import Session as DbSession, _migrate_add_project_id_column
+from core.database import Session as DbSession, _migrate_add_project_id_column, _migrate_backfill_project_session_mode
 from core.session_manager import SessionManager
 from routes import project_routes
 from src.project_sessions import create_project_session, list_project_sessions
@@ -131,3 +131,78 @@ def test_project_sessions_api_cross_owner(db_env, monkeypatch):
 
     res = client.get(f"/api/projects/{db_env['project_id']}/sessions")
     assert res.status_code == 404
+
+
+def test_backfill_project_session_mode(tmp_path, monkeypatch):
+    db_path = tmp_path / "backfill.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, name TEXT, project_id TEXT, mode TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO sessions (id, name, project_id, mode) VALUES (?, ?, ?, ?)",
+        ("s1", "Legacy project chat", "proj-x", None),
+    )
+    conn.execute(
+        "INSERT INTO sessions (id, name, project_id, mode) VALUES (?, ?, ?, ?)",
+        ("s2", "Main chat", None, "agent"),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(cdb, "DATABASE_URL", f"sqlite:///{db_path}")
+    _migrate_backfill_project_session_mode()
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT mode FROM sessions WHERE id = 's1'").fetchone()
+    other = conn.execute("SELECT mode FROM sessions WHERE id = 's2'").fetchone()
+    conn.close()
+    assert row[0] == "project"
+    assert other[0] == "agent"
+
+
+def test_is_project_workspace_session_helper():
+    from core.database import is_project_workspace_session
+
+    assert is_project_workspace_session("project", None)
+    assert is_project_workspace_session(None, "proj-1")
+    assert is_project_workspace_session("agent", None) is False
+    assert is_project_workspace_session(None, None) is False
+
+
+def test_project_sessions_marked_for_main_nav_exclusion(db_env):
+    manager = db_env["manager"]
+    project_id = db_env["project_id"]
+
+    project_chat = create_project_session(
+        manager,
+        "alice",
+        project_id,
+        name="Workspace chat",
+        endpoint_url="http://localhost:8000/v1",
+        model="test-model",
+    )
+    main_id = str(uuid.uuid4())
+    manager.create_session(
+        session_id=main_id,
+        name="Main sidebar chat",
+        endpoint_url="http://localhost:8000/v1",
+        model="test-model",
+        owner="alice",
+    )
+
+    from core.database import SessionLocal, is_project_workspace_session
+
+    db = SessionLocal()
+    try:
+        rows = {row.id: row for row in db.query(DbSession).all()}
+        assert is_project_workspace_session(
+            rows[project_chat["id"]].mode,
+            rows[project_chat["id"]].project_id,
+        )
+        assert not is_project_workspace_session(
+            rows[main_id].mode,
+            rows[main_id].project_id,
+        )
+    finally:
+        db.close()

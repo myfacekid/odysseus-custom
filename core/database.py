@@ -922,6 +922,43 @@ def _migrate_add_mode_column():
     except Exception as e:
         logging.getLogger(__name__).warning(f"Migration check for mode failed: {e}")
 
+
+def _migrate_backfill_project_session_mode():
+    """Set mode='project' on sessions linked to a project workspace."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(sessions)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "project_id" not in columns or "mode" not in columns:
+            conn.close()
+            return
+        cur = conn.execute(
+            "UPDATE sessions SET mode = 'project' "
+            "WHERE project_id IS NOT NULL AND TRIM(project_id) != '' "
+            "AND (mode IS NULL OR TRIM(mode) = '')"
+        )
+        if cur.rowcount:
+            conn.commit()
+            logging.getLogger(__name__).info(
+                "Migrated: backfilled mode='project' on %s session(s)",
+                cur.rowcount,
+            )
+        conn.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"project session mode backfill failed: {e}")
+
+
+def is_project_workspace_session(mode, project_id) -> bool:
+    """True when a session belongs to a project workspace (not main Chats nav)."""
+    if project_id and str(project_id).strip():
+        return True
+    return (mode or "").strip() == "project"
+
+
 def _migrate_add_folder_column():
     """Add folder column to sessions table if it doesn't exist."""
     import sqlite3
@@ -1572,6 +1609,7 @@ def init_db():
     _migrate_add_project_id_column()
     _migrate_add_token_columns()
     _migrate_add_mode_column()
+    _migrate_backfill_project_session_mode()
     _migrate_add_multiuser_owner_columns()
     _migrate_add_api_token_scopes_column()
     _migrate_backfill_document_owner_from_session()
@@ -1859,7 +1897,19 @@ def get_session_mode(session_id: str):
     connection is always returned to the pool."""
     try:
         with get_db_session() as db:
-            return db.query(Session.mode).filter(Session.id == session_id).scalar()
+            row = (
+                db.query(Session.mode, Session.project_id)
+                .filter(Session.id == session_id)
+                .first()
+            )
+            if not row:
+                return None
+            mode, project_id = row
+            if mode and str(mode).strip():
+                return mode
+            if project_id and str(project_id).strip():
+                return "project"
+            return None
     except Exception:
         logger.warning("Failed to read mode for session %s", session_id)
         return None

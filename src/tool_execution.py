@@ -375,6 +375,192 @@ def _parse_write_file(content: str) -> Dict:
     return {"path": lines[0].strip(), "content": lines[1] if len(lines) > 1 else ""}
 
 
+def _parse_write_project_file(content: str) -> Dict:
+    return _parse_write_file(content)
+
+
+def _parse_run_project_script_content(content: str) -> tuple:
+    """Return (rel_path, args list, timeout or None) from tool block text."""
+    import json as _json
+
+    lines = content.split("\n")
+    path = lines[0].strip() if lines else ""
+    if not path:
+        return "", [], None
+    body = "\n".join(lines[1:]).strip()
+    if body.startswith("{"):
+        try:
+            parsed = _json.loads(body)
+            if isinstance(parsed, dict):
+                raw_args = parsed.get("args") or []
+                args = [str(a) for a in raw_args] if isinstance(raw_args, list) else []
+                timeout = parsed.get("timeout")
+                if timeout is not None:
+                    timeout = int(timeout)
+                return path, args, timeout
+        except (_json.JSONDecodeError, TypeError, ValueError):
+            pass
+    args = [ln.strip() for ln in lines[1:] if ln.strip()]
+    return path, args, None
+
+
+async def _execute_read_project_file(
+    content: str,
+    *,
+    session_id: Optional[str],
+    owner: Optional[str],
+) -> Dict:
+    from src.project_files import ProjectFileError, read_text_file
+    from src.project_paths import ProjectPathError
+    from src.project_tool_policy import get_session_project_id
+    from src.project_workspace import ProjectAccessError, ProjectNotFoundError
+
+    rel_path = content.split("\n", 1)[0].strip()
+    if not rel_path:
+        return {"error": "read_project_file: path is required", "exit_code": 1}
+    project_id = get_session_project_id(session_id)
+    if not project_id:
+        return {"error": "read_project_file: no project linked to session", "exit_code": 1}
+    if not owner:
+        return {"error": "read_project_file: owner required", "exit_code": 1}
+    try:
+        payload = await asyncio.to_thread(read_text_file, owner, project_id, rel_path)
+    except ProjectPathError as e:
+        return {"error": f"read_project_file: {e}", "exit_code": 1}
+    except ProjectFileError as e:
+        return {"error": f"read_project_file: {e}", "exit_code": 1}
+    except (ProjectNotFoundError, ProjectAccessError):
+        return {"error": "read_project_file: project not found", "exit_code": 1}
+    except OSError as e:
+        return {"error": f"read_project_file: {rel_path}: {e}", "exit_code": 1}
+
+    data = payload["content"]
+    truncated = len(data) > MAX_READ_CHARS
+    if truncated:
+        data = data[:MAX_READ_CHARS] + f"\n... [truncated at {MAX_READ_CHARS} chars]"
+    return {
+        "output": data,
+        "path": payload.get("path", rel_path),
+        "modified_at": payload.get("modified_at"),
+        "exit_code": 0,
+    }
+
+
+async def _execute_write_project_file(
+    content: str,
+    *,
+    session_id: Optional[str],
+    owner: Optional[str],
+) -> Dict:
+    from src.project_files import ProjectFileError, write_text_file
+    from src.project_paths import ProjectPathError
+    from src.project_tool_policy import get_session_project_id
+    from src.project_workspace import ProjectAccessError, ProjectNotFoundError
+
+    lines = content.split("\n", 1)
+    rel_path = lines[0].strip()
+    body = lines[1] if len(lines) > 1 else ""
+    if not rel_path:
+        return {"error": "write_project_file: path is required", "exit_code": 1}
+    project_id = get_session_project_id(session_id)
+    if not project_id:
+        return {"error": "write_project_file: no project linked to session", "exit_code": 1}
+    if not owner:
+        return {"error": "write_project_file: owner required", "exit_code": 1}
+    try:
+        payload = await asyncio.to_thread(
+            write_text_file, owner, project_id, rel_path, body,
+        )
+    except ProjectPathError as e:
+        return {"error": f"write_project_file: {e}", "exit_code": 1}
+    except ProjectFileError as e:
+        return {"error": f"write_project_file: {e}", "exit_code": 1}
+    except (ProjectNotFoundError, ProjectAccessError):
+        return {"error": "write_project_file: project not found", "exit_code": 1}
+    except OSError as e:
+        return {"error": f"write_project_file: {rel_path}: {e}", "exit_code": 1}
+
+    rel = payload.get("path", rel_path)
+    size = payload.get("size", len(body.encode("utf-8")))
+    return {
+        "output": f"Wrote {size} bytes to {rel}",
+        "path": rel,
+        "modified_at": payload.get("modified_at"),
+        "exit_code": 0,
+    }
+
+
+async def _execute_run_project_script(
+    content: str,
+    *,
+    session_id: Optional[str],
+    owner: Optional[str],
+) -> Dict:
+    from src.project_files import ProjectFileError
+    from src.project_paths import ProjectPathError
+    from src.project_runner import ProjectRunError, run_python_script
+    from src.project_tool_policy import get_session_project_id
+    from src.project_workspace import ProjectAccessError, ProjectNotFoundError
+
+    rel_path, args, timeout = _parse_run_project_script_content(content)
+    if not rel_path:
+        return {"error": "run_project_script: path is required", "exit_code": 1}
+    project_id = get_session_project_id(session_id)
+    if not project_id:
+        return {"error": "run_project_script: no project linked to session", "exit_code": 1}
+    if not owner:
+        return {"error": "run_project_script: owner required", "exit_code": 1}
+    try:
+        result = await asyncio.to_thread(
+            run_python_script,
+            owner,
+            project_id,
+            rel_path,
+            args=args or None,
+            timeout=timeout,
+        )
+    except ProjectRunError as e:
+        return {"error": f"run_project_script: {e}", "exit_code": 1}
+    except ProjectPathError as e:
+        return {"error": f"run_project_script: {e}", "exit_code": 1}
+    except ProjectFileError as e:
+        return {"error": f"run_project_script: {e}", "exit_code": 1}
+    except (ProjectNotFoundError, ProjectAccessError):
+        return {"error": "run_project_script: project not found", "exit_code": 1}
+    except OSError as e:
+        return {"error": f"run_project_script: {rel_path}: {e}", "exit_code": 1}
+
+    stdout = (result.get("stdout") or "").rstrip()
+    stderr = (result.get("stderr") or "").rstrip()
+    output = stdout
+    if stderr:
+        output = (output + "\nSTDERR: " + stderr).strip() if output else "STDERR: " + stderr
+    if result.get("timed_out"):
+        note = "(timed out)"
+        output = (output + "\n" + note).strip() if output else note
+
+    exit_code = result.get("exit_code")
+    if result.get("timed_out"):
+        exit_code = 124
+    elif exit_code is None:
+        exit_code = 0 if result.get("ok") else 1
+
+    raw_output = output or "(no output)"
+    output_truncated = len(raw_output) > MAX_OUTPUT_CHARS
+    if output_truncated:
+        raw_output = _truncate(raw_output, MAX_OUTPUT_CHARS)
+
+    return {
+        "output": raw_output,
+        "exit_code": exit_code,
+        "path": result.get("path", rel_path),
+        "timed_out": bool(result.get("timed_out")),
+        "duration_ms": result.get("duration_ms"),
+        "network_allowed": result.get("network_allowed"),
+        "output_truncated": output_truncated,
+    }
+
+
 _MCP_ARG_PARSERS: Dict[str, callable] = {
     "bash":           lambda c: {"command": c},
     "python":         lambda c: {"code": c},
@@ -927,6 +1113,24 @@ async def execute_tool_block(
     elif tool == "search_zotero":
         desc = "search_zotero"
         result = await do_search_zotero(content, owner=owner)
+    elif tool == "read_project_file":
+        rel = content.split("\n", 1)[0].strip()[:120]
+        desc = f"read_project_file: {rel}"
+        result = await _execute_read_project_file(
+            content, session_id=session_id, owner=owner,
+        )
+    elif tool == "write_project_file":
+        rel = content.split("\n", 1)[0].strip()[:120]
+        desc = f"write_project_file: {rel}"
+        result = await _execute_write_project_file(
+            content, session_id=session_id, owner=owner,
+        )
+    elif tool == "run_project_script":
+        rel = content.split("\n", 1)[0].strip()[:120]
+        desc = f"run_project_script: {rel}"
+        result = await _execute_run_project_script(
+            content, session_id=session_id, owner=owner,
+        )
     elif tool == "vault_search":
         desc = "vault_search"
         result = await do_vault_search(content, owner=owner)

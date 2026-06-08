@@ -727,6 +727,20 @@ import createResearchSynapse from './researchSynapse.js';
         try { await documentModule.saveDocument(); } catch(e) { console.warn('doc auto-save failed', e); }
       }
 
+      // Project workspace: save open cwd file so agent tools match disk
+      const _chatContainer = document.getElementById('chat-container');
+      const _inProjectWs = _chatContainer?.classList.contains('project-active')
+        && _chatContainer?.classList.contains('project-chat-docked');
+      let _activeProjectFile = null;
+      if (_inProjectWs && typeof window.saveActiveProjectFile === 'function') {
+        try { await window.saveActiveProjectFile({ silent: true }); } catch (e) {
+          console.warn('project file auto-save failed', e);
+        }
+        if (typeof window.getActiveProjectFile === 'function') {
+          _activeProjectFile = window.getActiveProjectFile();
+        }
+      }
+
       // Inject document selection context if present
       let finalMsg = msg;
       if (docSel) {
@@ -759,12 +773,19 @@ import createResearchSynapse from './researchSynapse.js';
         try { await documentModule.saveDocument({ silent: true }); } catch (_e) { /* best-effort */ }
         fd.append('active_doc_id', documentModule.getCurrentDocId());
       }
+      if (_activeProjectFile) {
+        fd.append('active_project_file', _activeProjectFile);
+      }
       // Web toggle: pre-search in Chat mode, tool permission in Agent mode
       const toggleState = Storage.loadToggleState();
       let isAgentMode = (toggleState.mode || 'chat') === 'agent';
       // Auto-escalate to agent mode when a document is open — the user expects
       // the AI to see the document and have tools to edit it
       if (!isAgentMode && documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
+        isAgentMode = true;
+      }
+      // Same for project cwd file open in workspace chat
+      if (!isAgentMode && _inProjectWs && _activeProjectFile) {
         isAgentMode = true;
       }
       fd.append('mode', isAgentMode ? 'agent' : 'chat');

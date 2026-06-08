@@ -2,6 +2,7 @@
  * Deep Research side panel — open/close, form, job rendering, library.
  */
 import * as jobs from './jobs.js';
+import * as projectLink from './projectLink.js';
 import themeModule from '../theme.js';
 import createResearchSynapse from '../researchSynapse.js';
 import spinnerModule from '../spinner.js';
@@ -332,6 +333,7 @@ function _switchComposeTab(tab) {
   if (topicPane) topicPane.hidden = next !== 'topic';
   if (papersPane) papersPane.hidden = next !== 'papers';
 
+  projectLink.updateProjectPickerVisibility();
   const hint = document.getElementById('research-tab-hint');
   const queryEl = document.getElementById('research-query');
   if (hint) {
@@ -353,6 +355,7 @@ function _saveSettingsToStorage() {
     const knowledgeEl = document.getElementById('research-include-knowledge');
     const modeEl = document.getElementById('research-mode');
     const lengthEl = document.getElementById('research-report-length');
+    const projectEl = document.getElementById('research-project-id');
     localStorage.setItem(_SETTINGS_KEY, JSON.stringify({
       max_rounds: document.getElementById('research-rounds')?.value || '0',
       search_provider: document.getElementById('research-search-provider')?.value || '',
@@ -363,6 +366,7 @@ function _saveSettingsToStorage() {
       include_knowledge: knowledgeEl ? !!knowledgeEl.checked : true,
       mode: modeEl?.value || 'literature_review',
       report_length: lengthEl?.value || 'standard',
+      project_id: projectEl?.value || '',
       compose_tab: _getActiveComposeTab(),
     }));
   } catch {}
@@ -505,7 +509,10 @@ export function init(apiBase, markdownMod, sessionMod) {
   _sessionModule = sessionMod;
   jobs.init(apiBase);
   jobs.setRenderCallback(_renderJobs);
-  jobs.onComplete(() => { if (!_open) _showBadge(); });
+  jobs.onComplete((job) => {
+    if (!_open) _showBadge();
+    void projectLink.suggestLinkAfterComplete(job, _apiBase);
+  });
 }
 
 export function isOpen() { return _open; }
@@ -705,6 +712,13 @@ function _buildPanelHTML() {
               <option value="compare">Compare (2+ papers)</option>
             </select>
           </label>
+          <label class="research-setting research-project-setting" id="research-project-setting-wrap" hidden>
+            <span class="research-setting-label">Link to project</span>
+            <select id="research-project-id">
+              <option value="">None — decide after research</option>
+            </select>
+            <span class="research-project-hint">Optional for compare / gap analysis — we'll ask before linking when research completes.</span>
+          </label>
           <div class="research-seeds-block research-seeds-block--compact">
             <div class="research-seeds-label">Seed papers</div>
             <div id="research-seed-chips" class="research-seed-chips"></div>
@@ -842,7 +856,15 @@ function _wireEvents(pane) {
     pane.querySelector(`#${id}`)?.addEventListener('change', _saveSettingsToStorage);
   });
 
+  pane.querySelector('#research-mode')?.addEventListener('change', () => {
+    projectLink.updateProjectPickerVisibility();
+    _saveSettingsToStorage();
+  });
+  pane.querySelector('#research-project-id')?.addEventListener('change', _saveSettingsToStorage);
+
   _renderJobs();
+  void projectLink.populateProjectSelect(_apiBase, document.getElementById('research-project-id'));
+  projectLink.updateProjectPickerVisibility();
 }
 
 function _readSettings() {
@@ -866,6 +888,10 @@ function _readSettings() {
     compose_tab: tab,
   };
   if (seeds.length) settings.seed_papers = seeds;
+  const projectId = projectLink.readSelectedProjectId();
+  if (projectId && projectLink.modeWantsProjectLink(settings.mode)) {
+    settings.project_id = projectId;
+  }
   const epSel = document.getElementById('research-endpoint');
   if (epSel && epSel.value) {
     const opt = epSel.options[epSel.selectedIndex];
@@ -914,6 +940,9 @@ function _editJob(job) {
   else if ((s.seed_papers || []).length) _switchComposeTab('papers');
   const modeEl = document.getElementById('research-mode');
   if (modeEl && s.mode) modeEl.value = s.mode;
+  const projectEl = document.getElementById('research-project-id');
+  if (projectEl && s.project_id) projectEl.value = s.project_id;
+  projectLink.updateProjectPickerVisibility();
   const lengthEl = document.getElementById('research-report-length');
   if (lengthEl && s.report_length) lengthEl.value = s.report_length;
   const roundsEl = document.getElementById('research-rounds');
@@ -1028,12 +1057,14 @@ function _restoreSavedSettings() {
   }
   const modeEl = document.getElementById('research-mode');
   if (modeEl && saved.mode) modeEl.value = saved.mode;
+  const projectEl = document.getElementById('research-project-id');
+  if (projectEl && saved.project_id) projectEl.value = saved.project_id;
   const lengthEl = document.getElementById('research-report-length');
   if (lengthEl && saved.report_length) lengthEl.value = saved.report_length;
   if (saved.compose_tab === 'papers' || saved.compose_tab === 'topic') {
     _switchComposeTab(saved.compose_tab);
   }
-  // Rounds intentionally defaults to "Auto" on every open — don't restore.
+  projectLink.updateProjectPickerVisibility();
   // Users can pick a specific cap each time if needed.
   const search = document.getElementById('research-search-provider');
   if (search && saved.search_provider !== undefined) search.value = saved.search_provider;
@@ -1433,6 +1464,7 @@ function _buildJobCard(job) {
         <button class="research-job-action" data-action="chat" title="Open follow-up chat with this research as context">${_chatIcon} Discuss</button>
         <button class="research-job-action research-job-action-report" data-action="report" title="Visual report">${_externalIcon} Visual Report</button>
         <button class="research-job-action" data-action="zotero" title="Save cited web sources to your Zotero library">Save to Zotero</button>
+        <button class="research-job-action" data-action="project" title="Link this research to a project workspace">Add to project</button>
         <button class="research-job-action research-job-action-dim" data-action="dismiss" title="Clear from list">${_cancelIcon}</button>
         <button class="research-job-action research-job-action-dim" data-action="delete" title="Delete from disk">${_trashIcon} Delete</button>
       </div>
@@ -1488,6 +1520,10 @@ function _buildJobCard(job) {
         btn.title = err.message || 'Save failed';
         setTimeout(() => { btn.textContent = orig; btn.disabled = false; btn.title = 'Save cited web sources to your Zotero library'; }, 2500);
       }
+    });
+    card.querySelector('[data-action="project"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void projectLink.promptLinkResearchJob(job, _apiBase);
     });
     card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
       e.stopPropagation();

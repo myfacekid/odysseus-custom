@@ -238,6 +238,7 @@ class ResearchHandler:
         seed_papers: list = None,
         research_mode: str = "literature_review",
         report_length: str = "standard",
+        project_id: Optional[str] = None,
     ) -> dict:
         """Start research as a background task. Returns task info dict.
 
@@ -287,6 +288,7 @@ class ResearchHandler:
             "seed_papers": list(seed_papers or []),
             "research_mode": research_mode or "literature_review",
             "report_length": report_length or "standard",
+            "project_id": (project_id or "").strip() or None,
             # SECURITY: track ownership so all reads / saves can filter by user.
             "owner": owner or "",
         }
@@ -613,6 +615,7 @@ class ResearchHandler:
                 "source_breakdown": entry.get("source_breakdown") or {},
                 "research_mode": entry.get("research_mode") or "literature_review",
                 "report_length": entry.get("report_length") or "standard",
+                "project_id": entry.get("project_id") or "",
                 "started_at": entry["started_at"],
                 "completed_at": time.time(),
                 # SECURITY: stamp owner so route handlers can filter by user.

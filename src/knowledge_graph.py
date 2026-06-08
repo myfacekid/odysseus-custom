@@ -22,7 +22,7 @@ SCHEMA_VERSION = 1
 KNOWLEDGE_ROOT = Path(DATA_DIR) / "knowledge"
 DEBOUNCE_SEC = 0.45
 
-_NODE_TYPES = frozenset({"task", "document", "memory", "skill", "note", "paper", "collection", "research"})
+_NODE_TYPES = frozenset({"task", "document", "memory", "skill", "note", "paper", "collection", "research", "project"})
 _EDGE_KINDS = frozenset({"parent", "link", "wikilink", "related", "supports", "in_collection"})
 _MANUAL_EDGE_KINDS = frozenset({"link", "related", "supports"})
 _INFERRED_EDGE_KINDS = frozenset({"parent", "wikilink", "in_collection"})
@@ -273,7 +273,25 @@ def add_graph_link(
     manual.append({"from": fr, "to": to, "kind": kind, "source": "manual"})
     save_manual_edges(owner, manual)
     _sync_edges_from_manual(owner)
+    _refresh_project_nodes_for_link(owner, fr, to)
     return {"ok": True, "from": fr, "to": to, "kind": kind}
+
+
+def _refresh_project_nodes_for_link(owner: str, fr: str, to: str) -> None:
+    """Update project graph snippets when link counts change."""
+    try:
+        from src.project_graph import upsert_project_node
+        from src.project_workspace import get_project
+
+        for ref in (fr, to):
+            ntype, rid = parse_node_id(ref)
+            if ntype != "project":
+                continue
+            project = get_project(owner, rid)
+            if project:
+                upsert_project_node(owner, project)
+    except Exception as exc:
+        logger.debug("Project node refresh after link change skipped: %s", exc)
 
 
 def remove_graph_link(
@@ -303,6 +321,7 @@ def remove_graph_link(
         return {"ok": False, "error": "Manual link not found"}
     save_manual_edges(owner, manual)
     _sync_edges_from_manual(owner)
+    _refresh_project_nodes_for_link(owner, fr, to)
     return {"ok": True, "removed": True}
 
 
@@ -668,6 +687,13 @@ def rebuild_owner_graph(owner: str) -> dict:
     except Exception as e:
         logger.debug(f"Research index skipped for {owner}: {e}")
 
+    try:
+        from src.project_graph import index_project_nodes
+
+        index_project_nodes(owner, nodes)
+    except Exception as e:
+        logger.debug(f"Project index skipped for {owner}: {e}")
+
     manual = load_manual_edges(owner)
     all_edges = _merge_edge_lists(edges, manual)
     save_graph(owner, nodes, all_edges)
@@ -959,6 +985,14 @@ def read_knowledge_content(
             lines.append(f"… and {len(papers) - 40} more")
         body = "\n".join(lines)
         meta = {"source": "zotero", "collection_key": rid, "path": title}
+    elif ntype == "project":
+        from src.project_graph import read_project_node_content
+
+        out = read_project_node_content(owner, rid, max_chars=max_chars)
+        if out.get("exit_code") != 0:
+            return out
+        body = out.get("output") or ""
+        meta = out.get("meta") or {"type": "project", "project_id": rid}
 
     if not body:
         body = node.get("snippet") or ""
@@ -992,6 +1026,8 @@ def _anchor_for(node: dict) -> str:
         return f"#paper-{rid}"
     if ntype == "collection":
         return f"#collection-{rid}"
+    if ntype == "project":
+        return f"#project-{rid}"
     return ""
 
 

@@ -8,7 +8,63 @@ Use this doc when starting future chats: *"Follow docs/projects-roadmap.md Phase
 
 **Last updated:** 2026-06-01
 
-**Status:** Phase 0 complete — spikes **0a–0e done** (path, files, runner, sessions, tool policy). Ready for Phase A go/no-go.
+**Status:** Phase D complete. Phase E narrowed: E1 done; **E2/E3 skipped**; E4/E5 (Links hub + stale links) largely done — verify UX.
+
+**Phase E — scope revision (2026-06-01):** Skip Zotero collection bulk-import and Library-by-project filter — curated explicit links only; bulk paper edges would flood agent context at current preamble limits. Prioritize Links hub navigation from project workspace + stale-link cleanup UI.
+
+**Phase E — research → project (2026-06-01):** Compare/gap project picker in research panel; post-complete confirm dialog; manual “Add to project” on done jobs; `project_id` on `/api/research/start` + saved JSON.
+
+**Phase E — agent tool context (2026-06-01):** Project preamble tool-routing table + active editor file injection (`active_project_file`); auto agent-mode when cwd file open.
+
+**Phase D — tool routing (2026-06-01):** `apply_session_tool_policy()` centralizes depth denylist in chat routes; integration tests verify schema filter, execution blocks, and `_build_system_prompt` preamble with linked research.
+
+**Phase D — chat visibility fix (2026-06-01):** Dock only `#chat-history` in grid; input bar stays below workspace; skip fade in project workspace; larger chat grid row.
+
+**Phase D — context injection (2026-06-01):** `src/project_context.py` — linked graph summaries in project session preamble; stale links marked; truncated at 4k chars / 24 links.
+
+**Phase D — chat sidebar (2026-06-01):** `static/js/projects/chatSidebar.js` — list/create/rename project chats via project session API; docks main chat UI in workspace region; `selectSession({ inProjectWorkspace: true })` avoids closing workspace.
+
+**Phase C — safety UX (2026-06-01):** Save-before-run + first-run intro in run panel; runner stdout cap 100k; agent tool result cap 10k (`output_truncated`); write-before-run guidance in project session prompt.
+
+**Phase C — agent tool (2026-06-01):** `run_project_script` in `tool_execution.py` — project session only; same backend as Run API; `.py` path + optional args JSON/lines; agent output capped at 10k with `output_truncated` flag.
+
+**Phase C — run panel UI (2026-06-01):** `static/js/projects/runPanel.js` — Run on editor toolbar (`.py` only), stdout/stderr panel, re-run/clear/copy, save-before-run prompt, first-run intro per project session.
+
+**Phase C — network policy (2026-06-01):** `project_run_allow_network` in `settings.py` (default **false**). Subprocess gets minimal env + stripped proxy/TLS vars; `ODYSSEUS_PROJECT_RUN_NETWORK=0|1` marker; `network_allowed` in run response. Not kernel-level socket blocking — see open question #6.
+
+**Phase B — agent tools (2026-06-01):** `read_project_file` / `write_project_file` in `tool_execution.py` — project session only; path relative to cwd; traversal rejected.
+
+**Phase B — agent prompt block (2026-06-01):** Project sessions inject three-paradigm rules + working dir in `agent_loop._build_system_prompt`.
+
+**Phase B — file tree API (2026-06-01):**
+| Endpoint | Method | Role |
+|----------|--------|------|
+| `/api/projects/{id}/files?path=` | GET | List immediate children (relative paths) |
+| `/api/projects/{id}/file?path=` | GET | Read UTF-8 text + `modified_at` |
+| `/api/projects/{id}/file` | PUT | Write/create text file |
+| `/api/projects/{id}/file?path=&recursive=` | DELETE | Delete file or directory |
+| `/api/projects/{id}/rename` | POST | Move/rename within cwd |
+| `/api/projects/{id}/mkdir` | POST | Create directory |
+
+All ops: owner → project → `resolve_project_path` (depth boundary only).
+
+**Phase B — file tree UI (2026-06-01):** `static/js/projects/fileTree.js` — lazy tree, create/rename/delete.
+
+**Phase B — editor (2026-06-01):** `static/js/projects/editor.js` — highlight.js overlay, line numbers, autosave PUT, disk conflict check via `modified_at`.
+
+**Phase A verification (2026-06-01 audit):**
+
+| Check | Result |
+|-------|--------|
+| Graph `project` node + rebuild index | ✅ |
+| Re-validate cwd on list/open; persist status drift | ✅ |
+| Server-host path picker + broad-path warnings | ✅ |
+| Projects nav: list / create / rename / archive / change folder | ✅ |
+| Workspace shell with depth/breadth labels; no run/chat UI | ✅ |
+| Manual link add/remove from workspace + Links browser | ✅ |
+| Open workspace from Links; project filter in graph | ✅ |
+| Owner isolation (404 cross-user) | ✅ |
+| ES module paths (`../ui.js`) | ✅ fixed |
 
 ---
 
@@ -271,15 +327,15 @@ Defer dedicated `in_project` edge kind until stricter semantics than `related` a
 
 **Prerequisites:** Phase 0 path resolver + owner checks passing tests.
 
-| Item | Direction | Clarifications |
-|------|-----------|----------------|
-| **`project` node type** | Add to `_NODE_TYPES`; CRUD + API | Mirror `research` indexing patterns in `knowledge_graph.py` |
-| **Project record** | `working_dir`, title, description, `working_dir_status`, owner | Re-validate path on open; update status if missing |
-| **Working dir picker** | User enters path; validate exists, readable, canonical | Warn if home or overly broad path; explain server-host path in help text |
-| **Projects nav section** | Like Chats: list, create, rename, archive/delete | Feature flag optional for early rollout |
-| **Project detail (shell)** | **Fixed** layout regions (no resize yet): placeholders for tree, editor, run, chat, links rail | CSS grid tokens in `static/style.css` |
-| **Manual linking** | Link/unlink from project detail + Links | Reuse link picker patterns from `knowledge.js` |
-| **Path guard** | Wire Phase 0 `resolve_project_path` into service layer | No file tree yet — only validate stored path |
+| Item | Direction | Clarifications | Status |
+|------|-----------|----------------|--------|
+| **`project` node type** | Add to `_NODE_TYPES`; CRUD + API | Mirror `research` indexing patterns in `knowledge_graph.py` | ✅ Done |
+| **Project record** | `working_dir`, title, description, `working_dir_status`, owner | Re-validate path on open; update status if missing | ✅ Done |
+| **Working dir picker** | User enters path; validate exists, readable, canonical | Warn if home or overly broad path; explain server-host path in help text | ✅ Done |
+| **Projects nav section** | Like Chats: list, create, rename, archive/delete | Feature flag optional for early rollout | ✅ Done |
+| **Project detail (shell)** | **Fixed** layout regions (no resize yet): placeholders for tree, editor, run, chat, links rail | CSS grid tokens in `static/style.css` | ✅ Done |
+| **Manual linking** | Link/unlink from project detail + Links | Reuse link picker patterns from `knowledge.js` | ✅ Done |
+| **Path guard** | Wire Phase 0 `resolve_project_path` into service layer | No file tree yet — only validate stored path | ✅ Done (Phase 0) |
 
 **Deliverable:** User creates project, sets working dir, links papers/research/docs, opens hub shell. Path validation and owner scope proven.
 
@@ -294,6 +350,16 @@ Defer dedicated `in_project` edge kind until stricter semantics than `related` a
 
 **Tests:** Graph CRUD; cross-owner 404; working dir validation; link/unlink edges.
 
+**Phase A implemented:**
+
+| File | Role |
+|------|------|
+| `src/project_graph.py` | Graph node upsert/delete/index; link helpers |
+| `src/project_paths.py` | `working_dir_warning()` for broad paths |
+| `routes/project_routes.py` | validate-dir, archive, links CRUD |
+| `static/js/projects/index.js` | Sidebar list, create flow, workspace shell |
+| `tests/test_project_graph.py` | Graph sync, links API, owner gate, archive |
+
 ---
 
 ## Phase B — Working directory file tree + Python editor
@@ -304,15 +370,15 @@ Defer dedicated `in_project` edge kind until stricter semantics than `related` a
 
 **Prerequisites:** Phase A project CRUD; Phase 0 file CRUD API extended.
 
-| Item | Direction | Clarifications |
-|------|-----------|----------------|
-| **File tree API** | list / read / write / rename / delete / mkdir under `resolve_project_path` only | Every op: owner → project → path; audit optional |
-| **File tree UI** | Sidebar tree; create file/folder; open in editor tab | Show path relative to root; handle external deletes gracefully |
-| **Editor module** | **`static/js/projects/editor.js`** — new module | Share: highlight.js setup, line numbers, language map from `document.js`; **do not** bind to SQLite doc IDs |
-| **Save model** | PUT relative path; conflict if changed on disk since open (optional etag) | Autosave policy matches documents where sensible |
+| Item | Direction | Clarifications | Status |
+|------|-----------|----------------|--------|
+| **File tree API** | list / read / write / rename / delete / mkdir under `resolve_project_path` only | Every op: owner → project → path; audit optional | ✅ Done |
+| **File tree UI** | Sidebar tree; create file/folder; open in editor tab | Show path relative to root; handle external deletes gracefully | ✅ Done |
+| **Editor module** | **`static/js/projects/editor.js`** — new module | Share: highlight.js setup, line numbers, language map from `document.js`; **do not** bind to SQLite doc IDs | ✅ v1 (autosave + conflict check; not full document.js parity) |
+| **Save model** | PUT relative path; conflict if changed on disk since open (optional etag) | Autosave policy matches documents where sensible | ✅ Mostly (editor autosave + `modified_at`; native confirm on conflict) |
 | **New vs linked docs** | Cwd `.py` ≠ document node until user links | UI: “Add to Library as document” = explicit action |
-| **Agent tools** | `read_project_file`, `write_project_file` — path relative to project root | Register in `tool_schemas.py`; implement in project service; **project session allowlist only** |
-| **Agent prompt block** | Inject three-paradigm rules (see above) | Prevents `create_document` for a script that should be `analysis.py` in cwd |
+| **Agent tools** | `read_project_file`, `write_project_file` — path relative to project root | Register in `tool_schemas.py`; implement in project service; **project session allowlist only** | ✅ Done |
+| **Agent prompt block** | Inject three-paradigm rules (see above) | Prevents `create_document` for a script that should be `analysis.py` in cwd | ✅ Done |
 
 **Deliverable:** Browse/edit/save `.py` in user directory; agent writes only under cwd when in project session.
 
@@ -336,13 +402,17 @@ Defer dedicated `in_project` edge kind until stricter semantics than `related` a
 
 **Prerequisites:** Phase B file API; Phase 0 runner spike promoted to production.
 
-| Item | Direction | Clarifications |
-|------|-----------|----------------|
-| **Run API** | `POST /api/projects/{id}/run` — body: `{ path, args? }` | Subprocess: `python3 script.py` with `cwd=working_dir`; **no shell**; timeout (e.g. 60s); max output chars |
-| **Network policy** | Off by default for subprocess env | Optional setting `project_run_allow_network`; document in open questions |
-| **Run panel UI** | stdout/stderr; exit code; re-run; “Run” on editor toolbar | UX reference: `cookbookRunning.js` output panel |
-| **Agent tool** | `run_project_script` — relative path, optional args allowlist | Same backend as Run API; no arbitrary `-c` strings in v1 (file path only) |
-| **Safety UX** | Confirm if unsaved buffer; warn on first run in session | Cap output size server-side |
+**Status:** Phase C complete.
+
+**Phase C — Run API (2026-06-01):** `POST /api/projects/{id}/run` — `{ path, args?, timeout? }`; `subprocess` with `cwd=working_dir`, no shell, 60s default timeout, 100k output cap, `.py` only, path confinement + owner gate. Python runs with `-I` (isolated mode).
+
+| Item | Direction | Clarifications | Status |
+|------|-----------|----------------|--------|
+| **Run API** | `POST /api/projects/{id}/run` — body: `{ path, args? }` | Subprocess: `python3 script.py` with `cwd=working_dir`; **no shell**; timeout (e.g. 60s); max output chars | ✅ Done |
+| **Network policy** | Off by default for subprocess env | Optional setting `project_run_allow_network`; document in open questions | ✅ Done |
+| **Run panel UI** | stdout/stderr; exit code; re-run; “Run” on editor toolbar | UX reference: `cookbookRunning.js` output panel | ✅ Done |
+| **Agent tool** | `run_project_script` — relative path, optional args allowlist | Same backend as Run API; no arbitrary `-c` strings in v1 (file path only) | ✅ Done |
+| **Safety UX** | Confirm if unsaved buffer; warn on first run in session | Cap output size server-side | ✅ Done |
 
 **Do not:** Route through `/api/shell/exec` or `codeRunner.runServer` for project files — those are admin-oriented and not cwd-scoped.
 
@@ -360,15 +430,17 @@ Defer dedicated `in_project` edge kind until stricter semantics than `related` a
 
 **Prerequisites:** Phases B–C; Phase 0 `project_id` on sessions.
 
-| Item | Direction | Clarifications |
-|------|-----------|----------------|
-| **Session model** | `project_id` + distinguish project sessions in UI (extend `mode` or add `session_kind`) | Migration + backfill; main Chats nav may hide or badge project sessions |
-| **Chat sidebar** | List/create/rename chats for this project only | New chat inherits `project_id` |
-| **Layout v1** | **Fixed** split: chat | editor+run | links (no drag-resize yet) | Persist last open file + active chat id in project meta or localStorage |
-| **Layout v2** (optional same phase or follow-up) | Resizable panels; persist sizes per project | Defer if schedule tight |
-| **Context injection** | System preamble: project title, cwd, linked summaries (papers, recent research) | Pull from graph + project record; truncate |
-| **Tool routing** | **Depth allowlist:** project file + run tools. **Breadth allowlist:** graph/Zotero/research/document tools (unchanged). | **Depth denylist:** `bash`, `python` (inline), `read_file`, `write_file`, MCP filesystem, shell/exec. Graph tools stay enabled — they do not bypass cwd writes. |
-| **Spike already done** | Phase 0 tool policy test | Expand to integration test with mock agent loop |
+**Status:** D1–D6 done. Next: Phase E (hybrid suggestions + research integration).
+
+| Item | Direction | Clarifications | Status |
+|------|-----------|----------------|--------|
+| **Session model** | `project_id` + distinguish project sessions in UI (extend `mode` or add `session_kind`) | Migration + backfill; main Chats nav may hide or badge project sessions | ✅ Done |
+| **Chat sidebar** | List/create/rename chats for this project only | New chat inherits `project_id` | ✅ Done |
+| **Layout v1** | **Fixed** split: chat \| editor+run \| links (no drag-resize yet) | Persist last open file + active chat id in project meta or localStorage | ✅ Done |
+| **Layout v2** (optional same phase or follow-up) | Resizable panels; persist sizes per project | Defer if schedule tight | → see **`docs/projects-ui-roadmap.md`** (Phase G) |
+| **Context injection** | System preamble: project title, cwd, linked summaries (papers, recent research) | Pull from graph + project record; truncate | ✅ Done |
+| **Tool routing** | **Depth allowlist:** project file + run tools. **Breadth allowlist:** graph/Zotero/research/document tools (unchanged). | **Depth denylist:** `bash`, `python` (inline), `read_file`, `write_file`, MCP filesystem, shell/exec. Graph tools stay enabled — they do not bypass cwd writes. | ✅ Done |
+| **Integration tests** | Phase 0 tool policy test expanded with mock agent loop paths | `tests/test_project_tool_routing.py` — schema filter, execute blocks, preamble | ✅ Done |
 
 **Deliverable:** Multiple chats per project in workspace; agent respects cwd + links; escape tools blocked.
 
@@ -380,23 +452,27 @@ Defer dedicated `in_project` edge kind until stricter semantics than `related` a
 
 ## Phase E — Hybrid suggestions + research integration
 
-**Goal:** Connect Deep Research and Zotero to projects without auto-spam.
+**Goal:** Connect Deep Research to projects without auto-spam; navigate linked knowledge via Links hub.
 
-**Estimate:** 1–2 weeks.
+**Estimate:** ~1 week remaining (E4/E5 only).
 
 **Prerequisites:** Phase A linking UI; Deep Research on `feature/knowledge-graph`.
 
-| Item | Direction | Clarifications |
-|------|-----------|----------------|
-| **Research → project** | Optional project picker when starting compare/gap; post-complete suggest | Same confirm pattern as Save-to-Zotero |
-| **Zotero collection import** | Opt-in: bulk create `related` edges from collection members | No auto-import on sync |
-| **Library filter** | Research tab filter by project (optional) | Low priority if time-constrained |
-| **Links hub** | Open project workspace from `project:{id}` node | Same route as Projects section |
-| **Stale links** | Show “missing from graph” for deleted research/paper | Don't crash context rail |
+**Status:** E1 done. **E2 and E3 skipped** (see rationale). E4/E5 in progress.
 
-**Deliverable:** Literature workflow → project hub in one click (with confirmation).
+| Item | Direction | Clarifications | Status |
+|------|-----------|----------------|--------|
+| **Research → project** | Optional project picker when starting compare/gap; post-complete suggest | Same confirm pattern as Save-to-Zotero | ✅ Done |
+| **Zotero collection import** | ~~Opt-in: bulk create `related` edges from collection members~~ | **Skipped** — bulk paper edges would flood agent preamble/context at current truncation (24 links / 4k chars); prefer explicit one-at-a-time linking via Links picker | ⏭ Skipped |
+| **Library filter** | ~~Research tab filter by project~~ | **Skipped** — same token-budget concern; low distinct value vs explicit graph links | ⏭ Skipped |
+| **Links hub** | Open Links modal from project workspace; link rows → node detail in hub; `project:{id}` → workspace | `openKnowledgeAtNode()` from links rail; “Browse in Links” on project | ✅ Done (verify) |
+| **Stale links** | Show “missing from graph”; one-click remove stale; agent preamble marks stale | Rail UI + bulk remove; preamble already truncates | ✅ Done (verify) |
 
-**Reuse:** `src/research_graph.py`, Library research preview, `research_zotero_save.py` confirm UX.
+**Deliverable:** Curated literature → project workflow with Links as the navigation hub — no bulk import.
+
+**Reuse:** `src/research_graph.py`, Library research preview, `research_zotero_save.py` confirm UX, `static/js/knowledge.js`.
+
+**Deferred (revisit only if context budget changes):** Zotero collection → project bulk edges; Research Library filter by `project_id`. Would need summarization caps or lazy-load, not raw member lists in preamble.
 
 ---
 
@@ -424,7 +500,7 @@ Projects are **phase 1** of a longer IDE direction on `feature/projects`:
 | Multi-pane editor (diff, split) | Phase B | — |
 | Integrated terminal (cwd-scoped) | Phase C | Still not generic shell |
 | Git status in file tree | Phase B | Read-only first |
-| Drag-resize layout persistence | Phase D v2 | — |
+| Drag-resize layout persistence | Phase G6+ in `projects-ui-roadmap.md` | Was “Phase D v2” |
 | Debug / breakpoints | Far future | — |
 | Client-side path bridge (remote users) | Far future | Sync agent or SFTP |
 
@@ -453,12 +529,14 @@ The two-boundary model drives security policy: **containment applies to depth (c
 | 1 | Project id: uuid vs slug? | **uuid** in id; slug optional in meta |
 | 2 | Move/rename working dir after create? | Allow with re-validation + `working_dir_status` |
 | 3 | Copy vs link when importing document into cwd? | **Link** by default |
-| 4 | Max projects per user / disk quota? | Defer |
-| 5 | Share projects across users? | Out of scope v1 |
-| 6 | Network during `run_project_script`? | **Off** by default; admin setting |
+| 4 | Max projects per user / disk quota? | max projects should be based on disk quota |
+| 5 | Share projects across users? | Out of scope, we need to make a seperate roadmap for this as the plan would be to share linked webs |
+| 6 | Network during `run_project_script`? | **Off** by default via `project_run_allow_network` in `data/settings.json`. Minimal env + proxy strip when off; not kernel socket blocking. Set `true` for scripts that need urllib/pip/etc. |
 | 7 | Symlinks inside project root? | **Allow** if resolved path stays inside root; else reject |
-| 8 | `session_kind` vs extend `mode`? | Decide in Phase 0 spike |
-| 9 | Show project sessions in main Chats nav? | **Badge/filter** or hide — avoid duplicate UX |
+| 8 | `session_kind` vs extend `mode`? | clarfy this point |
+| 9 | Show project sessions in main Chats nav? | **Badge/filter** or hide — avoid duplicate chats, chats can be linked to web tool and appear in session |
+| 10 | Bulk-link Zotero collection to project? | **Deferred** — explicit links only; bulk import floods agent context until summarization improves |
+| 11 | Filter Research Library by project? | **Deferred** — same rationale as #10 |
 
 ---
 
@@ -471,7 +549,7 @@ The two-boundary model drives security policy: **containment applies to depth (c
 | **B** | File API round-trip; agent tools scoped; editor save |
 | **C** | Run timeout; output cap; no shell escape |
 | **D** | Tool denylist in project session; chat list by project |
-| **E** | Suggest UI never auto-links without confirm |
+| **E** | Suggest UI never auto-links without confirm; Links hub from project rail; stale link remove |
 
 Fixtures: `tmp_path` as fake project roots; never use real `/etc` in CI.
 
@@ -522,6 +600,7 @@ Fixtures: `tmp_path` as fake project roots; never use real `/etc` in CI.
 
 | Doc | Relationship |
 |-----|--------------|
+| `docs/projects-ui-roadmap.md` | **Workspace UI redesign** — tabbed layout, visual polish (Phase G) |
 | `docs/deep-research-roadmap.md` | Research → project linking (Phase E) |
 | `ROADMAP.md` | Link Projects when section ships |
 
@@ -535,3 +614,12 @@ Fixtures: `tmp_path` as fake project roots; never use real `/etc` in CI.
 | 2026-06-01 | Expanded: deployment assumption, three paradigms, implementation risks, Phase 0 spikes, per-phase clarifications, feasibility/product fit |
 | 2026-06-01 | Phase 0d: sessions.project_id migration + project session API |
 | 2026-06-01 | Phase 0e: project tool policy module + bash rejection test |
+| 2026-06-01 | Phase B started: file tree API (rename, recursive delete, list payload, modified_at on read) |
+| 2026-06-01 | Phase B: project editor (highlight overlay, autosave, modified_at conflict check) |
+| 2026-06-01 | Phase B: file tree UI (lazy tree, CRUD toolbar, read-only preview pane) |
+| 2026-06-01 | Phase A: project graph node, Projects nav, workspace shell, manual linking |
+| 2026-06-01 | Phase D5/D6: `apply_session_tool_policy`, integration tests in `test_project_tool_routing.py` |
+| 2026-06-01 | Phase D: project chat visibility fix (dock history only, input below panel) |
+| 2026-06-01 | Phase E scope: skip Zotero collection import + Library filter; prioritize Links hub + stale links |
+| 2026-06-01 | Phase E: Links rail → `openKnowledgeAtNode`; stale bulk remove; tool-routing preamble |
+| 2026-06-01 | Added `docs/projects-ui-roadmap.md` — tabbed workspace UI (Phase G) |

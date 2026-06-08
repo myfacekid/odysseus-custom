@@ -445,7 +445,7 @@ async def do_list_sessions(content: str, session_id: Optional[str] = None, owner
     keyword = content.strip().lower() if content.strip() else None
 
     try:
-        from core.database import SessionLocal, Session as DbSession
+        from core.database import SessionLocal, Session as DbSession, is_project_workspace_session
         from datetime import datetime, timezone
 
         # Pull every session's last_accessed from the DB so we can sort
@@ -466,6 +466,11 @@ async def do_list_sessions(content: str, session_id: Optional[str] = None, owner
             if keyword and keyword not in (sess.name or "").lower():
                 continue
             db_row = db_rows.get(sid)
+            if db_row and is_project_workspace_session(
+                getattr(db_row, "mode", None),
+                getattr(db_row, "project_id", None),
+            ):
+                continue
             # Prefer last_accessed; fall back to updated_at, then created_at.
             ts = None
             if db_row:

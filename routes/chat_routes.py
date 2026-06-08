@@ -405,7 +405,14 @@ def setup_chat_routes(
             auto_escalated = True
             logger.info("chat→agent auto-escalation: message matched tool-intent pattern")
         active_doc_id = form_data.get("active_doc_id", "").strip()
-        logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
+        from src.project_context import sanitize_active_project_file_path
+        active_project_file = sanitize_active_project_file_path(
+            form_data.get("active_project_file", "")
+        )
+        logger.info(
+            f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}, "
+            f"active_project_file={active_project_file!r}"
+        )
 
         try:
             # Attachment-only sends: skip the message-required check when the
@@ -559,6 +566,11 @@ def setup_chat_routes(
         finally:
             _doc_db.close()
 
+        if active_project_file:
+            from src.project_tool_policy import get_session_project_id, session_is_project
+            if not session_is_project(session) or not get_session_project_id(session):
+                active_project_file = None
+
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
         if not OBSIDIAN_INTEGRATION_ENABLED:
@@ -606,9 +618,8 @@ def setup_chat_routes(
             disabled_tools.update(_global_disabled)
 
         # Project workspace chats: deny cwd escape hatches (Phase 0e).
-        from src.project_tool_policy import disabled_tools_for_project_session, session_is_project
-        if session_is_project(session):
-            disabled_tools.update(disabled_tools_for_project_session())
+        from src.project_tool_policy import apply_session_tool_policy
+        disabled_tools = apply_session_tool_policy(disabled_tools, session)
 
         # Light auto-escalation: the user is in chat mode and just expressed a
         # notes/calendar/email intent. Grant the relevant managers but withhold
@@ -984,6 +995,7 @@ def setup_chat_routes(
                         disabled_tools=disabled_tools if disabled_tools else None,
                         owner=_user,
                         fallbacks=_fallback_candidates,
+                        active_project_file=active_project_file,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

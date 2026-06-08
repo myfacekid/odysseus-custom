@@ -697,6 +697,207 @@ export function styledConfirm(message, { confirmText = 'Confirm', cancelText = '
 }
 
 /**
+ * Multi-choice styled dialog — e.g. Save / Don't save / Cancel.
+ * Returns the chosen option `id`, or null on dismiss.
+ */
+export function styledChoice(message, {
+  title = 'Confirm',
+  choices = [
+    { id: 'ok', label: 'OK', primary: true },
+    { id: 'cancel', label: 'Cancel', secondary: true },
+  ],
+} = {}) {
+  return new Promise((resolve) => {
+    let overlay = document.getElementById('styled-choice-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'styled-choice-overlay';
+      overlay.className = 'modal';
+      overlay.innerHTML =
+        '<div class="modal-content styled-confirm-box" role="dialog" aria-modal="true" aria-labelledby="styled-choice-title" aria-describedby="styled-choice-msg">' +
+          '<div class="modal-header"><h4 id="styled-choice-title"></h4></div>' +
+          '<div class="modal-body"><p id="styled-choice-msg"></p></div>' +
+          '<div class="modal-footer styled-choice-footer"></div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+    }
+
+    const titleEl = overlay.querySelector('#styled-choice-title');
+    const msgEl = overlay.querySelector('#styled-choice-msg');
+    const footerEl = overlay.querySelector('.styled-choice-footer');
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    footerEl.replaceChildren();
+
+    const buttons = [];
+    for (const choice of choices) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = choice.label;
+      if (choice.danger) btn.className = 'confirm-btn confirm-btn-danger';
+      else if (choice.primary) btn.className = 'confirm-btn confirm-btn-primary';
+      else btn.className = 'confirm-btn confirm-btn-secondary';
+      btn.dataset.choiceId = choice.id;
+      footerEl.appendChild(btn);
+      buttons.push(btn);
+    }
+
+    const _prevFocus = document.activeElement;
+    overlay.classList.remove('hidden');
+    overlay.style.display = '';
+
+    function cleanup(result) {
+      overlay.classList.add('hidden');
+      overlay.style.display = 'none';
+      footerEl.removeEventListener('click', onClick);
+      overlay.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      try { _prevFocus?.focus?.(); } catch {}
+      resolve(result);
+    }
+    function onClick(e) {
+      const btn = e.target.closest('[data-choice-id]');
+      if (!btn) return;
+      cleanup(btn.dataset.choiceId);
+    }
+    function onBackdrop(e) {
+      if (e.target === overlay) cleanup(null);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cleanup(null);
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const f = buttons;
+        const i = f.indexOf(document.activeElement);
+        const n = e.shiftKey ? (i <= 0 ? f.length - 1 : i - 1) : (i >= f.length - 1 ? 0 : i + 1);
+        f[n]?.focus();
+      }
+    }
+
+    footerEl.addEventListener('click', onClick);
+    overlay.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+    (buttons.find((b) => b.classList.contains('confirm-btn-primary')) || buttons[0])?.focus();
+  });
+}
+
+/**
+ * Scrollable list picker — one row per option (replaces many footer buttons).
+ * Returns selected item `id`, or null on dismiss.
+ */
+export function styledListPick(message, {
+  title = 'Choose',
+  items = [],
+  cancelLabel = 'Cancel',
+  emptyLabel = 'No items',
+} = {}) {
+  return new Promise((resolve) => {
+    let overlay = document.getElementById('styled-list-pick-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'styled-list-pick-overlay';
+      overlay.className = 'modal';
+      overlay.innerHTML =
+        '<div class="modal-content styled-confirm-box styled-list-pick-box" role="dialog" aria-modal="true" aria-labelledby="styled-list-pick-title" aria-describedby="styled-list-pick-msg">' +
+          '<div class="modal-header"><h4 id="styled-list-pick-title"></h4></div>' +
+          '<div class="modal-body">' +
+            '<p id="styled-list-pick-msg"></p>' +
+            '<div id="styled-list-pick-list" class="styled-list-pick-list" role="listbox"></div>' +
+          '</div>' +
+          '<div class="modal-footer styled-choice-footer"></div>' +
+        '</div>';
+      document.body.appendChild(overlay);
+    }
+
+    const titleEl = overlay.querySelector('#styled-list-pick-title');
+    const msgEl = overlay.querySelector('#styled-list-pick-msg');
+    const listEl = overlay.querySelector('#styled-list-pick-list');
+    const footerEl = overlay.querySelector('.styled-choice-footer');
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    footerEl.replaceChildren();
+
+    const rowButtons = [];
+    listEl.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'styled-list-pick-empty';
+      empty.textContent = emptyLabel;
+      listEl.appendChild(empty);
+    } else {
+      for (const item of items) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'styled-list-pick-item';
+        btn.dataset.itemId = item.id;
+        btn.setAttribute('role', 'option');
+        btn.innerHTML =
+          `<span class="styled-list-pick-item-label">${esc(item.label || item.id || '')}</span>` +
+          (item.hint
+            ? `<span class="styled-list-pick-item-hint">${esc(item.hint)}</span>`
+            : '');
+        listEl.appendChild(btn);
+        rowButtons.push(btn);
+      }
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'confirm-btn confirm-btn-secondary';
+    cancelBtn.textContent = cancelLabel;
+    footerEl.appendChild(cancelBtn);
+
+    const focusables = [...rowButtons, cancelBtn];
+    const _prevFocus = document.activeElement;
+    overlay.classList.remove('hidden');
+    overlay.style.display = '';
+
+    function cleanup(result) {
+      overlay.classList.add('hidden');
+      overlay.style.display = 'none';
+      listEl.removeEventListener('click', onListClick);
+      footerEl.removeEventListener('click', onFooterClick);
+      overlay.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      try { _prevFocus?.focus?.(); } catch {}
+      resolve(result);
+    }
+    function onListClick(e) {
+      const btn = e.target.closest('.styled-list-pick-item');
+      if (!btn?.dataset.itemId) return;
+      cleanup(btn.dataset.itemId);
+    }
+    function onFooterClick(e) {
+      if (e.target === cancelBtn) cleanup(null);
+    }
+    function onBackdrop(e) {
+      if (e.target === overlay) cleanup(null);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cleanup(null);
+      } else if (e.key === 'Tab' && focusables.length) {
+        e.preventDefault();
+        const i = focusables.indexOf(document.activeElement);
+        const n = e.shiftKey
+          ? (i <= 0 ? focusables.length - 1 : i - 1)
+          : (i >= focusables.length - 1 ? 0 : i + 1);
+        focusables[n]?.focus();
+      }
+    }
+
+    listEl.addEventListener('click', onListClick);
+    footerEl.addEventListener('click', onFooterClick);
+    overlay.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+    (rowButtons[0] || cancelBtn)?.focus();
+  });
+}
+
+/**
  * Styled text-input prompt � drop-in replacement for window.prompt().
  * Resolves to the trimmed string the user typed, or null on Cancel / Escape / backdrop.
  */
@@ -882,6 +1083,8 @@ const uiModule = {
   showToast,
   showError,
   styledConfirm,
+  styledChoice,
+  styledListPick,
   styledPrompt,
   scrollHistory,
   scrollHistoryInstant,
@@ -903,6 +1106,7 @@ export default uiModule;
 // uiModule. Usage: `if (!await window.styledConfirm(msg, { danger:true })) return;`
 if (typeof window !== 'undefined') {
   window.styledConfirm = styledConfirm;
+  window.styledChoice = styledChoice;
 }
 
 // ?? Mobile: clear enter animation so inline transform works for dragging ??

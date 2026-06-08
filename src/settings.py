@@ -116,6 +116,10 @@ DEFAULT_SETTINGS = {
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell
     # rc files, SSH key files) are always blocked regardless of roots.
     "tool_path_extra_roots": [],
+    # Project workspace script runs (Phase C): when False (default), subprocess
+    # env is minimal and proxy/TLS vars are stripped. Does not kernel-block
+    # sockets — enable only when scripts need outbound network (urllib, pip, etc.).
+    "project_run_allow_network": False,
     "task_endpoint_id": "",
     "task_model": "",
     "default_endpoint_id": "",

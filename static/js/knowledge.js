@@ -16,6 +16,7 @@ const TYPE_LABELS = {
   paper: 'Paper',
   collection: 'Collection',
   research: 'Research',
+  project: 'Project',
   note: 'Document', // legacy index rows
 };
 
@@ -310,6 +311,16 @@ async function _showDetail(nodeId) {
       if (bits.length) metaHtml = `<div class="kg-meta">${esc(bits.join(' · '))}</div>`;
     } else if (node.type === 'collection') {
       metaHtml = `<div class="kg-meta">Zotero folder${meta.path ? ` · ${esc(meta.path)}` : ''}</div>`;
+    } else if (node.type === 'project') {
+      const bits = [];
+      if (meta.working_dir) bits.push(`cwd: ${meta.working_dir}`);
+      if (meta.working_dir_status && meta.working_dir_status !== 'ok') {
+        bits.push(`status: ${meta.working_dir_status}`);
+      }
+      if (bits.length) metaHtml = `<div class="kg-meta">${esc(bits.join(' · '))}</div>`;
+      if (meta.description) {
+        metaHtml += `<div class="kg-meta">${esc(meta.description.slice(0, 200))}</div>`;
+      }
     }
     const linked = new Set();
     for (const row of [...(nb.outgoing || []), ...(nb.incoming || [])]) {
@@ -321,6 +332,9 @@ async function _showDetail(nodeId) {
     const researchOpenBtn = node.type === 'research'
       ? `<button type="button" class="admin-btn-sm kg-research-report-btn" data-session-id="${esc(meta.session_id || nodeId.replace(/^research:/i, ''))}">Open report</button>`
       : '';
+    const projectOpenBtn = node.type === 'project'
+      ? `<button type="button" class="admin-btn-sm kg-project-workspace-btn" data-project-id="${esc(meta.project_id || nodeId.replace(/^project:/i, ''))}">Open workspace</button>`
+      : '';
     detail.innerHTML = `
       <div class="kg-detail-head">
         ${_typeBadge(node)}
@@ -330,6 +344,7 @@ async function _showDetail(nodeId) {
           <button type="button" class="admin-btn-sm kg-open-btn" data-node-id="${esc(nodeId)}">Open</button>
           ${paperSeedBtn}
           ${researchOpenBtn}
+          ${projectOpenBtn}
         </div>
       </div>
       <div class="kg-detail-snippet">${esc((node.snippet || '').slice(0, 420))}</div>
@@ -348,6 +363,14 @@ async function _showDetail(nodeId) {
       ev.stopPropagation();
       const sid = ev.currentTarget?.dataset?.sessionId || nodeId.replace(/^research:/i, '');
       if (sid) window.open(`${API_BASE}/api/research/report/${encodeURIComponent(sid)}`, '_blank', 'noopener,noreferrer');
+    });
+    detail.querySelector('.kg-project-workspace-btn')?.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const pid = ev.currentTarget?.dataset?.projectId || nodeId.replace(/^project:/i, '');
+      if (!pid) return;
+      const mod = await import('./projects/index.js');
+      const open = mod.openProjectWorkspace || mod.default?.openProjectWorkspace;
+      if (open) open(pid);
     });
   } catch (e) {
     detail.innerHTML = `<div class="kg-error">${esc(e.message || e)}</div>`;
@@ -644,6 +667,10 @@ async function openKnowledgeNode(nodeId, opts = {}) {
     return;
   }
   if (effective === 'paper') {
+    if (opts.navigate) {
+      await openKnowledgeAtNode(nodeId);
+      return;
+    }
     let url = _selectedNodeMeta?.url;
     if (!url) {
       try {
@@ -660,13 +687,7 @@ async function openKnowledgeNode(nodeId, opts = {}) {
   }
   if (effective === 'research') {
     if (opts.navigate) {
-      openKnowledgeModal();
-      _activeType = 'research';
-      document.querySelectorAll('.kg-type-filter').forEach((btn) => {
-        btn.classList.toggle('active', (btn.dataset.type || '') === 'research');
-      });
-      await _renderList({ type: 'research' });
-      await _showDetail(nodeId);
+      await openKnowledgeAtNode(nodeId, { type: 'research' });
       return;
     }
     const sid = raw || nodeId.replace(/^research:/i, '');
@@ -691,6 +712,13 @@ async function openKnowledgeNode(nodeId, opts = {}) {
     const q = path.split('/').pop()?.trim() || path;
     if (search && q) search.value = q;
     await _renderList({ query: search?.value || '', type: 'paper' });
+    return;
+  }
+  if (effective === 'project') {
+    const mod = await import('./projects/index.js');
+    const open = mod.openProjectWorkspace || mod.default?.openProjectWorkspace;
+    const pid = raw || nodeId.replace(/^project:/i, '');
+    if (open && pid) open(pid);
     return;
   }
 }
@@ -768,6 +796,20 @@ export function openKnowledgeModal() {
   _renderList();
 }
 
+/** Open Links hub focused on a node (project workspace rail, deep links). */
+export async function openKnowledgeAtNode(nodeId, { type } = {}) {
+  if (!nodeId) return;
+  openKnowledgeModal();
+  if (type) {
+    _activeType = type;
+    document.querySelectorAll('.kg-type-filter').forEach((btn) => {
+      btn.classList.toggle('active', (btn.dataset.type || '') === type);
+    });
+    await _renderList({ type });
+  }
+  await _showDetail(nodeId);
+}
+
 if (typeof window !== 'undefined') {
   window.addEventListener('knowledge-graph-refresh', () => {
     if (_open) void _renderList();
@@ -799,6 +841,7 @@ export default {
   closeKnowledgeModal,
   isKnowledgeOpen,
   openKnowledgeNode,
+  openKnowledgeAtNode,
   createGraphLink,
   removeGraphLink,
   mountGraphLinkPicker,

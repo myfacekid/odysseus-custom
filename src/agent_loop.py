@@ -308,6 +308,26 @@ Read a file and return its contents.""",
 ```
 Write content to a file. First line is the path, rest is the content.""",
 
+    "read_project_file": """\
+```read_project_file
+<path relative to project root>
+```
+Read a text file from the **project working directory** (depth boundary). Use for scripts, configs, and outputs under the project cwd — NOT for Library documents or arbitrary disk paths.""",
+
+    "write_project_file": """\
+```write_project_file
+<path relative to project root>
+<file contents>
+```
+Write a text file under the **project working directory**. First line is the relative path, rest is content. Use for analysis code and generated outputs — NOT create_document (Library) unless the user wants a Library note/report.""",
+
+    "run_project_script": """\
+```run_project_script
+<path/to/script.py>
+[optional: one CLI arg per line on following lines]
+```
+Run a **.py file** under the project working directory (same backend as the Run panel). Use in project chats instead of `python` or `bash`. Optional args: one per line after the path, or JSON on line 2: `{"args": ["--flag"], "timeout": 60}`. Only `.py` paths — no inline `-c` code. **Runs from disk:** call `write_project_file` first if you edited the script this turn. Tool output is capped (~10k chars) for context limits.""",
+
     "create_document": """\
 ```create_document
 <title>
@@ -627,6 +647,8 @@ def _build_system_prompt(
     mcp_disabled_map: Optional[Dict[str, set]] = None,
     compact: bool = False,
     owner: Optional[str] = None,
+    session_id: Optional[str] = None,
+    active_project_file: Optional[str] = None,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -694,6 +716,25 @@ def _build_system_prompt(
             f"subtract the offset above from the user's local time "
             f"(local {_now.strftime('%H:%M')} = {_utc.strftime('%H:%M')} UTC right now).\n\n"
         ) + agent_prompt
+    except Exception:
+        pass
+
+    # Project workspace sessions: inject cwd context + three-paradigm rules.
+    try:
+        from src.project_tool_policy import get_session_project_id, session_is_project
+        if session_id and session_is_project(session_id) and owner:
+            project_id = get_session_project_id(session_id)
+            if project_id:
+                from src.project_context import build_project_session_preamble
+                from src.project_workspace import assert_project_owner, refresh_working_dir_status
+
+                project = refresh_working_dir_status(assert_project_owner(owner, project_id))
+                agent_prompt = build_project_session_preamble(
+                    owner,
+                    project_id,
+                    project,
+                    active_file_path=active_project_file,
+                ) + agent_prompt
     except Exception:
         pass
 
@@ -1348,6 +1389,7 @@ async def stream_agent_loop(
     relevant_tools: Optional[Set[str]] = None,
     fallbacks: Optional[List[tuple]] = None,
     _is_teacher_run: bool = False,
+    active_project_file: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -1527,6 +1569,8 @@ async def stream_agent_loop(
         mcp_disabled_map=_mcp_disabled_map,
         compact=_is_api_model,
         owner=owner,
+        session_id=session_id,
+        active_project_file=active_project_file,
     )
     prep_timings["prompt_build"] = time.time() - _t2
 

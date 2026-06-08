@@ -418,6 +418,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         mode: str = Field(default="literature_review")
         report_length: str = Field(default="standard")
         category: Optional[str] = None  # ignored — always academic
+        project_id: Optional[str] = Field(default=None, max_length=128)
 
     @router.post("/api/research/start")
     async def research_start(body: ResearchStartRequest, request: Request):
@@ -522,6 +523,21 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         if seed_papers and not (body.query or "").strip():
             body.query = "Literature synthesis from selected seed papers."
 
+        project_id = (body.project_id or "").strip() or None
+        if project_id:
+            from src.project_workspace import (
+                ProjectAccessError,
+                ProjectNotFoundError,
+                assert_project_owner,
+            )
+
+            try:
+                assert_project_owner(user, project_id)
+            except ProjectNotFoundError:
+                raise HTTPException(404, "Project not found")
+            except ProjectAccessError:
+                raise HTTPException(404, "Project not found")
+
         research_handler.start_research(
             session_id=session_id,
             query=body.query,
@@ -541,6 +557,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             seed_papers=seed_papers,
             research_mode=mode,
             report_length=report_length,
+            project_id=project_id,
         )
         return {
             "session_id": session_id,
@@ -548,6 +565,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             "query": body.query,
             "mode": mode,
             "seed_papers": seed_papers,
+            "project_id": project_id,
         }
 
     @router.get("/api/research/papers")

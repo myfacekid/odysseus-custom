@@ -10,6 +10,7 @@ from src.project_paths import (
     WORKING_DIR_MISSING,
     WORKING_DIR_OK,
     ProjectPathError,
+    find_dirs_named_under_root,
     is_path_under_root,
     resolve_path_under_root,
     resolve_project_path,
@@ -196,3 +197,14 @@ def test_resolve_owned_project_path_missing_root(tmp_path, monkeypatch):
     root.rmdir()
     with pytest.raises(ProjectPathError, match="missing"):
         resolve_owned_project_path("alice", "proj-break", "file.py")
+
+
+def test_find_dirs_named_under_root(tmp_path):
+    root = tmp_path / "home"
+    nested = root / "Documents" / "experiments" / "alpha"
+    nested.mkdir(parents=True)
+    (root / "Downloads" / "alpha").mkdir(parents=True)
+
+    matches = find_dirs_named_under_root(str(root), "alpha")
+    assert len(matches) == 2
+    assert str(nested.resolve()) in matches

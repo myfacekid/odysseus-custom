@@ -246,6 +246,56 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "read_project_file",
+            "description": "Read a text file from the current project's working directory. Path is relative to the project root (e.g. analysis.py, src/run.py). Only available in project workspace chats — NOT for Library documents or paths outside the project cwd.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path relative to project root"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_project_file",
+            "description": "Write a text file under the current project's working directory. Path is relative to the project root. Use for scripts, analysis code, and generated outputs — NOT for Library documents (use create_document / edit_document). Only available in project workspace chats.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path relative to project root"},
+                    "content": {"type": "string", "description": "File content to write"}
+                },
+                "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_project_script",
+            "description": "Run a .py script under the current project's working directory (scoped subprocess, not shell). Path is relative to project root. Only available in project workspace chats — use instead of the generic python/bash tools. Runs the file on disk — write_project_file first if you edited the script. Optional args are passed to the script (allowlisted strings only). Output capped for agent context (~10k chars).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Python script path relative to project root (must end in .py)"},
+                    "args": {
+                        "type": "array",
+                        "description": "Optional CLI arguments for the script",
+                        "items": {"type": "string"},
+                        "maxItems": 16,
+                    },
+                    "timeout": {"type": "integer", "description": "Optional timeout in seconds (1-300, default 60)"},
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_document",
             "description": "Create a new document in the editor panel. Use this when the user asks to write, create, build, or generate code, scripts, programs, games, apps, or any substantial content (>15 lines) AND there is no already-open document/email draft that the request refers to. If an email compose draft is open, edit that draft instead of creating another document. NEVER put large code blocks directly in chat — use this tool instead.",
             "parameters": {
@@ -1060,6 +1110,24 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = args.get("path", "")
     elif tool_type == "write_file":
         content = args.get("path", "") + "\n" + args.get("content", "")
+    elif tool_type == "read_project_file":
+        content = args.get("path", "")
+    elif tool_type == "write_project_file":
+        content = args.get("path", "") + "\n" + args.get("content", "")
+    elif tool_type == "run_project_script":
+        import json as _json
+        path = args.get("path", "")
+        run_args = args.get("args")
+        timeout = args.get("timeout")
+        if run_args or timeout is not None:
+            payload = {}
+            if run_args:
+                payload["args"] = run_args
+            if timeout is not None:
+                payload["timeout"] = timeout
+            content = path + "\n" + _json.dumps(payload)
+        else:
+            content = path
     elif tool_type == "create_document":
         parts = [args.get("title", "Untitled")]
         if args.get("language"):

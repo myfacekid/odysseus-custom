@@ -10,7 +10,7 @@ import logging
 from core.session_manager import SessionManager
 from core.models import ChatMessage
 from src.request_models import SessionResponse
-from core.database import Session as DbSession, SessionLocal, Document, GalleryImage
+from core.database import Session as DbSession, SessionLocal, Document, GalleryImage, is_project_workspace_session
 from src.auth_helpers import get_current_user, effective_user
 from src.text_helpers import _THINK
 
@@ -182,8 +182,21 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             updated_map = {}
             last_msg_map = {}
             mode_map = {}
+            project_id_map = {}
             msg_count_map = {}
-            rows = db.query(DbSession.id, DbSession.folder, DbSession.total_input_tokens, DbSession.total_output_tokens, DbSession.is_important, DbSession.created_at, DbSession.updated_at, DbSession.last_message_at, DbSession.mode, DbSession.message_count).filter(DbSession.archived == False).all()
+            rows = db.query(
+                DbSession.id,
+                DbSession.folder,
+                DbSession.total_input_tokens,
+                DbSession.total_output_tokens,
+                DbSession.is_important,
+                DbSession.created_at,
+                DbSession.updated_at,
+                DbSession.last_message_at,
+                DbSession.mode,
+                DbSession.project_id,
+                DbSession.message_count,
+            ).filter(DbSession.archived == False).all()
             for row in rows:
                 folder_map[row.id] = row.folder
                 token_map[row.id] = (row.total_input_tokens or 0) + (row.total_output_tokens or 0)
@@ -198,6 +211,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                           else (row.created_at.isoformat() if row.created_at else None))
                 )
                 mode_map[row.id] = row.mode
+                project_id_map[row.id] = row.project_id
                 msg_count_map[row.id] = row.message_count or 0
             # Sessions with active documents that have content
             from sqlalchemy import func
@@ -227,10 +241,15 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                      "has_documents": s.id in doc_session_ids,
                      "has_images": s.id in img_session_ids,
                      "mode": mode_map.get(s.id),
+                     "project_id": project_id_map.get(s.id),
                      "message_count": msg_count_map.get(s.id, 0)}
                     for s in user_sessions.values()
                     if not s.archived
-                    and (s.name or "").strip() not in ("Nobody", "Incognito")]
+                    and (s.name or "").strip() not in ("Nobody", "Incognito")
+                    and not is_project_workspace_session(
+                        mode_map.get(s.id),
+                        project_id_map.get(s.id) or getattr(s, "project_id", None),
+                    )]
 
         return sessions
     
@@ -615,6 +634,11 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             if not user:
                 raise HTTPException(403, "Authentication required")
             q = q.filter(DbSession.owner == user)
+            q = q.filter(
+                (DbSession.project_id.is_(None)) | (DbSession.project_id == "")
+            ).filter(
+                (DbSession.mode.is_(None)) | (DbSession.mode != "project")
+            )
             if search:
                 safe_search = search.replace('%', r'\%').replace('_', r'\_')
                 q = q.filter(DbSession.name.ilike(f"%{safe_search}%", escape='\\'))

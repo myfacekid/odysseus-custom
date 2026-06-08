@@ -7,7 +7,12 @@ from fastapi.testclient import TestClient
 from routes import project_routes
 from src.project_files import write_text_file
 from src.project_paths import ProjectPathError
-from src.project_runner import ProjectRunError, run_python_script
+from src.project_runner import (
+    ProjectRunError,
+    build_run_env,
+    project_run_allow_network,
+    run_python_script,
+)
 from src.project_workspace import create_project
 
 
@@ -98,6 +103,21 @@ def test_run_uses_project_cwd(project_env):
     assert (project_env["workspace"] / "out.txt").read_text(encoding="utf-8") == "cwd-ok\n"
 
 
+def test_run_truncates_large_stdout(project_env):
+    from src.project_runner import MAX_OUTPUT_CHARS
+
+    write_text_file(
+        "alice",
+        project_env["project_id"],
+        "big.py",
+        f"print('{'x' * (MAX_OUTPUT_CHARS + 5000)}')\n",
+    )
+    result = run_python_script("alice", project_env["project_id"], "big.py")
+    assert result["ok"] is True
+    assert len(result["stdout"]) <= MAX_OUTPUT_CHARS + 80
+    assert "truncated" in result["stdout"]
+
+
 def test_api_run_endpoint(project_env, monkeypatch):
     monkeypatch.setattr(project_routes, "get_current_user", lambda request: "alice")
     write_text_file(
@@ -131,3 +151,69 @@ def test_api_run_rejects_traversal(project_env, monkeypatch):
         json={"path": "../../etc/passwd"},
     )
     assert res.status_code == 400
+
+
+def test_api_run_rejects_cross_owner(project_env, monkeypatch):
+    monkeypatch.setattr(project_routes, "get_current_user", lambda request: "bob")
+    write_text_file(
+        "alice",
+        project_env["project_id"],
+        "secret.py",
+        "print('secret')\n",
+    )
+    app = FastAPI()
+    app.include_router(project_routes.setup_project_routes())
+    client = TestClient(app)
+
+    res = client.post(
+        f"/api/projects/{project_env['project_id']}/run",
+        json={"path": "secret.py"},
+    )
+    assert res.status_code == 404
+
+
+def test_build_run_env_strips_proxy_when_network_off(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    env = build_run_env(allow_network=False)
+    assert "HTTP_PROXY" not in env
+    assert env.get("ODYSSEUS_PROJECT_RUN_NETWORK") == "0"
+    assert env.get("PATH") == "/usr/bin:/bin"
+
+
+def test_build_run_env_inherits_proxy_when_network_on(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
+    env = build_run_env(allow_network=True)
+    assert env.get("HTTP_PROXY") == "http://proxy.example:8080"
+    assert env.get("ODYSSEUS_PROJECT_RUN_NETWORK") == "1"
+
+
+def test_run_result_includes_network_policy(project_env, monkeypatch):
+    write_text_file(
+        "alice",
+        project_env["project_id"],
+        "net_flag.py",
+        "import os\nprint(os.environ.get('ODYSSEUS_PROJECT_RUN_NETWORK', '?'))\n",
+    )
+    result = run_python_script(
+        "alice",
+        project_env["project_id"],
+        "net_flag.py",
+        allow_network=False,
+    )
+    assert result["network_allowed"] is False
+    assert "0" in result["stdout"]
+
+    result_on = run_python_script(
+        "alice",
+        project_env["project_id"],
+        "net_flag.py",
+        allow_network=True,
+    )
+    assert result_on["network_allowed"] is True
+    assert "1" in result_on["stdout"]
+
+
+def test_project_run_allow_network_default_false(monkeypatch):
+    monkeypatch.delenv("HTTP_PROXY", raising=False)
+    assert project_run_allow_network() is False

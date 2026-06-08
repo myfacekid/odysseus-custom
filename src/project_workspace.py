@@ -15,6 +15,7 @@ from src.project_paths import (
     ProjectPathError,
     resolve_project_path,
     validate_working_dir,
+    working_dir_warning,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,10 +49,14 @@ def _now_ts() -> int:
 
 def _normalize_working_dir(raw_path: str) -> Dict[str, str]:
     canonical, status = validate_working_dir(raw_path)
-    return {
+    out = {
         "working_dir": canonical or (raw_path or "").strip(),
         "working_dir_status": status,
     }
+    warning = working_dir_warning(out["working_dir"])
+    if warning:
+        out["working_dir_warning"] = warning
+    return out
 
 
 def get_project(owner: str, project_id: str) -> Optional[dict]:
@@ -68,6 +73,8 @@ def get_project(owner: str, project_id: str) -> Optional[dict]:
         return None
     if (data.get("owner") or "") != (owner or ""):
         return None
+    if data.get("archived"):
+        return None
     return data
 
 
@@ -83,7 +90,9 @@ def list_projects(owner: str) -> List[dict]:
         except Exception:
             continue
         if isinstance(data, dict) and (data.get("owner") or "") == (owner or ""):
-            rows.append(refresh_working_dir_status(data))
+            if data.get("archived"):
+                continue
+            rows.append(ensure_project_status_current(owner, data))
     return rows
 
 
@@ -124,6 +133,13 @@ def save_project(owner: str, project_id: str, data: dict) -> None:
     payload["owner"] = owner or ""
     payload["updated_at"] = _now_ts()
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    if not payload.get("archived"):
+        try:
+            from src.project_graph import upsert_project_node
+
+            upsert_project_node(owner, payload)
+        except Exception as exc:
+            logger.warning("Project graph sync failed on save %s: %s", project_id, exc)
 
 
 def refresh_working_dir_status(project: dict) -> dict:
@@ -138,7 +154,7 @@ def assert_project_owner(owner: str, project_id: str) -> dict:
     """Load a project and enforce ownership."""
     project = get_project(owner, project_id)
     if project is not None:
-        return refresh_working_dir_status(project)
+        return ensure_project_status_current(owner, project)
     if PROJECTS_ROOT.is_dir():
         for path in PROJECTS_ROOT.glob(f"*/{project_id}.json"):
             try:
@@ -169,3 +185,36 @@ def resolve_owned_project_path(
         raise
     except Exception as exc:
         raise ProjectPathError(str(exc)) from exc
+
+
+def archive_project(owner: str, project_id: str) -> dict:
+    """Mark a project archived and remove it from the active list/graph."""
+    project = assert_project_owner(owner, project_id)
+    project["archived"] = True
+    project["updated_at"] = _now_ts()
+    save_project(owner, project_id, project)
+    try:
+        from src.project_graph import delete_project_node
+
+        delete_project_node(owner, project_id)
+    except Exception as exc:
+        logger.warning("Project graph delete failed on archive %s: %s", project_id, exc)
+    return project
+
+
+def ensure_project_status_current(owner: str, project: dict) -> dict:
+    """Re-validate working_dir on read and persist if status changed on disk."""
+    pid = (project.get("id") or "").strip()
+    if not pid:
+        return refresh_working_dir_status(project)
+    before_status = project.get("working_dir_status")
+    before_dir = project.get("working_dir")
+    refreshed = refresh_working_dir_status(project)
+    if (
+        refreshed.get("working_dir_status") != before_status
+        or refreshed.get("working_dir") != before_dir
+    ):
+        payload = {**project, **refreshed}
+        save_project(owner, pid, payload)
+        return payload
+    return refreshed

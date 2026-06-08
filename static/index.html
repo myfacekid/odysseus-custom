@@ -455,6 +455,7 @@
           <button type="button" class="kg-type-filter" data-type="document">Documents</button>
           <button type="button" class="kg-type-filter" data-type="paper">Papers</button>
           <button type="button" class="kg-type-filter" data-type="research">Research</button>
+          <button type="button" class="kg-type-filter" data-type="project">Projects</button>
           <button type="button" class="kg-type-filter" data-type="memory">Memories</button>
           <button type="button" class="kg-type-filter" data-type="skill">Skills</button>
         </div>
@@ -780,6 +781,16 @@
         </div>
         <div id="session-list" role="listbox"></div>
       </div>
+
+      <div class="section" id="projects-section">
+        <div class="section-header-flex">
+          <span class="section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg><span class="section-title-label">Projects</span></span>
+          <button type="button" class="section-header-btn" id="project-create-btn" title="New project">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        <div id="project-list" role="listbox"></div>
+      </div>
       <!-- Hidden dropdown for session actions -->
       <div id="session-actions-dropdown" class="dropdown hidden">
         <div class="dropdown-item" id="rename-session-option">
@@ -1001,6 +1012,47 @@
     })();
     </script>
     <div id="chat-history" class="chat-history" role="log" aria-live="polite"></div>
+
+    <div id="project-workspace-panel" class="project-workspace-panel hidden" aria-hidden="true">
+      <div class="project-workspace-toolbar">
+        <div class="project-workspace-toolbar-meta">
+          <div id="project-workspace-meta" class="project-workspace-meta"></div>
+          <div id="project-workspace-warning" class="project-workspace-warning hidden"></div>
+          <div id="project-workspace-status" class="project-workspace-status"></div>
+        </div>
+        <div class="project-workspace-actions">
+          <button type="button" class="admin-btn-sm" id="project-edit-dir-btn">Change folder</button>
+          <button type="button" class="admin-btn-sm" id="project-rename-btn">Rename</button>
+          <button type="button" class="admin-btn-sm" id="project-archive-btn">Archive</button>
+        </div>
+      </div>
+      <div class="project-workspace-body">
+        <div class="project-workspace-grid">
+          <div class="project-region project-region-tree" id="project-file-tree-region">
+            <div class="project-region-label">File tree · depth</div>
+            <div id="project-file-tree" class="project-file-tree"></div>
+          </div>
+          <div class="project-region project-region-editor" id="project-editor-region">
+            <div class="project-region-label">Editor · depth</div>
+            <div id="project-editor-pane" class="project-editor-pane"></div>
+          </div>
+          <div class="project-region project-region-run">
+            <div class="project-region-label">Run · depth</div>
+            <div id="project-run-pane" class="project-run-pane"></div>
+          </div>
+          <div class="project-region project-region-chat" id="project-chat-region">
+            <div class="project-region-label">Chat · both boundaries</div>
+            <div id="project-chat-pane" class="project-chat-pane"></div>
+          </div>
+          <div class="project-region project-region-links" id="project-links-rail">
+            <div class="project-region-label">Links · breadth</div>
+            <div id="project-links-mount" class="project-links-mount">
+              <div class="project-region-placeholder">Loading links…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Attachments strip -->
     <div id="attach-strip" class="attach-strip"></div>
@@ -1783,6 +1835,11 @@
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
                 <span class="vis-label">Chats <span class="vis-hint">Chat history list</span></span>
                 <input type="checkbox" checked data-ui-key="sessions-section"><span class="vis-switch"></span>
+              </label>
+              <label class="vis-row">
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg></span>
+                <span class="vis-label">Projects <span class="vis-hint">Computational workspaces</span></span>
+                <input type="checkbox" checked data-ui-key="projects-section"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span>

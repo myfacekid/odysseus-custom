@@ -14,6 +14,8 @@ const API_BASE = window.location.origin;
 
 let sessions = [];
 let currentSessionId = null;
+/** Active session meta when not in main Chats list (e.g. project workspace). */
+let _currentSessionMeta = null;
 let _sessionNavToken = 0;
 let _skipAutoSelect = false;
 
@@ -1488,11 +1490,19 @@ export async function loadSessions() {
   }
 }
 
-export async function selectSession(id, { keepSidebar = false } = {}) {
+export async function selectSession(id, {
+  keepSidebar = false,
+  inProjectWorkspace = false,
+  sessionMeta = null,
+} = {}) {
   // Exit compare mode cleanly if active
   if (window.compareModule && window.compareModule.isActive()) {
     window.compareModule.deactivate(true);
     return; // deactivate does a page reload
+  }
+  if (!inProjectWorkspace && window.closeProjectWorkspace) {
+    const closed = await window.closeProjectWorkspace({ restoreChat: false });
+    if (!closed) return;
   }
   try {
     const navToken = ++_sessionNavToken;
@@ -1504,14 +1514,15 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       try { window.documentModule.clearSelection(); } catch {}
     }
     currentSessionId = id;
+    _currentSessionMeta = sessionMeta || sessions.find((s) => s.id === id) || null;
     // Identify Assistant / task-output sessions so we don't "trap" the user
     // there on return. Skipped from both `lastSessionId` persistence and the
     // URL hash — the user complained that coming back to Odysseus kept
     // landing them on the auto-firing task-log chat instead of their last
     // real conversation.
-    const _meta = sessions.find(s => s.id === id);
+    const _meta = sessionMeta || sessions.find(s => s.id === id);
     const _isTransientChat = !!_meta && (_meta.folder === 'Assistant' || _meta.folder === 'Tasks');
-    if (!_isTransientChat) {
+    if (!_isTransientChat && !inProjectWorkspace) {
       Storage.set('lastSessionId', id);
       // Update URL hash without triggering hashchange handler
       if (window.location.hash !== '#' + id) {
@@ -1523,7 +1534,7 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       const presetsModule = window.presetsModule || (await import('./presets.js')).default;
       if (presetsModule && presetsModule.onSessionSwitch) presetsModule.onSessionSwitch(id);
     } catch (e) {}
-    const meta = sessions.find(s => s.id === id);
+    const meta = sessionMeta || sessions.find(s => s.id === id);
 
     // Detach any in-flight stream to background instead of aborting
     try {
@@ -1566,10 +1577,12 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
 
     // On mobile, keep sidebar open — user dismisses it by tapping chat area or swiping
 
-    // Highlight active session in sidebar
-    document.querySelectorAll('.list-item.active-session').forEach(el => el.classList.remove('active-session'));
-    const activeEl = document.querySelector(`.list-item[data-session-id="${id}"]`);
-    if (activeEl) activeEl.classList.add('active-session');
+    // Highlight active session in main Chats sidebar (not project workspace list)
+    if (!inProjectWorkspace) {
+      document.querySelectorAll('.list-item.active-session').forEach(el => el.classList.remove('active-session'));
+      const activeEl = document.querySelector(`.list-item[data-session-id="${id}"]`);
+      if (activeEl) activeEl.classList.add('active-session');
+    }
 
     const currentMetaEl = uiModule.el('current-meta');
     if (currentMetaEl) {
@@ -1601,7 +1614,7 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       // never diverge from what's actually sent (the "picker says Minimax
       // but it used the default" bug after a restart / stale cache).
       if (modelName) {
-        const sMeta = sessions.find(s => s.id === id);
+        const sMeta = getSessionMeta(id);
         if (sMeta && sMeta.model !== modelName) {
           sMeta.model = modelName;
           updateModelPicker();
@@ -1623,12 +1636,21 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       return;
     }
 
-    // Fade out old content, swap, fade in
-    if (chatHistory) {
+    // Fade out old content, swap, fade in (skip fade in project workspace — DOM is reparented)
+    const skipHistoryFade = inProjectWorkspace;
+    if (chatHistory && !skipHistoryFade) {
       chatHistory.style.transition = 'opacity 0.12s ease-out';
       chatHistory.style.opacity = '0';
       await new Promise(r => setTimeout(r, 120));
-      if (navToken !== _sessionNavToken || currentSessionId !== id) return;
+      if (navToken !== _sessionNavToken || currentSessionId !== id) {
+        if (chatHistory) {
+          chatHistory.style.opacity = '1';
+          chatHistory.style.transition = '';
+        }
+        return;
+      }
+      chatHistory.innerHTML = '';
+    } else if (chatHistory) {
       chatHistory.innerHTML = '';
     }
 
@@ -1666,7 +1688,9 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
         window.chatModule.addMessage(msg.role, markdownModule.renderContent(displayContent), modelName, meta);
       }
     } else {
-      if (window.chatModule && window.chatModule.showWelcomeScreen) window.chatModule.showWelcomeScreen();
+      if (!inProjectWorkspace && window.chatModule && window.chatModule.showWelcomeScreen) {
+        window.chatModule.showWelcomeScreen();
+      }
       // Don't highlight empty sessions — feels like nothing is selected
       document.querySelectorAll('.list-item.active-session').forEach(el => el.classList.remove('active-session'));
     }
@@ -1674,7 +1698,11 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
 
     // Fade in and re-enable message animations
     if (chatHistory) {
-      chatHistory.style.transition = 'opacity 0.15s ease-in';
+      if (!skipHistoryFade) {
+        chatHistory.style.transition = 'opacity 0.15s ease-in';
+      } else {
+        chatHistory.style.transition = '';
+      }
       chatHistory.style.opacity = '1';
       chatHistory.classList.remove('no-animate');
     }
@@ -1888,8 +1916,14 @@ export function getSessions() {
   return sessions;
 }
 
+export function getSessionMeta(id) {
+  if (!id) return null;
+  if (_currentSessionMeta && _currentSessionMeta.id === id) return _currentSessionMeta;
+  return sessions.find((s) => s.id === id) || null;
+}
+
 export function getCurrentModel() {
-  const sess = sessions.find(x => x.id === currentSessionId);
+  const sess = getSessionMeta(currentSessionId);
   if (sess && sess.model) return sess.model;
   // Pending session not yet materialized — read from model picker label
   const label = document.getElementById('model-picker-label');
@@ -1899,7 +1933,7 @@ export function getCurrentModel() {
 /** Endpoint URL serving the current (or pending) session's model. Used to
  *  decide whether a model is local (free) vs a billable cloud provider. */
 export function getCurrentEndpointUrl() {
-  const sess = sessions.find(x => x.id === currentSessionId);
+  const sess = getSessionMeta(currentSessionId);
   if (sess && sess.endpoint_url) return sess.endpoint_url;
   if (_pendingChat && _pendingChat.url) return _pendingChat.url;
   return null;
@@ -1909,6 +1943,7 @@ export function setCurrentSessionId(id) {
   _sessionNavToken++;
   currentSessionId = id;
   if (!id) {
+    _currentSessionMeta = null;
     Storage.remove('lastSessionId');
     history.replaceState(null, '', window.location.pathname);
     document.querySelectorAll('.list-item.active-session, .session-item.active').forEach(el => {
@@ -2217,6 +2252,7 @@ function _initAllDropdowns() {
   initModelPicker({
     getCurrentSessionId: () => currentSessionId,
     getSessions: () => sessions,
+    getSessionMeta,
     getPendingChat: () => _pendingChat,
     setPendingChat: (v) => { _pendingChat = v; },
     createDirectChat,
@@ -3083,6 +3119,7 @@ const sessionModule = {
   getPendingChat,
   getCurrentSessionId,
   getSessions,
+  getSessionMeta,
   getCurrentModel,
   getCurrentEndpointUrl,
   setCurrentSessionId,

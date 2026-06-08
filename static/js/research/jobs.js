@@ -223,7 +223,8 @@ function _makeJob(query, settings) {
 }
 
 async function _launchJob(job) {
-  const body = { query: job.query, ...job.settings };
+  const { compose_tab, _endpointName, _modelName, ...rest } = job.settings || {};
+  const body = { query: job.query, ...rest };
   let data;
   try {
     const res = await fetch(`${_apiBase}/api/research/start`, {
@@ -248,6 +249,7 @@ async function _launchJob(job) {
   job.id = data.session_id;
   job.status = 'running';
   job.startedAt = Date.now();
+  if (data.project_id && job.settings) job.settings.project_id = data.project_id;
   _connectStream(job);
   _notify();
 }

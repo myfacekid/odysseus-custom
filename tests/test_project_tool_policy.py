@@ -16,6 +16,7 @@ from src.project_sessions import create_project_session
 from src.project_tool_policy import (
     PROJECT_DEPTH_DENIED_TOOLS,
     disabled_tools_for_project_session,
+    disabled_tools_outside_project_session,
     is_project_depth_denied_tool,
     project_tool_block_reason,
     session_is_project,
@@ -91,6 +92,14 @@ def test_disabled_tools_for_project_session():
     assert "mcp__filesystem__read_file" in disabled
 
 
+def test_disabled_tools_outside_project_session():
+    disabled = disabled_tools_outside_project_session()
+    assert "read_project_file" in disabled
+    assert "write_project_file" in disabled
+    assert "run_project_script" in disabled
+    assert "bash" not in disabled
+
+
 def test_project_tool_block_reason(policy_env):
     pid = policy_env["project_session_id"]
     rid = policy_env["regular_session_id"]
@@ -99,6 +108,9 @@ def test_project_tool_block_reason(policy_env):
     assert "read_project_file" in project_tool_block_reason("bash", pid)
     assert project_tool_block_reason("bash", rid) is None
     assert project_tool_block_reason("search_knowledge", pid) is None
+    assert project_tool_block_reason("read_project_file", rid) is not None
+    assert project_tool_block_reason("read_project_file", pid) is None
+    assert project_tool_block_reason("run_project_script", pid) is None
 
 
 @pytest.mark.asyncio

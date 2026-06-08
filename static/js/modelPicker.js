@@ -494,9 +494,14 @@ function _initModelPickerDropdown() {
           uiModule.showError('Failed to set model');
           return;
         }
-        const sessions = _deps.getSessions();
-        const s = sessions.find(x => x.id === currentSessionId);
-        if (s) { s.model = m.mid; s.endpoint_url = m.url; }
+        const s = _deps.getSessionMeta
+          ? _deps.getSessionMeta(currentSessionId)
+          : _deps.getSessions().find(x => x.id === currentSessionId);
+        if (s) {
+          s.model = m.mid;
+          s.endpoint_url = m.url;
+          if (m.endpointId) s.endpoint_id = m.endpointId;
+        }
         // Header stays as session name — model info shown in picker only
       } catch (e) {
         uiModule.showError('Failed to set model: ' + e);
@@ -512,7 +517,9 @@ function _initModelPickerDropdown() {
     const detail = (e && e.detail) || {};
     const currentSessionId = _deps.getCurrentSessionId();
     const sessions = _deps.getSessions();
-    const current = sessions.find(x => x.id === currentSessionId);
+    const current = _deps.getSessionMeta
+      ? _deps.getSessionMeta(currentSessionId)
+      : sessions.find(x => x.id === currentSessionId);
     const pending = _deps.getPendingChat();
     if ((current && current.model) || (pending && pending.modelId)) return;
 
@@ -622,9 +629,10 @@ export function updateModelPicker() {
     wrap.style.pointerEvents = '';
   }
   const currentSessionId = _deps.getCurrentSessionId();
-  const sessions = _deps.getSessions();
   const _pendingChat = _deps.getPendingChat();
-  const s = sessions.find(x => x.id === currentSessionId);
+  const s = _deps.getSessionMeta
+    ? _deps.getSessionMeta(currentSessionId)
+    : _deps.getSessions().find(x => x.id === currentSessionId);
   let modelId = null;
   if (s && s.model) {
     modelId = s.model;

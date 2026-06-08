@@ -1,8 +1,8 @@
-"""Scoped file operations under a project working directory (Phase 0)."""
+"""Scoped file operations under a project working directory (Phase 0 / B)."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 from src.project_paths import ProjectPathError, is_path_under_root
 from src.project_workspace import (
@@ -29,28 +29,38 @@ def _working_dir_root(owner: str, project_id: str) -> str:
     return project.get("working_dir") or ""
 
 
-def list_directory(owner: str, project_id: str, rel_path: str = ".") -> List[dict]:
+def _project_root(owner: str, project_id: str) -> Path:
+    root = _working_dir_root(owner, project_id)
+    return Path(root).resolve()
+
+
+def _rel_to_root(path: Path, root: Path) -> str:
+    return path.resolve().relative_to(root).as_posix()
+
+
+def list_directory(owner: str, project_id: str, rel_path: str = ".") -> dict:
     """List immediate children under *rel_path* within the project cwd."""
+    normalized = _normalize_rel_path(rel_path)
     directory = resolve_owned_project_path(
         owner,
         project_id,
-        _normalize_rel_path(rel_path),
+        normalized,
         must_exist=True,
     )
     if not directory.is_dir():
         raise ProjectFileError("path is not a directory")
 
-    root = _working_dir_root(owner, project_id)
+    root = _project_root(owner, project_id)
     entries: List[dict] = []
     for item in sorted(directory.iterdir(), key=lambda p: p.name.lower()):
         try:
             resolved = item.resolve()
         except OSError:
             continue
-        if not is_path_under_root(str(resolved), root):
+        if not is_path_under_root(str(resolved), str(root)):
             continue
         try:
-            rel = resolved.relative_to(Path(root))
+            rel = resolved.relative_to(root)
         except ValueError:
             continue
         stat = resolved.stat()
@@ -61,7 +71,7 @@ def list_directory(owner: str, project_id: str, rel_path: str = ".") -> List[dic
             "size": stat.st_size if resolved.is_file() else None,
             "modified_at": int(stat.st_mtime),
         })
-    return entries
+    return {"path": normalized, "entries": entries}
 
 
 def read_text_file(owner: str, project_id: str, rel_path: str) -> dict:
@@ -78,12 +88,14 @@ def read_text_file(owner: str, project_id: str, rel_path: str) -> dict:
     if size > MAX_FILE_BYTES:
         raise ProjectFileError(f"file exceeds {MAX_FILE_BYTES} byte limit")
     content = path.read_text(encoding="utf-8")
-    root = _working_dir_root(owner, project_id)
-    rel = path.relative_to(Path(root)).as_posix()
+    root = _project_root(owner, project_id)
+    rel = path.relative_to(root).as_posix()
+    stat = path.stat()
     return {
         "path": rel,
         "content": content,
         "size": size,
+        "modified_at": int(stat.st_mtime),
     }
 
 
@@ -107,8 +119,8 @@ def write_text_file(
         _normalize_rel_path(rel_path),
         must_exist=False,
     )
-    root = Path(_working_dir_root(owner, project_id))
-    if path.resolve() == root.resolve():
+    root = _project_root(owner, project_id)
+    if path.resolve() == root:
         raise ProjectFileError("cannot write project root directory")
 
     if create_dirs:
@@ -118,7 +130,7 @@ def write_text_file(
 
     path.write_text(content, encoding="utf-8")
     stat = path.stat()
-    rel = path.relative_to(root).as_posix()
+    rel = path.relative_to(_project_root(owner, project_id)).as_posix()
     return {
         "path": rel,
         "size": stat.st_size,
@@ -134,36 +146,92 @@ def mkdir(owner: str, project_id: str, rel_path: str) -> dict:
         _normalize_rel_path(rel_path),
         must_exist=False,
     )
-    root = Path(_working_dir_root(owner, project_id))
-    if path.resolve() == root.resolve():
+    root = _project_root(owner, project_id)
+    if path.resolve() == root:
         raise ProjectFileError("project root already exists")
     path.mkdir(parents=True, exist_ok=True)
     rel = path.relative_to(root).as_posix()
     return {"path": rel, "type": "dir"}
 
 
-def delete_path(owner: str, project_id: str, rel_path: str) -> dict:
-    """Delete a file or empty directory under the project cwd."""
+def _delete_tree_under_root(path: Path, root: Path) -> None:
+    """Remove a directory tree, rejecting escapes via symlinks."""
+    if not path.is_dir():
+        raise ProjectFileError("path is not a directory")
+    for item in sorted(path.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        resolved = item.resolve()
+        if not is_path_under_root(str(resolved), str(root)):
+            raise ProjectFileError("path escapes project root")
+        if resolved.is_dir():
+            resolved.rmdir()
+        elif resolved.is_file() or resolved.is_symlink():
+            resolved.unlink()
+    path.resolve().rmdir()
+
+
+def rename_path(owner: str, project_id: str, src_rel: str, dest_rel: str) -> dict:
+    """Move or rename a file or directory within the project cwd."""
+    src = resolve_owned_project_path(
+        owner,
+        project_id,
+        _normalize_rel_path(src_rel),
+        must_exist=True,
+    )
+    dest = resolve_owned_project_path(
+        owner,
+        project_id,
+        _normalize_rel_path(dest_rel),
+        must_exist=False,
+    )
+    root = _project_root(owner, project_id)
+    src_resolved = src.resolve()
+    dest_resolved = dest.resolve()
+    if src_resolved == root:
+        raise ProjectFileError("cannot rename project root directory")
+    if dest_resolved == root:
+        raise ProjectFileError("cannot replace project root directory")
+    if dest_resolved.exists():
+        raise ProjectFileError("destination already exists")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not is_path_under_root(str(dest_resolved), str(root)):
+        raise ProjectFileError("destination escapes project root")
+
+    src_resolved.rename(dest_resolved)
+    return {
+        "from": _rel_to_root(src_resolved, root),
+        "to": _rel_to_root(dest_resolved, root),
+    }
+
+
+def delete_path(owner: str, project_id: str, rel_path: str, *, recursive: bool = False) -> dict:
+    """Delete a file or directory under the project cwd."""
     path = resolve_owned_project_path(
         owner,
         project_id,
         _normalize_rel_path(rel_path),
         must_exist=True,
     )
-    root = Path(_working_dir_root(owner, project_id))
-    if path.resolve() == root.resolve():
+    root = _project_root(owner, project_id)
+    resolved = path.resolve()
+    if resolved == root:
         raise ProjectFileError("cannot delete project root directory")
 
-    rel = path.relative_to(root).as_posix()
-    if path.is_dir():
-        path.rmdir()
+    rel = resolved.relative_to(root).as_posix()
+    if resolved.is_dir():
+        if recursive:
+            _delete_tree_under_root(resolved, root)
+        else:
+            try:
+                resolved.rmdir()
+            except OSError as exc:
+                raise ProjectFileError("directory is not empty") from exc
         kind = "dir"
-    elif path.is_file():
-        path.unlink()
+    elif resolved.is_file() or resolved.is_symlink():
+        resolved.unlink()
         kind = "file"
     else:
         raise ProjectFileError("path is not a file or directory")
-    return {"path": rel, "deleted": kind}
+    return {"path": rel, "deleted": kind, "recursive": bool(recursive and kind == "dir")}
 
 
 def map_project_exception(exc: Exception) -> tuple[int, str]:
