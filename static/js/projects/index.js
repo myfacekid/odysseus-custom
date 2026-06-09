@@ -6,6 +6,7 @@
  * - Breadth: explicit graph links to papers, research, documents — active now.
  */
 import uiModule, { styledPrompt } from '../ui.js';
+import Storage from '../storage.js';
 import knowledgeModule from '../knowledge.js';
 import fileTreeModule from './fileTree.js';
 import editorModule from './editor.js';
@@ -18,13 +19,17 @@ import linkViewerModule from './linkViewer.js';
 import workspaceShortcuts from './workspaceShortcuts.js';
 import workspaceResize from './workspaceResize.js';
 import workspaceSplit from './workspaceSplit.js';
+import workspaceQuickOpen from './workspaceQuickOpen.js';
+import runBadge from './runBadge.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
+const PROJECT_ONBOARDING_KEY = 'odysseus_project_onboarding_seen';
 
 let _projects = [];
 let _openProjectId = null;
 let _openProjectFile = null;
+let _cachedQuickOpenLinks = [];
 
 function _projectNodeId(projectId) {
   return `project:${projectId}`;
@@ -154,6 +159,7 @@ function _initCenterTabs() {
     },
     onChange: (tabs, activeId) => _persistCenterTabs(tabs, activeId),
   });
+  tabHost.bindOverflow(document.getElementById('project-center-tab-overflow'));
   linkViewerModule.mount(document.getElementById('project-link-viewer-pane'), {
     onLinkRemoved: () => {
       if (_openProjectId) void _reloadWorkspaceLinks(_openProjectId);
@@ -184,6 +190,43 @@ function _openFileTab(path) {
     shortLabel: path.split('/').pop() || path,
   });
   if (!tab) uiModule.showToast?.('Close or unpin a tab to open more items', 3000);
+}
+
+function _bindCenterEmptyActions() {
+  const openLinks = document.getElementById('project-empty-open-links');
+  const newFile = document.getElementById('project-empty-new-file');
+  if (openLinks && !openLinks.dataset.bound) {
+    openLinks.dataset.bound = '1';
+    openLinks.addEventListener('click', () => {
+      workspaceShell.setLeftTab('links');
+    });
+  }
+  if (newFile && !newFile.dataset.bound) {
+    newFile.dataset.bound = '1';
+    newFile.addEventListener('click', () => {
+      workspaceShell.setLeftTab('files');
+      fileTreeModule.openNewMenu('file');
+    });
+  }
+}
+
+function _mountQuickOpen(projectId) {
+  workspaceQuickOpen.mount({
+    getFiles: () => fileTreeModule.collectAllPaths(),
+    getLinks: () => _cachedQuickOpenLinks,
+    onOpenFile: async (path) => {
+      workspaceShell.setLeftTab('files');
+      await fileTreeModule.openPath(path);
+    },
+    onOpenLink: (nodeId, meta) => {
+      workspaceShell.setLeftTab('links');
+      _openLinkTab(nodeId, meta);
+    },
+  });
+}
+
+function _syncEditorTabDirty(path, dirty) {
+  if (path) tabHost.setTabDirty(_fileTabId(path), dirty);
 }
 
 function _bindSplitToggle() {
@@ -228,6 +271,7 @@ function _mountEditor(project) {
       workspaceShell.focusRunTab();
       void runPanelModule.runCurrent();
     },
+    onDirtyChange: _syncEditorTabDirty,
   });
 }
 
@@ -245,6 +289,7 @@ function _mountRunPanel(project) {
     isDirty: () => editorModule.isDirty(),
     save: (opts) => editorModule.save(opts),
     onRunComplete: () => void fileTreeModule.refresh(),
+    onRunStateChange: (state) => runBadge.setRunTabBadge(state),
   });
 }
 
@@ -847,6 +892,15 @@ const LINK_TYPE_LABELS = {
   skill: 'Skill',
 };
 
+const EDGE_KIND_LABELS = {
+  parent: 'Parent',
+  link: 'Link',
+  related: 'Related',
+  wikilink: 'Wikilink',
+  in_collection: 'Collection',
+  supports: 'Supports',
+};
+
 const LINK_TYPE_ORDER = {
   research: 0,
   paper: 1,
@@ -870,14 +924,27 @@ function _projectLinkTitle(node, nodeId) {
   return 'Untitled';
 }
 
+function _projectEdgeKindLabel(kind, direction) {
+  const k = (kind || 'link').toLowerCase();
+  if (k === 'parent') {
+    return direction === 'out' ? 'Child link' : 'Parent link';
+  }
+  return EDGE_KIND_LABELS[k] || k;
+}
+
 function _projectLinkRows(fromId, linksData) {
   const rows = [];
   const seen = new Set();
 
   const push = (row, linkedId, direction) => {
-    if (!linkedId || linkedId === fromId || seen.has(linkedId)) return;
-    seen.add(linkedId);
-    rows.push({ row, linkedId, direction });
+    const edge = row.edge || {};
+    const fr = edge.from || '';
+    const to = edge.to || '';
+    const kind = edge.kind || 'link';
+    const edgeKey = `${fr}|${to}|${kind}`;
+    if (!linkedId || linkedId === fromId || seen.has(edgeKey)) return;
+    seen.add(edgeKey);
+    rows.push({ row, linkedId, direction, kind });
   };
 
   for (const row of linksData?.outgoing || []) {
@@ -910,6 +977,16 @@ function _renderLinksRail(project, linksData) {
 
   const fromId = _projectNodeId(project.id);
   const linkRows = _projectLinkRows(fromId, linksData);
+  _cachedQuickOpenLinks = linkRows.map(({ row, linkedId }) => {
+    const n = row.node;
+    const edge = row.edge || {};
+    return {
+      id: linkedId,
+      label: _projectLinkTitle(n, linkedId),
+      type: n?.type || edge.kind || 'link',
+      meta: { label: _projectLinkTitle(n, linkedId) },
+    };
+  });
   const staleRows = linkRows.filter(({ row }) => !row.node);
   const staleCount = staleRows.length;
   const rows = linkRows.map(({ row, linkedId, direction }) => {
@@ -921,16 +998,25 @@ function _renderLinksRail(project, linksData) {
     const removeTo = direction === 'out' ? linkedId : fromId;
     const manual = (edge.source || 'manual') === 'manual';
     const title = _projectLinkTitle(n, linkedId);
-    const badge = n ? _projectTypeBadge(n) : `<span class="kg-type kg-type-research">?</span>`;
+    const nodeBadge = n ? _projectTypeBadge(n) : `<span class="kg-type kg-type-research">Unknown</span>`;
+    const edgeLabel = _projectEdgeKindLabel(kind, direction);
+    const dirIcon = direction === 'out' ? '→' : '←';
     return `<div class="kg-link-row-wrap project-link-row-wrap${stale ? ' project-link-row-stale' : ''}">
       <button type="button" class="kg-link-row project-link-row" data-node-id="${esc(linkedId)}"${
         stale
           ? ` data-stale="1" data-remove-from="${esc(removeFrom)}" data-remove-to="${esc(removeTo)}" data-edge-kind="${esc(kind)}"`
           : ''
       }>
-        <span class="kg-link-kind">${esc(kind)}</span>
-        ${badge}
-        <span class="kg-node-title">${esc(title)}</span>
+        <span class="project-link-row-main">
+          <span class="kg-node-title">${esc(title)}</span>
+          <span class="project-link-row-meta">
+            <span class="project-link-edge" title="${esc(direction === 'out' ? 'Outgoing link' : 'Incoming link')}">
+              <span class="project-link-direction" aria-hidden="true">${dirIcon}</span>
+              <span class="kg-link-kind project-link-edge-kind">${esc(edgeLabel)}</span>
+            </span>
+            ${nodeBadge}
+          </span>
+        </span>
         ${stale ? '<span class="project-link-stale">missing</span>' : ''}
       </button>
       ${manual ? `<button type="button" class="kg-link-remove project-link-remove" data-from="${esc(removeFrom)}" data-to="${esc(removeTo)}" data-kind="${esc(kind)}" title="Remove link" aria-label="Remove link">×</button>` : ''}
@@ -940,18 +1026,16 @@ function _renderLinksRail(project, linksData) {
   mount.innerHTML = `
     <div class="project-links-head">
       <div class="project-links-head-row">
-        <div class="project-links-head-text">
-          <div class="project-links-title">Linked knowledge</div>
-          <div class="project-links-sub">Breadth boundary — explicit links only (not bulk Zotero import)</div>
-          ${staleCount ? `<div class="project-links-stale-hint">${staleCount} stale link${staleCount === 1 ? '' : 's'} — node missing from graph</div>` : ''}
-        </div>
-        <div class="project-links-head-actions">
-          <button type="button" class="admin-btn-sm" id="project-links-browse-btn" title="Open this project in Links">Browse in Links</button>
-          ${staleCount ? `<button type="button" class="admin-btn-sm project-links-stale-btn" id="project-links-remove-stale-btn">Remove stale (${staleCount})</button>` : ''}
-        </div>
+        <input type="search" id="project-links-search" class="project-left-search project-left-search--compact" placeholder="Filter links…" autocomplete="off" spellcheck="false" aria-label="Filter links" />
+        ${staleCount ? `<button type="button" class="admin-btn-sm project-links-stale-btn project-links-head-btn" id="project-links-remove-stale-btn" title="Remove stale links">Stale (${staleCount})</button>` : ''}
       </div>
+      ${staleCount ? `<div class="project-links-stale-hint">${staleCount} stale link${staleCount === 1 ? '' : 's'} — node missing from graph</div>` : ''}
     </div>
-    <div class="project-links-list">${rows || '<div class="kg-link-empty">No links yet — search below to add</div>'}</div>
+    <div class="project-links-list">${rows || `<div class="project-empty-hero project-empty-hero--compact">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      <div class="project-empty-hero-title">No links yet</div>
+      <div class="project-empty-hero-msg">Add papers, research, or documents with the link picker below.</div>
+    </div>`}</div>
     <div id="project-link-picker" class="project-link-picker"></div>`;
 
   const picker = mount.querySelector('#project-link-picker');
@@ -961,8 +1045,12 @@ function _renderLinksRail(project, linksData) {
     });
   }
 
-  mount.querySelector('#project-links-browse-btn')?.addEventListener('click', () => {
-    void knowledgeModule.openKnowledgeAtNode(fromId);
+  mount.querySelector('#project-links-search')?.addEventListener('input', (e) => {
+    const q = (e.target.value || '').trim().toLowerCase();
+    mount.querySelectorAll('.project-link-row-wrap').forEach((row) => {
+      const text = row.textContent.toLowerCase();
+      row.classList.toggle('project-link-row-wrap--filtered', q && !text.includes(q));
+    });
   });
 
   mount.querySelector('#project-links-remove-stale-btn')?.addEventListener('click', () => {
@@ -1038,6 +1126,46 @@ async function _reloadWorkspaceLinks(projectId) {
   _renderLinksRail(project, links);
 }
 
+function _updateProjectModePill(project) {
+  const pill = document.getElementById('project-mode-pill');
+  const label = document.getElementById('project-mode-pill-label');
+  if (!pill) return;
+  if (project?.id) {
+    pill.classList.remove('hidden');
+    if (label) {
+      label.textContent = project.title || project.id;
+      label.title = project.title || project.id;
+    }
+    pill.title = `Project workspace — ${project.title || project.id}`;
+  } else {
+    pill.classList.add('hidden');
+    if (label) label.textContent = 'Project';
+  }
+}
+
+function _dismissProjectOnboarding() {
+  try { Storage.set(PROJECT_ONBOARDING_KEY, '1'); } catch {}
+  document.getElementById('project-onboarding')?.remove();
+}
+
+function _maybeShowProjectOnboarding() {
+  if (Storage.get(PROJECT_ONBOARDING_KEY)) return;
+  const body = document.querySelector('.project-workspace-body');
+  if (!body || document.getElementById('project-onboarding')) return;
+  const banner = document.createElement('div');
+  banner.id = 'project-onboarding';
+  banner.className = 'project-onboarding';
+  banner.innerHTML =
+    '<span class="project-onboarding-text">' +
+      '<span class="project-breadth-hint">Links</span> = breadth (papers, research, documents). ' +
+      '<span class="project-depth-hint">Files</span> = depth (code in your folder). ' +
+      'Press <kbd>Ctrl+P</kbd> to quick-open.' +
+    '</span>' +
+    '<button type="button" class="project-onboarding-dismiss" aria-label="Dismiss tips">×</button>';
+  banner.querySelector('.project-onboarding-dismiss')?.addEventListener('click', _dismissProjectOnboarding);
+  body.insertBefore(banner, body.firstChild);
+}
+
 function _setProjectMainVisible(show) {
   const panel = _workspaceRoot();
   const container = document.getElementById('chat-container');
@@ -1047,11 +1175,16 @@ function _setProjectMainVisible(show) {
     container.classList.remove('welcome-active');
     panel.classList.remove('hidden');
     panel.setAttribute('aria-hidden', 'false');
+    chatSidebarModule.dockComposer?.();
     if (window.chatModule?.hideWelcomeScreen) window.chatModule.hideWelcomeScreen();
   } else {
+    chatSidebarModule.undockComposer?.();
     container.classList.remove('project-active');
+    container.classList.remove('project-chat-docked');
     panel.classList.add('hidden');
     panel.setAttribute('aria-hidden', 'true');
+    _updateProjectModePill(null);
+    document.getElementById('project-onboarding')?.remove();
   }
 }
 
@@ -1062,16 +1195,32 @@ function _renderWorkspaceShell(project) {
   const currentMetaEl = uiModule.el('current-meta');
   if (currentMetaEl) currentMetaEl.textContent = project.title || project.id;
 
+  const titleEl = root.querySelector('#project-workspace-title');
+  if (titleEl) titleEl.textContent = project.title || project.id;
+
   const meta = root.querySelector('#project-workspace-meta');
   if (meta) {
-    const bits = [
-      project.working_dir ? `Depth · ${project.working_dir}` : '',
-      project.working_dir_status && project.working_dir_status !== 'ok'
-        ? `status: ${project.working_dir_status}`
-        : '',
-    ].filter(Boolean);
-    meta.textContent = bits.join(' · ');
+    meta.textContent = project.working_dir || 'No working folder set';
     meta.title = [project.working_dir_warning, project.working_dir].filter(Boolean).join('\n');
+  }
+
+  const badge = root.querySelector('#project-workspace-status-badge');
+  if (badge) {
+    const status = project.working_dir_status || '';
+    if (status === 'ok') {
+      badge.textContent = 'Ready';
+      badge.className = 'project-workspace-status-badge project-workspace-status-badge--ok';
+      badge.title = 'Working folder is accessible — agent can read and run project files';
+    } else if (status) {
+      badge.textContent = status;
+      badge.className = 'project-workspace-status-badge project-workspace-status-badge--bad';
+      badge.title = project.working_dir_warning
+        || `Working folder status: ${status}`;
+    } else {
+      badge.textContent = '';
+      badge.title = '';
+      badge.className = 'project-workspace-status-badge hidden';
+    }
   }
 
   const warnEl = root.querySelector('#project-workspace-warning');
@@ -1082,17 +1231,6 @@ function _renderWorkspaceShell(project) {
     } else {
       warnEl.textContent = '';
       warnEl.classList.add('hidden');
-    }
-  }
-
-  const statusEl = root.querySelector('#project-workspace-status');
-  if (statusEl) {
-    if (project.working_dir_status === 'ok') {
-      statusEl.textContent = 'Working directory OK — edit files in the tree; saves to disk automatically';
-      statusEl.className = 'project-workspace-status ok';
-    } else {
-      statusEl.textContent = `Working directory ${project.working_dir_status || 'unknown'} — fix path before running code`;
-      statusEl.className = 'project-workspace-status bad';
     }
   }
 }
@@ -1158,12 +1296,16 @@ export async function openProjectWorkspace(projectId) {
   workspaceState.saveLastOpenProject(projectId);
   _renderProjectList();
   _renderWorkspaceShell(project);
+  _updateProjectModePill(project);
+  _maybeShowProjectOnboarding();
   _setProjectMainVisible(true);
   _initCenterTabs();
   workspaceShell.mount(projectId);
   workspaceResize.mount(projectId);
   workspaceSplit.mount(projectId);
   _bindSplitToggle();
+  _bindCenterEmptyActions();
+  _mountQuickOpen(projectId);
   _mountEditor(project);
   _mountFileTree(project);
   _mountRunPanel(project);
@@ -1195,8 +1337,11 @@ function _doCloseProjectWorkspace({ restoreChat = true, wasOpen = false } = {}) 
   workspaceResize.unmount();
   workspaceSplit.unmount();
   workspaceShortcuts.unmount();
+  workspaceQuickOpen.unmount();
+  runBadge.setRunTabBadge(null);
   _updateCenterView(null);
   _openProjectFile = null;
+  workspaceState.clearLastOpenProject();
   _setProjectMainVisible(false);
   _openProjectId = null;
   _renderProjectList();
@@ -1259,6 +1404,22 @@ async function _editWorkingDir() {
   _mountChatSidebar(updated);
   await refreshProjectList();
   uiModule.showToast?.('Working directory updated');
+}
+
+export async function restoreLastOpenProjectIfAny() {
+  const projectId = workspaceState.getLastOpenProject();
+  if (!projectId) return false;
+  try {
+    await _fetchProjects();
+  } catch {
+    return false;
+  }
+  if (!_projects.some((p) => p.id === projectId)) {
+    workspaceState.clearLastOpenProject();
+    return false;
+  }
+  await openProjectWorkspace(projectId);
+  return true;
 }
 
 export function initProjects() {
@@ -1331,6 +1492,7 @@ export default {
   refreshProjectList,
   openProjectWorkspace,
   closeProjectWorkspace,
+  restoreLastOpenProjectIfAny,
   createProjectDialog,
   refreshProjectWorkspaceLinks,
 };
@@ -1344,5 +1506,6 @@ if (typeof window !== 'undefined') {
     const panel = document.getElementById('project-workspace-panel');
     return !!(panel && !panel.classList.contains('hidden'));
   };
+  window.getOpenProjectId = () => _openProjectId;
   window.saveActiveProjectFile = (opts) => editorModule.save?.(opts || { silent: true });
 }

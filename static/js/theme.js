@@ -453,6 +453,14 @@ export function applyBgEffectSize(v) {
  *  rules scoped to `body.theme-frosted`. */
 export function applyFrostedGlass(on) {
   document.body.classList.toggle('theme-frosted', !!on);
+  const s = document.documentElement.style;
+  if (on) {
+    s.setProperty('--project-glass-bg', 'color-mix(in srgb, var(--panel) 16%, transparent)');
+    s.setProperty('--project-glass-blur', 'blur(28px) saturate(180%)');
+  } else {
+    s.removeProperty('--project-glass-bg');
+    s.removeProperty('--project-glass-blur');
+  }
 }
 
 // Read current size multiplier for JS effects (canvas-based).

@@ -8,7 +8,7 @@ Use this doc when starting future chats: *"Follow docs/projects-ui-roadmap.md Ph
 
 **Last updated:** 2026-06-01
 
-**Status:** G1–G7 implemented (uncommitted). Optional future: center split ratio drag, tab reorder polish.
+**Status:** G1–G8 implemented. Optional future: center split ratio drag, tab reorder polish, footer maximize.
 
 **Prerequisite:** Phases A–E feature-complete (file tree, editor, run, chat, links rail, tool policy). Backend/API changes should be minimal.
 
@@ -299,6 +299,17 @@ Estimate **3–4 weeks** focused UI work after E sign-off. Each phase is shippab
 - Markdown/HTML preview for cwd files — **done** (editor Preview button)
 - Pin tab / tab reorder — **done** (pin control + drag reorder on center tabs)
 
+### G8 — Discoverability & polish (done)
+
+| Task | Notes |
+|------|-------|
+| Hero empty states + left CTAs | Center, Links, Files empty heroes with action buttons |
+| Tab overflow menu + dirty dots + run badge | `⋯` menu, unsaved dot on depth tabs, Run tab pulse/error badge |
+| Quick open (`Ctrl+P`) | `workspaceQuickOpen.js` — fuzzy picker for files + links |
+| Editor status line + toolbar parity | Line/char count, icon save/reload/preview/run in header |
+
+**Deliverable:** Workspace feels guided on first open; power-user navigation without leaving the shell.
+
 ---
 
 ## File map
@@ -314,6 +325,8 @@ Estimate **3–4 weeks** focused UI work after E sign-off. Each phase is shippab
 | Bottom chat | `static/js/projects/chatSidebar.js` |
 | Bottom run | `static/js/projects/runPanel.js` |
 | State | `static/js/projects/workspaceState.js` |
+| Quick open | **new** `static/js/projects/workspaceQuickOpen.js` |
+| Run badge | **new** `static/js/projects/runBadge.js` |
 | Styles | `static/style.css` (`.project-workspace-*`, tab tokens) |
 | Themes | `static/js/theme.js` (`applyColors` — project depth/breadth tokens + hue guard) |
 | Docs | This file; cross-link from `docs/projects-roadmap.md` |
@@ -380,4 +393,5 @@ Estimate **3–4 weeks** focused UI work after E sign-off. Each phase is shippab
 | 2026-06-01 | G1–G3 + G5: tabbed shell, inline link viewer, center tabs, theme accent tokens |
 | 2026-06-01 | G4 + G6: viewer/editor chrome, stale link tabs, center tab restore, shortcuts, legacy CSS cleanup |
 | 2026-06-01 | G7: panel resize, split view, md/html preview, pin + tab reorder |
+| 2026-06-01 | G8: empty-state heroes, tab overflow, Ctrl+P quick open, editor status parity, run badge |
 | 2026-06-01 | Theme-aware color system: `--project-depth-accent` / `--project-breadth-accent`, hue guard, theme matrix QA |

@@ -1774,7 +1774,7 @@ import createResearchSynapse from './researchSynapse.js';
                   // away (e.g. started a new chat) while research finished —
                   // just refresh the sidebar so the report shows when they return.
                   if (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() === streamSessionId) {
-                    await sessionModule.selectSession(streamSessionId);
+                    await sessionModule.reloadSession(streamSessionId);
                   } else {
                     await sessionModule.loadSessions();
                   }
@@ -3153,7 +3153,7 @@ import createResearchSynapse from './researchSynapse.js';
           // Reload session to show the completed response — but only if the user
           // is still on it; don't yank them back from a new chat they opened.
           if (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() === sessionId) {
-            sessionModule.selectSession(sessionId);
+            sessionModule.reloadSession(sessionId);
           } else {
             sessionModule.loadSessions();
           }
@@ -3395,7 +3395,7 @@ import createResearchSynapse from './researchSynapse.js';
       console.warn('[tab-recovery] Tab was discarded by browser — reloading session');
       setTimeout(() => {
         var _sid = sessionModule && sessionModule.getCurrentSessionId();
-        if (_sid) sessionModule.selectSession(_sid);
+        if (_sid) sessionModule.reloadSession(_sid);
       }, 500);
     }
   }

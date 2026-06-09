@@ -13,6 +13,7 @@ let _getOpenPath = () => null;
 let _isDirty = () => false;
 let _save = async () => true;
 let _onRunComplete = null;
+let _onRunStateChange = null;
 let _lastPath = null;
 let _lastArgs = [];
 let _running = false;
@@ -71,6 +72,7 @@ function _setRunning(running) {
     status.textContent = 'Running…';
     status.className = 'project-run-status running';
   }
+  if (running) _onRunStateChange?.('running');
 }
 
 function _showOutput(show) {
@@ -90,6 +92,7 @@ function _clearOutput() {
     status.className = 'project-run-status';
   }
   _showOutput(false);
+  _onRunStateChange?.(null);
 }
 
 function _formatMeta(result) {
@@ -132,6 +135,8 @@ function _renderResult(result) {
       stderrWrap.classList.add('hidden');
     }
   }
+  if (!ok) _onRunStateChange?.('error');
+  else _onRunStateChange?.(null);
 }
 
 async function _confirmSaveBeforeRun(path) {
@@ -214,11 +219,43 @@ export async function runPath(path, { args = [], skipSavePrompt = false } = {}) 
       status.className = 'project-run-status error';
     }
     if (stdout) stdout.textContent = err.message || 'Run failed';
+    _onRunStateChange?.('error');
     uiModule.showToast?.(err.message || 'Run failed', 4000);
     return null;
   } finally {
     _setRunning(false);
   }
+}
+
+const SNIPPET_PATH = '.nobody_scratch/__run_snippet__.py';
+
+async function _writeSnippetFile(content) {
+  const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(_projectId)}/file`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: SNIPPET_PATH, content, create_dirs: true }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || 'Failed to write snippet');
+  return data;
+}
+
+export async function runMarkdownSnippet(code, lang) {
+  if (!_mounted || !_projectId || !code) return null;
+  const pick = (lang || '').toLowerCase();
+  if (pick !== 'python' && pick !== 'py') {
+    uiModule.showToast?.('Only Python snippets run in the project runner', 3000);
+    return null;
+  }
+  if (_running) return null;
+  try {
+    await _writeSnippetFile(code);
+  } catch (err) {
+    uiModule.showToast?.(err.message || 'Could not save snippet', 4000);
+    return null;
+  }
+  return runPath(SNIPPET_PATH, { skipSavePrompt: true });
 }
 
 export async function runCurrent() {
@@ -266,21 +303,21 @@ function _renderChrome() {
         '<span>Runs use the saved file on disk (project cwd only — not admin shell).</span>' +
         '<button type="button" id="project-run-intro-dismiss" class="admin-btn-sm">Got it</button>' +
       '</div>' +
-      '<div class="project-run-toolbar">' +
-        '<span id="project-run-status" class="project-run-status"></span>' +
-        '<span id="project-run-meta" class="project-run-meta"></span>' +
-        '<span class="project-run-toolbar-actions">' +
-          '<button type="button" id="project-run-copy-btn" class="admin-btn-sm" title="Copy output">Copy</button>' +
-          '<button type="button" id="project-run-rerun-btn" class="admin-btn-sm" title="Re-run last script">Re-run</button>' +
-          '<button type="button" id="project-run-clear-btn" class="admin-btn-sm" title="Clear output">Clear</button>' +
-        '</span>' +
-      '</div>' +
       '<div class="project-run-output doc-run-output">' +
         '<pre id="project-run-stdout" class="doc-run-pre"></pre>' +
         '<div id="project-run-stderr-wrap" class="project-run-stderr-wrap hidden">' +
           '<div class="project-run-stderr-label">stderr</div>' +
           '<pre id="project-run-stderr" class="doc-run-error"></pre>' +
         '</div>' +
+      '</div>' +
+      '<div class="project-run-toolbar">' +
+        '<span id="project-run-status" class="project-run-status"></span>' +
+        '<span id="project-run-meta" class="project-run-meta"></span>' +
+        '<span class="project-run-toolbar-actions">' +
+          '<button type="button" id="project-run-copy-btn" class="project-run-tool-btn" title="Copy output">Copy</button>' +
+          '<button type="button" id="project-run-rerun-btn" class="project-run-tool-btn" title="Re-run last script">Re-run</button>' +
+          '<button type="button" id="project-run-clear-btn" class="project-run-tool-btn" title="Clear output">Clear</button>' +
+        '</span>' +
       '</div>' +
     '</div>';
   _bindEvents();
@@ -296,7 +333,7 @@ export function syncPath(path) {
   }
 }
 
-export function mount(container, projectId, { getOpenPath, isDirty, save, onRunComplete } = {}) {
+export function mount(container, projectId, { getOpenPath, isDirty, save, onRunComplete, onRunStateChange } = {}) {
   unmount();
   _container = container;
   _projectId = projectId;
@@ -304,6 +341,7 @@ export function mount(container, projectId, { getOpenPath, isDirty, save, onRunC
   _isDirty = isDirty || (() => false);
   _save = save || (async () => true);
   _onRunComplete = onRunComplete || null;
+  _onRunStateChange = onRunStateChange || null;
   _mounted = true;
   _lastPath = null;
   _lastArgs = [];
@@ -317,6 +355,7 @@ export function unmount() {
   _isDirty = () => false;
   _save = async () => true;
   _onRunComplete = null;
+  _onRunStateChange = null;
   _lastPath = null;
   _lastArgs = [];
   _running = false;
@@ -328,5 +367,6 @@ export default {
   unmount,
   runPath,
   runCurrent,
+  runMarkdownSnippet,
   syncPath,
 };

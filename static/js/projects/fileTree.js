@@ -12,6 +12,14 @@ const _moveIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" s
 const _deleteIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
 const _menuChevron = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
 
+const _EXT_FILE_ICON = {
+  py: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  js: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>',
+  md: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+  json: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h4v10H4z"/><path d="M16 7h4v10h-4z"/><path d="M10 7h4v10h-4z"/></svg>',
+  html: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+};
+
 let _projectId = null;
 let _container = null;
 let _onFileSelect = null;
@@ -20,6 +28,45 @@ let _onAfterRefresh = null;
 let _expanded = new Set(['.']);
 let _selectedPath = null;
 let _loading = false;
+let _filterQuery = '';
+
+function _fileEntryIcon(name, type) {
+  if (type === 'dir') {
+    return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>';
+  }
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  return _EXT_FILE_ICON[ext] ||
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+}
+
+function _applyTreeFilter() {
+  const q = (_filterQuery || '').trim().toLowerCase();
+  _container?.querySelectorAll('.project-tree-row').forEach((row) => {
+    const path = (row.dataset.path || '').toLowerCase();
+    row.classList.toggle('project-tree-row--filtered', q && !path.includes(q));
+  });
+}
+
+function _renderEmptyHero() {
+  return (
+    '<div class="project-empty-hero">' +
+      '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/>' +
+      '</svg>' +
+      '<div class="project-empty-hero-title">Empty project folder</div>' +
+      '<div class="project-empty-hero-msg">Create a file or folder to start coding.</div>' +
+      '<div class="project-empty-actions">' +
+        '<button type="button" class="project-empty-btn project-empty-btn--depth" data-empty-action="new-file">New file</button>' +
+        '<button type="button" class="project-empty-btn project-empty-btn--depth" data-empty-action="new-folder">New folder</button>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+function _bindEmptyHeroActions(body) {
+  body.querySelector('[data-empty-action="new-file"]')?.addEventListener('click', () => openNewMenu('file'));
+  body.querySelector('[data-empty-action="new-folder"]')?.addEventListener('click', () => openNewMenu('folder'));
+}
 
 function _icon(svg) {
   return `<span class="dropdown-icon">${svg}</span>`;
@@ -575,10 +622,13 @@ async function _submitNewFolder(rawPath) {
   }
 }
 
-async function _renderTreeBody() {
+async function _renderTreeBody({ silent = false } = {}) {
   const body = _container?.querySelector('#project-file-tree-body');
   if (!body) return;
-  body.innerHTML = '<div class="project-tree-empty">Loading…</div>';
+  const scrollTop = body.scrollTop;
+  if (!silent) {
+    body.innerHTML = '<div class="project-tree-empty">Loading…</div>';
+  }
   _removeActionMenusFromBody();
 
   const rows = [];
@@ -600,7 +650,8 @@ async function _renderTreeBody() {
   await walk('.', 0);
 
   if (!rows.length) {
-    body.innerHTML = '<div class="project-tree-empty">Empty folder — use New to create a file or folder</div>';
+    body.innerHTML = _renderEmptyHero();
+    _bindEmptyHeroActions(body);
     return;
   }
 
@@ -620,19 +671,18 @@ async function _renderTreeBody() {
     rowEl.className = 'project-tree-row';
     rowEl.dataset.path = entry.path;
     rowEl.dataset.type = entry.type;
+    rowEl.dataset.depth = String(depth);
     if (entry.path === _selectedPath) rowEl.classList.add('selected');
 
     const mainBtn = document.createElement('button');
     mainBtn.type = 'button';
     mainBtn.className = 'project-tree-main';
-    mainBtn.style.paddingLeft = `${8 + depth * 14}px`;
+    mainBtn.style.setProperty('--tree-depth', String(depth));
 
     const expandChevron = entry.type === 'dir'
       ? (_expanded.has(entry.path) ? '▾' : '▸')
       : ' ';
-    const icon = entry.type === 'dir'
-      ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>'
-      : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+    const icon = _fileEntryIcon(entry.name, entry.type);
 
     mainBtn.innerHTML =
       `<span class="project-tree-chevron">${expandChevron}</span>` +
@@ -644,7 +694,7 @@ async function _renderTreeBody() {
         _setSelected(entry.path);
         _onFileSelect?.(null);
         _toggleExpanded(entry.path);
-        void _renderTreeBody();
+        void _renderTreeBody({ silent: true });
         return;
       }
       void _selectFile(entry.path);
@@ -655,7 +705,7 @@ async function _renderTreeBody() {
       ev.preventDefault();
       if (entry.type === 'dir') {
         _toggleExpanded(entry.path);
-        void _renderTreeBody();
+        void _renderTreeBody({ silent: true });
       } else {
         _startInlineRename(entry, rowEl);
       }
@@ -672,13 +722,16 @@ async function _renderTreeBody() {
     _buildRowActionMenu(entry, rowEl, menuBtn);
     body.appendChild(rowEl);
   }
+  _applyTreeFilter();
+  body.scrollTop = scrollTop;
 }
 
 function _renderChrome() {
   if (!_container) return;
   _container.innerHTML =
     '<div class="project-file-tree-toolbar">' +
-      '<button type="button" class="admin-btn-sm project-tree-tool" data-action="refresh" title="Refresh tree">' +
+      '<input type="search" id="project-tree-search" class="project-left-search project-left-search--compact" placeholder="Filter files…" autocomplete="off" spellcheck="false" aria-label="Filter files" />' +
+      '<button type="button" class="admin-btn-sm project-tree-tool" data-action="refresh" title="Refresh tree" aria-label="Refresh tree">' +
         '<span class="project-tree-tool-icon" aria-hidden="true">↻</span>' +
       '</button>' +
       '<div id="project-tree-new-wrap" class="project-tree-dropdown-wrap">' +
@@ -706,6 +759,10 @@ function _renderChrome() {
     '<div id="project-file-tree-body" class="project-file-tree-body" role="tree"></div>';
 
   _container.querySelector('[data-action="refresh"]')?.addEventListener('click', () => void refresh());
+  _container.querySelector('#project-tree-search')?.addEventListener('input', (e) => {
+    _filterQuery = e.target.value || '';
+    _applyTreeFilter();
+  });
   _container.querySelector('[data-action="new"]')?.addEventListener('click', (e) => {
     e.stopPropagation();
     _toggleNewDropdown();
@@ -797,6 +854,31 @@ export function getSelectedPath() {
   return _selectedPath;
 }
 
+export function openNewMenu(kind = 'file') {
+  _toggleNewDropdown();
+  if (kind === 'folder') {
+    requestAnimationFrame(() => _container?.querySelector('#project-tree-new-folder-input')?.focus());
+  }
+}
+
+export async function collectAllPaths() {
+  if (!_projectId) return [];
+  const paths = [];
+  async function walk(dirPath) {
+    const entries = await _listDir(dirPath);
+    for (const entry of entries) {
+      if (entry.type === 'file') paths.push(entry.path);
+      else if (entry.type === 'dir') await walk(entry.path);
+    }
+  }
+  try {
+    await walk('.');
+  } catch {
+    return paths;
+  }
+  return paths.sort((a, b) => a.localeCompare(b));
+}
+
 /** Restore a previously open file — expands parent folders then selects. */
 export async function openPath(path) {
   if (!path || !_projectId || !_onFileSelect) return false;
@@ -816,4 +898,6 @@ export default {
   refresh,
   getSelectedPath,
   openPath,
+  collectAllPaths,
+  openNewMenu,
 };

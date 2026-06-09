@@ -1823,7 +1823,7 @@ export function displayMetrics(messageElement, metrics) {
             if (res.ok) {
               const data = await res.json();
               // Reload session — the compacted history will show
-              if (window.sessionModule) await window.sessionModule.selectSession(sid);
+              if (window.sessionModule) await window.sessionModule.reloadSession(sid);
               // Scroll to the compacted message (first msg with compacted metadata)
               setTimeout(() => {
                 const msgs = document.querySelectorAll('#chat-history .msg');

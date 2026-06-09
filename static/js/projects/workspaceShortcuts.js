@@ -3,6 +3,7 @@
  */
 import workspaceShell from './workspaceShell.js';
 import tabHost from './tabHost.js';
+import workspaceQuickOpen from './workspaceQuickOpen.js';
 
 let _bound = false;
 
@@ -31,6 +32,11 @@ function _onKeyDown(e) {
     if (!active) return;
     e.preventDefault();
     tabHost.closeTab(active.id);
+    return;
+  }
+  if (e.key === 'p' || e.key === 'P') {
+    e.preventDefault();
+    void workspaceQuickOpen.open();
   }
 }
 

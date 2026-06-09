@@ -101,9 +101,6 @@ function _typeIntro(type) {
 }
 
 function _bindActions(nodeId, node, meta, tabMeta) {
-  _pane.querySelector('#project-link-viewer-hub-btn')?.addEventListener('click', () => {
-    void knowledgeModule.openKnowledgeAtNode(nodeId);
-  });
   _pane.querySelector('#project-link-viewer-report-btn')?.addEventListener('click', () => {
     const sid = meta.session_id || nodeId.replace(/^research:/i, '');
     if (sid) {
@@ -180,7 +177,6 @@ export async function show(nodeId, tabMeta) {
             `<div class="project-link-viewer-id">${esc(nodeId)}</div>` +
           `</div>` +
           `<div class="project-link-viewer-actions">` +
-            `<button type="button" class="admin-btn-sm" id="project-link-viewer-hub-btn">Browse in Links</button>` +
             (type === 'research' && meta.session_id
               ? `<button type="button" class="admin-btn-sm" id="project-link-viewer-report-btn">Open report</button>`
               : '') +

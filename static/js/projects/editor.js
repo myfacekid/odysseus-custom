@@ -5,6 +5,9 @@
 import uiModule, { styledChoice } from '../ui.js';
 import { langIcon } from '../langIcons.js';
 import markdownModule from '../markdown.js';
+import codeRunnerModule from '../codeRunner.js';
+import runPanelModule from './runPanel.js';
+import workspaceShell from './workspaceShell.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
@@ -14,6 +17,16 @@ const MAX_FILE_BYTES = 2_000_000;
 const _RUN_PLAY_SVG =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">' +
   '<polygon points="5 3 19 12 5 21 5 3"/></svg>';
+const _SAVE_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>' +
+  '<polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
+const _RELOAD_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+const _PREVIEW_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 
 const EXT_TO_LANG = {
   py: 'python',
@@ -57,6 +70,7 @@ let _hlDebounce = null;
 let _diskPollTimer = null;
 let _mounted = false;
 let _onRun = null;
+let _onDirtyChange = null;
 let _pendingDiskPayload = null;
 let _lineNumberResizeRaf = null;
 let _lineNumberResizeObserver = null;
@@ -83,6 +97,7 @@ function _els() {
     previewBtn: _pane?.querySelector('#project-editor-preview-btn'),
     mdPreview: _pane?.querySelector('#project-editor-md-preview'),
     htmlPreview: _pane?.querySelector('#project-editor-html-preview'),
+    metaStatus: _pane?.querySelector('#project-editor-meta-status'),
   };
 }
 
@@ -95,8 +110,9 @@ function _updatePreviewButton() {
   if (!previewBtn) return;
   const show = _canPreview() && !!_path;
   previewBtn.classList.toggle('hidden', !show);
-  previewBtn.textContent = _previewMode ? 'Edit' : 'Preview';
+  previewBtn.classList.toggle('active', !!_previewMode);
   previewBtn.setAttribute('aria-pressed', _previewMode ? 'true' : 'false');
+  previewBtn.title = _previewMode ? 'Return to editor' : 'Preview markdown or HTML';
 }
 
 function _exitPreview() {
@@ -123,9 +139,30 @@ function _syncPreviewContent() {
     if (window.hljs) {
       mdPreview.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
     }
+    _bindMarkdownPreviewRuns(mdPreview);
   } else if (_previewMode === 'html' && htmlPreview) {
     htmlPreview.srcdoc = text;
   }
+}
+
+function _bindMarkdownPreviewRuns(root) {
+  if (!root || root.dataset.runBound === '1') return;
+  root.dataset.runBound = '1';
+  root.addEventListener('click', (e) => {
+    const btn = e.target.closest('.run-code');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const lang = (btn.getAttribute('data-lang') || '').toLowerCase();
+    const code = btn.getAttribute('data-code') || '';
+    if (!code) return;
+    if (lang === 'python' || lang === 'py') {
+      workspaceShell.focusRunTab();
+      void runPanelModule.runMarkdownSnippet(code, lang);
+      return;
+    }
+    if (codeRunnerModule?.run) codeRunnerModule.run(btn);
+  });
 }
 
 function _setPreviewActive(active) {
@@ -356,6 +393,22 @@ function _setSaveStatus(text, kind = '') {
   status.className = `project-editor-save-status${kind ? ` ${kind}` : ''}`;
 }
 
+function _updateMetaStatus() {
+  const { textarea, metaStatus } = _els();
+  if (!metaStatus) return;
+  if (!_path || !textarea) {
+    metaStatus.textContent = '';
+    return;
+  }
+  const lines = (textarea.value.match(/\n/g) || []).length + 1;
+  const chars = textarea.value.length;
+  metaStatus.textContent = `${lines} line${lines === 1 ? '' : 's'} · ${chars} char${chars === 1 ? '' : 's'} · UTF-8`;
+}
+
+function _notifyDirty() {
+  if (_onDirtyChange) _onDirtyChange(_path, isDirty());
+}
+
 function _updatePathDisplay() {
   const { path } = _els();
   if (!path) return;
@@ -560,6 +613,8 @@ async function _applyPayload(payload, { fromDisk = false } = {}) {
   }
   syncHighlighting();
   _setSaveStatus(fromDisk ? 'Reloaded from disk' : '', fromDisk ? 'saved' : '');
+  _updateMetaStatus();
+  _notifyDirty();
   _startDiskPoll();
 }
 
@@ -601,6 +656,8 @@ export async function save({ silent = false, force = false } = {}) {
     _diskModifiedAt = result.modified_at ?? _diskModifiedAt;
     _hideDiskBanner();
     _setSaveStatus('Saved', 'saved');
+    _updateMetaStatus();
+    _notifyDirty();
     if (!silent) uiModule.showToast?.('File saved');
     return true;
   } catch (err) {
@@ -614,6 +671,7 @@ function _scheduleAutoSave() {
   if (!_path) return;
   clearTimeout(_autoSaveTimer);
   _setSaveStatus('Unsaved changes', 'dirty');
+  _notifyDirty();
   _autoSaveTimer = setTimeout(() => {
     void save({ silent: true });
   }, AUTO_SAVE_MS);
@@ -628,6 +686,7 @@ function _bindEditorEvents() {
     _scheduleHighlight();
     _scheduleAutoSave();
     _syncPreviewContent();
+    _updateMetaStatus();
   });
   textarea.addEventListener('scroll', () => {
     const { pre } = _els();
@@ -696,15 +755,19 @@ function _renderChrome() {
         '<span id="project-editor-path" class="project-editor-path" title=""></span>' +
         '<span id="project-editor-lang" class="project-editor-lang"></span>' +
         '<span class="project-editor-head-actions">' +
+          '<button type="button" id="project-editor-preview-btn" class="doc-action-icon-btn hidden" title="Preview markdown or HTML" aria-pressed="false">' +
+            _PREVIEW_SVG +
+          '</button>' +
+          '<button type="button" id="project-editor-reload-btn" class="doc-action-icon-btn" title="Reload from disk">' +
+            _RELOAD_SVG +
+          '</button>' +
+          '<button type="button" id="project-editor-save-btn" class="doc-action-icon-btn" title="Save (Ctrl+S)">' +
+            _SAVE_SVG +
+          '</button>' +
           '<button type="button" id="project-editor-run-btn" class="doc-action-icon-btn project-editor-run-btn" disabled title="Run script">' +
             _RUN_PLAY_SVG +
           '</button>' +
         '</span>' +
-      '</div>' +
-      '<div class="project-editor-toolbar">' +
-        '<button type="button" id="project-editor-reload-btn" class="admin-btn-sm" title="Reload from disk">Reload</button>' +
-        '<button type="button" id="project-editor-save-btn" class="admin-btn-sm">Save</button>' +
-        '<button type="button" id="project-editor-preview-btn" class="admin-btn-sm hidden" title="Preview markdown or HTML">Preview</button>' +
       '</div>' +
       '<div id="project-editor-md-preview" class="doc-md-preview project-editor-md-preview" style="display:none"></div>' +
       '<iframe id="project-editor-html-preview" class="doc-html-preview project-editor-html-preview" sandbox="allow-scripts allow-modals" style="display:none"></iframe>' +
@@ -714,7 +777,8 @@ function _renderChrome() {
         '<textarea id="project-editor-textarea" class="doc-editor-textarea" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>' +
       '</div>' +
       '<div class="project-editor-footer">' +
-        '<span class="project-editor-hints">Ctrl+S save · Ctrl+Enter run · Ctrl+W close tab</span>' +
+        '<span id="project-editor-meta-status" class="project-editor-meta-status"></span>' +
+        '<span class="project-editor-hints">Ctrl+S save · Ctrl+Enter run · Ctrl+P open</span>' +
         '<span id="project-editor-save-status" class="project-editor-save-status"></span>' +
       '</div>' +
     '</div>';
@@ -752,6 +816,8 @@ export function closeFile() {
   _diskModifiedAt = null;
   _lastSavedContent = '';
   _setSaveStatus('', '');
+  _updateMetaStatus();
+  _notifyDirty();
   _updateRunButton();
   _showEditor(false);
 }
@@ -826,11 +892,12 @@ export async function reconcileWithDisk({ quiet = false } = {}) {
   }
 }
 
-export function mount(pane, projectId, { onRun } = {}) {
+export function mount(pane, projectId, { onRun, onDirtyChange } = {}) {
   unmount();
   _pane = pane;
   _projectId = projectId;
   _onRun = onRun || null;
+  _onDirtyChange = onDirtyChange || null;
   _mounted = true;
   _renderChrome();
   closeFile();
@@ -849,6 +916,7 @@ export function unmount() {
   _pane = null;
   _projectId = null;
   _onRun = null;
+  _onDirtyChange = null;
   _mounted = false;
 }
 

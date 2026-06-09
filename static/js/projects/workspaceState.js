@@ -92,16 +92,18 @@ export function getLayoutSizes(projectId) {
   return {
     leftWidth: typeof s.leftWidth === 'number' ? s.leftWidth : null,
     footerHeight: typeof s.footerHeight === 'number' ? s.footerHeight : null,
+    footerExpanded: s.footerExpanded === true,
   };
 }
 
-export function saveLayoutSizes(projectId, { leftWidth, footerHeight } = {}) {
+export function saveLayoutSizes(projectId, { leftWidth, footerHeight, footerExpanded } = {}) {
   const prev = loadState(projectId).layout || {};
   saveState(projectId, {
     layout: {
       ...prev,
       ...(typeof leftWidth === 'number' ? { leftWidth } : {}),
       ...(typeof footerHeight === 'number' ? { footerHeight } : {}),
+      ...(typeof footerExpanded === 'boolean' ? { footerExpanded } : {}),
     },
   });
 }
@@ -132,9 +134,18 @@ export function saveSplitTabs(projectId, { depthId, breadthId } = {}) {
 }
 
 export function saveLastOpenProject(projectId) {
-  if (!projectId) return;
+  if (!projectId) {
+    clearLastOpenProject();
+    return;
+  }
   try {
     Storage.set(LAST_OPEN_PROJECT_KEY, projectId);
+  } catch {}
+}
+
+export function clearLastOpenProject() {
+  try {
+    Storage.remove(LAST_OPEN_PROJECT_KEY);
   } catch {}
 }
 
@@ -170,4 +181,5 @@ export default {
   saveSplitTabs,
   saveLastOpenProject,
   getLastOpenProject,
+  clearLastOpenProject,
 };

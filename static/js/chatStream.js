@@ -205,7 +205,7 @@ export function notifyStreamComplete(sessionId, query) {
   notification.onclick = function() {
     window.focus();
     if (isOtherSession && sessionModule) {
-      sessionModule.selectSession(sessionId);
+      sessionModule.reloadSession(sessionId);
     }
     notification.close();
   };
@@ -231,7 +231,7 @@ export function insertStreamDoneToast(sessionId, query) {
     + '</span>'
     + '</div>';
   div.addEventListener('click', function() {
-    if (sessionModule) sessionModule.selectSession(sessionId);
+    if (sessionModule) sessionModule.reloadSession(sessionId);
   });
   box.appendChild(div);
   uiModule.scrollHistory();
@@ -253,7 +253,7 @@ export function notifyResearchComplete(sessionId, query) {
   notification.onclick = function() {
     window.focus();
     if (isOtherSession && sessionModule) {
-      sessionModule.selectSession(sessionId);
+      sessionModule.reloadSession(sessionId);
     }
     notification.close();
   };

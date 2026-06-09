@@ -3996,6 +3996,13 @@ function startNobodyApp() {
 
     // Load sessions first (critical path) — remove loader when done
     sessionModule.loadSessions()
+      .then(async () => {
+        if (window._pendingProjectRestore && window.openProjectWorkspace) {
+          const projectId = window._pendingProjectRestore;
+          window._pendingProjectRestore = null;
+          await window.openProjectWorkspace(projectId);
+        }
+      })
       .catch(e => console.warn('loadSessions error:', e))
       .finally(() => {
         const loader = document.getElementById('app-loader');

@@ -17,6 +17,60 @@ let _sessions = [];
 let _activeSessionId = null;
 let _mounted = false;
 let _chatDock = null;
+let _composerDock = null;
+
+export function dockComposer() {
+  _dockComposerUi();
+}
+
+export function undockComposer() {
+  _undockComposerUi();
+}
+
+function _dockComposerUi() {
+  const composer = document.getElementById('project-workspace-composer');
+  const attach = document.getElementById('attach-strip');
+  const inputBar = document.querySelector('.chat-input-bar');
+  if (!composer || !inputBar || _composerDock) return;
+
+  _composerDock = {
+    attach,
+    inputBar,
+    attachParent: attach?.parentElement || null,
+    inputParent: inputBar.parentElement,
+    attachNext: attach?.nextElementSibling || null,
+    inputNext: inputBar.nextElementSibling,
+  };
+  if (attach) composer.appendChild(attach);
+  composer.appendChild(inputBar);
+  composer.classList.remove('hidden');
+}
+
+function _undockComposerUi() {
+  if (!_composerDock) return;
+  const { attach, inputBar, attachParent, inputParent, attachNext, inputNext } = _composerDock;
+  const panel = document.getElementById('project-workspace-panel');
+
+  if (attach && attachParent) {
+    if (attachNext && attachNext.parentElement === attachParent) {
+      attachParent.insertBefore(attach, attachNext);
+    } else if (panel && panel.parentElement === attachParent) {
+      attachParent.insertBefore(attach, panel.nextSibling);
+    } else {
+      attachParent.appendChild(attach);
+    }
+  }
+  if (inputBar && inputParent) {
+    if (inputNext && inputNext.parentElement === inputParent) {
+      inputParent.insertBefore(inputBar, inputNext);
+    } else {
+      inputParent.appendChild(inputBar);
+    }
+  }
+
+  document.getElementById('project-workspace-composer')?.classList.add('hidden');
+  _composerDock = null;
+}
 
 function _icon(svg) {
   return `<span class="dropdown-icon">${svg}</span>`;
@@ -80,6 +134,7 @@ function _dockChatUi() {
     }
     container?.classList.add('project-chat-docked');
     _ensureChatVisible();
+    _dockComposerUi();
     return;
   }
 
@@ -93,13 +148,18 @@ function _dockChatUi() {
   main.appendChild(history);
   container?.classList.add('project-chat-docked');
   _ensureChatVisible();
+  _dockComposerUi();
 }
 
 function _undockChatUi() {
-  if (!_chatDock) return;
+  if (!_chatDock) {
+    _undockComposerUi();
+    return;
+  }
   const { history, parent, anchor } = _chatDock;
   const container = document.getElementById('chat-container');
   container?.classList.remove('project-chat-docked');
+  _undockComposerUi();
 
   if (parent && history) {
     if (anchor && anchor.parentElement === parent) {
@@ -436,4 +496,6 @@ export default {
   unmount,
   refresh,
   getActiveSessionId,
+  dockComposer,
+  undockComposer,
 };

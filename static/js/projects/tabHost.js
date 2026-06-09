@@ -13,6 +13,8 @@ let _onSelect = null;
 let _onClose = null;
 let _onChange = null;
 let _dragId = null;
+let _overflowBtn = null;
+let _overflowMenu = null;
 
 function _emitChange() {
   if (_onChange) _onChange(_tabs.slice(), _activeId);
@@ -68,6 +70,9 @@ function _render() {
       t.pinned ? 'is-pinned' : '',
     ].filter(Boolean).join(' ');
     const icon = t.kind === 'depth' ? '◇' : '◆';
+    const dirtyDot = t.dirty
+      ? '<span class="project-center-tab-dirty" aria-label="Unsaved changes" title="Unsaved">●</span>'
+      : '';
     return `<button type="button" role="tab" class="${cls}" data-tab-id="${esc(t.id)}" draggable="true" ` +
       `title="${esc(t.label)}" aria-selected="${active ? 'true' : 'false'}">` +
       `<span class="project-center-tab-pin${t.pinned ? ' pinned' : ''}" data-pin-tab="${esc(t.id)}" ` +
@@ -75,6 +80,7 @@ function _render() {
         `${t.pinned ? '▪' : '○'}</span>` +
       `<span class="project-center-tab-icon" aria-hidden="true">${icon}</span>` +
       `<span class="project-center-tab-label">${esc(t.shortLabel || t.label)}</span>` +
+      dirtyDot +
       `<span class="project-center-tab-close" data-close-tab="${esc(t.id)}" aria-label="Close tab">×</span>` +
       `</button>`;
   }).join('');
@@ -109,6 +115,134 @@ function _render() {
     });
   });
   _bindDragDrop();
+  _syncOverflowButton();
+}
+
+function _closeOverflowMenu() {
+  if (!_overflowMenu) return;
+  _overflowMenu.remove();
+  _overflowMenu = null;
+  document.removeEventListener('click', _onOverflowOutside, true);
+  document.removeEventListener('keydown', _onOverflowEscape, true);
+}
+
+function _onOverflowOutside(e) {
+  if (_overflowMenu?.contains(e.target) || _overflowBtn?.contains(e.target)) return;
+  _closeOverflowMenu();
+}
+
+function _onOverflowEscape(e) {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  _closeOverflowMenu();
+}
+
+function _syncOverflowButton() {
+  if (!_overflowBtn) return;
+  const hidden = _tabs.length < 2;
+  _overflowBtn.classList.toggle('hidden', hidden);
+  _overflowBtn.disabled = hidden;
+}
+
+function _openOverflowMenu() {
+  _closeOverflowMenu();
+  if (!_overflowBtn || _tabs.length < 2) return;
+
+  const menu = document.createElement('div');
+  menu.id = 'project-tab-overflow-menu';
+  menu.className = 'doc-overflow-menu open project-tab-overflow-menu';
+  menu.setAttribute('role', 'menu');
+
+  for (const t of _tabs) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'doc-overflow-item project-tab-overflow-item';
+    item.dataset.tabId = t.id;
+    item.setAttribute('role', 'menuitem');
+    const icon = t.kind === 'depth' ? '◇' : '◆';
+    const dirty = t.dirty ? ' ●' : '';
+    item.innerHTML =
+      `<span class="project-tab-overflow-kind">${icon}</span>` +
+      `<span class="project-tab-overflow-label">${esc(t.shortLabel || t.label)}${dirty}</span>` +
+      (t.id === _activeId ? '<span class="overflow-active-dot"></span>' : '');
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _closeOverflowMenu();
+      _activate(t.id, { user: true });
+    });
+    menu.appendChild(item);
+  }
+
+  const sep = document.createElement('div');
+  sep.className = 'project-tab-overflow-sep';
+  menu.appendChild(sep);
+
+  const closeOthers = document.createElement('button');
+  closeOthers.type = 'button';
+  closeOthers.className = 'doc-overflow-item';
+  closeOthers.textContent = 'Close other tabs';
+  closeOthers.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _closeOverflowMenu();
+    closeOtherTabs(_activeId);
+  });
+  menu.appendChild(closeOthers);
+
+  const closeRight = document.createElement('button');
+  closeRight.type = 'button';
+  closeRight.className = 'doc-overflow-item';
+  closeRight.textContent = 'Close tabs to the right';
+  closeRight.disabled = !_activeId || _tabs.findIndex((t) => t.id === _activeId) >= _tabs.length - 1;
+  closeRight.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _closeOverflowMenu();
+    closeTabsToRight(_activeId);
+  });
+  menu.appendChild(closeRight);
+
+  document.body.appendChild(menu);
+  _overflowMenu = menu;
+  const rect = _overflowBtn.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+  menu.style.left = 'auto';
+  menu.style.zIndex = '9999';
+
+  setTimeout(() => {
+    document.addEventListener('click', _onOverflowOutside, true);
+    document.addEventListener('keydown', _onOverflowEscape, true);
+  }, 0);
+}
+
+export function closeOtherTabs(keepId) {
+  if (!keepId) return;
+  [..._tabs].filter((t) => t.id !== keepId).forEach((t) => closeTab(t.id));
+}
+
+export function closeTabsToRight(fromId) {
+  const idx = _tabs.findIndex((t) => t.id === fromId);
+  if (idx < 0) return;
+  [..._tabs.slice(idx + 1)].forEach((t) => closeTab(t.id));
+}
+
+export function setTabDirty(id, dirty) {
+  const tab = _tabs.find((t) => t.id === id);
+  if (!tab || !!tab.dirty === !!dirty) return;
+  tab.dirty = !!dirty;
+  _render();
+}
+
+export function bindOverflow(btn) {
+  _overflowBtn = btn;
+  if (!btn || btn.dataset.overflowBound) return;
+  btn.dataset.overflowBound = '1';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (_overflowMenu) _closeOverflowMenu();
+    else _openOverflowMenu();
+  });
+  _syncOverflowButton();
 }
 
 function _activate(id, { user = false, emit = true } = {}) {
@@ -152,6 +286,7 @@ export function openTab({ id, kind, label, shortLabel, meta, pinned, activate = 
     shortLabel: shortLabel || (label || id).split('/').pop() || id.replace(/^[^:]+:/, ''),
     meta: meta || undefined,
     pinned: !!pinned,
+    dirty: false,
   };
   _tabs.push(tab);
   if (activate !== false) _activate(id);
@@ -196,6 +331,7 @@ export function restoreTabs(tabs, activeId) {
       shortLabel: t.shortLabel || (t.label || t.id).split('/').pop() || t.id.replace(/^[^:]+:/, ''),
       meta: t.meta || undefined,
       pinned: !!t.pinned,
+      dirty: false,
     }));
   _activeId = _tabs.some((t) => t.id === activeId) ? activeId : (_tabs[0]?.id || null);
   _render();
@@ -215,6 +351,7 @@ export function getTabs() {
 }
 
 export function reset() {
+  _closeOverflowMenu();
   _tabs = [];
   _activeId = null;
   _render();
@@ -231,4 +368,8 @@ export default {
   getActiveTab,
   getTabs,
   reset,
+  setTabDirty,
+  closeOtherTabs,
+  closeTabsToRight,
+  bindOverflow,
 };

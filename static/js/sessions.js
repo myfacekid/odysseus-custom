@@ -9,6 +9,7 @@ import { providerLogo } from './providers.js';
 import { initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
+import { getLastOpenProject, clearLastOpenProject } from './projects/workspaceState.js';
 
 const API_BASE = window.location.origin;
 
@@ -18,6 +19,37 @@ let currentSessionId = null;
 let _currentSessionMeta = null;
 let _sessionNavToken = 0;
 let _skipAutoSelect = false;
+
+function _isProjectWorkspaceActive() {
+  return !!document.getElementById('chat-container')?.classList.contains('project-active');
+}
+
+function _getOpenProjectId() {
+  return typeof window.getOpenProjectId === 'function' ? window.getOpenProjectId() : null;
+}
+
+function _sessionMetaForId(id) {
+  if (!id) return null;
+  if (id === currentSessionId && _currentSessionMeta) return _currentSessionMeta;
+  return sessions.find((s) => s.id === id) || null;
+}
+
+/** True when *id* is a chat scoped to the currently open project. */
+function _sessionBelongsToOpenProject(id) {
+  const projectId = _getOpenProjectId();
+  if (!projectId || !id) return false;
+  const meta = _sessionMetaForId(id);
+  return !!(meta && meta.project_id === projectId);
+}
+
+/** Keep project workspace open when reloading or switching project-scoped chats. */
+function _resolveInProjectWorkspace(id, explicit) {
+  if (explicit) return true;
+  if (!_isProjectWorkspaceActive()) return false;
+  if (id && id === currentSessionId) return true;
+  if (_sessionBelongsToOpenProject(id)) return true;
+  return false;
+}
 
 const SIDEBAR_MAX_VISIBLE = 10;
 const FOLDER_MAX_VISIBLE = 5;
@@ -1426,7 +1458,11 @@ export async function loadSessions() {
     const _isFirstLoad = !sessionStorage.getItem('ody-session-active');
     if (_isFirstLoad) {
       sessionStorage.setItem('ody-session-active', '1');
-      if (!targetId) {
+      const lastProject = getLastOpenProject();
+      if (lastProject && !hashId) {
+        targetId = null;
+        window._pendingProjectRestore = lastProject;
+      } else if (!targetId) {
         try {
           const dcRes = await fetch(`${API_BASE}/api/default-chat`);
           const dc = await dcRes.json();
@@ -1452,7 +1488,20 @@ export async function loadSessions() {
     }
 
     if (targetId && targetId !== currentSessionId) {
-      await selectSession(targetId, { keepSidebar: true });
+      const inProject = _isProjectWorkspaceActive();
+      // Project chats don't update the URL hash; a stale #main-chat hash would
+      // otherwise win here after loadSessions() (e.g. post-stream rename refresh)
+      // and eject the user from the workspace.
+      if (inProject && currentSessionId) {
+        targetId = currentSessionId;
+      }
+    }
+
+    if (targetId && targetId !== currentSessionId) {
+      await selectSession(targetId, {
+        keepSidebar: true,
+        inProjectWorkspace: _resolveInProjectWorkspace(targetId, false),
+      });
     } else if (targetId && targetId === currentSessionId) {
       // Same session — just refresh the header name in case it was auto-generated
       const s = sessions.find(x => x.id === targetId);
@@ -1490,11 +1539,20 @@ export async function loadSessions() {
   }
 }
 
+export async function reloadSession(id = currentSessionId) {
+  if (!id) return;
+  return selectSession(id, {
+    keepSidebar: true,
+    inProjectWorkspace: _resolveInProjectWorkspace(id, false),
+  });
+}
+
 export async function selectSession(id, {
   keepSidebar = false,
   inProjectWorkspace = false,
   sessionMeta = null,
 } = {}) {
+  inProjectWorkspace = _resolveInProjectWorkspace(id, inProjectWorkspace);
   // Exit compare mode cleanly if active
   if (window.compareModule && window.compareModule.isActive()) {
     window.compareModule.deactivate(true);
@@ -1503,6 +1561,7 @@ export async function selectSession(id, {
   if (!inProjectWorkspace && window.closeProjectWorkspace) {
     const closed = await window.closeProjectWorkspace({ restoreChat: false });
     if (!closed) return;
+    clearLastOpenProject();
   }
   try {
     const navToken = ++_sessionNavToken;
@@ -2036,6 +2095,9 @@ export function initDragSort() {
 
 // Hash-based routing: navigate between sessions with browser back/forward
 window.addEventListener('hashchange', () => {
+  // Project chats don't update the URL hash; ignore stale main-chat hashes
+  // while the workspace is open so back/forward doesn't eject the user.
+  if (_isProjectWorkspaceActive()) return;
   const hashId = window.location.hash.replace('#', '');
   if (hashId && hashId !== currentSessionId) {
     const target = sessions.find(s => s.id === hashId && !s.archived);
@@ -2222,13 +2284,13 @@ async function _checkServerStream(sessionId) {
           spinner.destroy();
           if (holder.parentNode) holder.remove();
           // Reload session to show the completed response + docs
-          selectSession(sessionId);
+          reloadSession(sessionId);
         }
       } catch (_) {
         clearInterval(pollId);
         spinner.destroy();
         if (holder.parentNode) holder.remove();
-        selectSession(sessionId);
+        reloadSession(sessionId);
       }
     }, 1500);
   } catch (_) {
@@ -3113,6 +3175,7 @@ const sessionModule = {
   renderSessionList,
   loadSessions,
   selectSession,
+  reloadSession,
   createDirectChat,
   materializePendingSession,
   hasPendingChat,
