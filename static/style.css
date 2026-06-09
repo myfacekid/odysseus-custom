@@ -38227,7 +38227,7 @@ body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card.kg-link-suggest-o
 .project-workspace-grid {
   display: grid;
   grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) minmax(160px, 30%);
+  grid-template-rows: minmax(0, 1fr) minmax(120px, 22%);
   grid-template-areas:
     "left center"
     "workspace workspace";
@@ -38338,6 +38338,9 @@ body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card.kg-link-suggest-o
   flex-direction: column;
   overflow: hidden;
   padding: 4px 6px 6px;
+}
+#project-bottom-pane-run {
+  padding-bottom: 4px;
 }
 .project-left-pane.hidden,
 .project-bottom-pane.hidden {
@@ -38758,6 +38761,13 @@ body.project-workspace-resizing {
   gap: 0;
 }
 .project-run-shell.hidden { display: none !important; }
+.project-run-pane > .project-pane-placeholder {
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 6px 8px;
+  min-height: 0;
+}
 .project-run-intro {
   display: flex;
   align-items: center;
@@ -38773,14 +38783,14 @@ body.project-workspace-resizing {
 }
 .project-run-intro.hidden { display: none !important; }
 .project-run-output {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-height: 0;
   max-height: none !important;
   margin: 0;
-  padding: 6px 8px;
+  padding: 4px 8px;
   overflow: auto;
-  border-top: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--project-depth-accent) 35%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--project-depth-accent) 22%, transparent);
+  border-bottom: none;
   background: color-mix(in srgb, var(--bg) 28%, transparent);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -38793,13 +38803,17 @@ body.project-workspace-resizing {
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
-  padding: 2px 2px 0;
+  padding: 2px 4px;
   flex-shrink: 0;
-  min-height: 24px;
+  min-height: 22px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
 }
 .project-run-pane .doc-run-output {
   max-height: none !important;
   position: static;
+  padding-right: 8px !important;
+  border-top: none;
+  background: transparent;
 }
 .project-run-status {
   font-size: 11px;

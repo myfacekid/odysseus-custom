@@ -6,10 +6,10 @@ import workspaceState from './workspaceState.js';
 const LEFT_MIN = 160;
 const LEFT_MAX = 420;
 const LEFT_DEFAULT = 220;
-const FOOTER_MIN = 120;
-const FOOTER_MAX = 560;
-const FOOTER_DEFAULT = 200;
-const FOOTER_EXPANDED = 380;
+const FOOTER_MIN = 96;
+const FOOTER_MAX = 480;
+const FOOTER_DEFAULT = 140;
+const FOOTER_EXPANDED = 280;
 
 let _projectId = null;
 let _grid = null;

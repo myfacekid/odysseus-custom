@@ -91,8 +91,15 @@ function _clearOutput() {
     status.textContent = '';
     status.className = 'project-run-status';
   }
-  _showOutput(false);
   _onRunStateChange?.(null);
+  const path = _getOpenPath?.() || _lastPath;
+  if (path && /\.py$/i.test(path)) {
+    syncPath(path);
+  } else if (_lastPath) {
+    _showOutput(true);
+  } else {
+    _showOutput(false);
+  }
 }
 
 function _formatMeta(result) {
@@ -303,13 +310,6 @@ function _renderChrome() {
         '<span>Runs use the saved file on disk (project cwd only — not admin shell).</span>' +
         '<button type="button" id="project-run-intro-dismiss" class="admin-btn-sm">Got it</button>' +
       '</div>' +
-      '<div class="project-run-output doc-run-output">' +
-        '<pre id="project-run-stdout" class="doc-run-pre"></pre>' +
-        '<div id="project-run-stderr-wrap" class="project-run-stderr-wrap hidden">' +
-          '<div class="project-run-stderr-label">stderr</div>' +
-          '<pre id="project-run-stderr" class="doc-run-error"></pre>' +
-        '</div>' +
-      '</div>' +
       '<div class="project-run-toolbar">' +
         '<span id="project-run-status" class="project-run-status"></span>' +
         '<span id="project-run-meta" class="project-run-meta"></span>' +
@@ -319,6 +319,13 @@ function _renderChrome() {
           '<button type="button" id="project-run-clear-btn" class="project-run-tool-btn" title="Clear output">Clear</button>' +
         '</span>' +
       '</div>' +
+      '<div class="project-run-output doc-run-output">' +
+        '<pre id="project-run-stdout" class="doc-run-pre"></pre>' +
+        '<div id="project-run-stderr-wrap" class="project-run-stderr-wrap hidden">' +
+          '<div class="project-run-stderr-label">stderr</div>' +
+          '<pre id="project-run-stderr" class="doc-run-error"></pre>' +
+        '</div>' +
+      '</div>' +
     '</div>';
   _bindEvents();
   _showIntroIfNeeded();
@@ -326,10 +333,27 @@ function _renderChrome() {
 
 export function syncPath(path) {
   if (!_mounted) return;
-  const { empty } = _els();
-  if (!path && !_lastPath) {
+  const { empty, shell, meta, status } = _els();
+  const isPy = !!(path && /\.py$/i.test(path));
+  if (isPy || _lastPath) {
+    empty?.classList.add('hidden');
+    shell?.classList.remove('hidden');
+    if (isPy && !_lastPath && !_running) {
+      const name = (path.split('/').pop() || path).trim();
+      if (meta) meta.textContent = name;
+      if (status && !status.textContent) {
+        status.textContent = 'Ready';
+        status.className = 'project-run-status';
+      }
+    }
+  } else if (!path && !_lastPath) {
     empty?.classList.remove('hidden');
-    _els().shell?.classList.add('hidden');
+    shell?.classList.add('hidden');
+    if (meta) meta.textContent = '';
+    if (status) {
+      status.textContent = '';
+      status.className = 'project-run-status';
+    }
   }
 }
 
