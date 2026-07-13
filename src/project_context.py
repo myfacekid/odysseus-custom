@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 DEFAULT_MAX_LINKS = 24
 DEFAULT_MAX_CHARS = 4000
+DEFAULT_MAX_RELATES = 8
 DEFAULT_ACTIVE_FILE_CHARS = 6000
 
 # Prefer literature/research at the top of the injected link list.
@@ -18,6 +19,21 @@ _TYPE_ORDER = {
     "skill": 6,
     "note": 7,
     "project": 8,
+}
+
+# Semantic edge kinds — stronger signals first; weak `relates` capped separately.
+_EDGE_KIND_ORDER = {
+    "refutes": 0,
+    "derives_from": 1,
+    "supports": 2,
+    "depends_on": 3,
+    "summarizes": 4,
+    "parent": 5,
+    "wikilink": 6,
+    "in_collection": 7,
+    "relates": 8,
+    "related": 8,
+    "link": 9,
 }
 
 
@@ -51,10 +67,18 @@ def build_project_description_block(project: dict) -> str:
 
 
 def _format_link_row(edge: dict, node: Optional[dict]) -> str:
-    kind = (edge.get("kind") or "related").strip()
+    from src.edge_taxonomy import edge_kind_label, is_inhibitory_kind, normalize_semantic_kind
+
+    raw_kind = (edge.get("kind") or "relates").strip()
+    kind = normalize_semantic_kind(raw_kind)
+    kind_label = edge_kind_label(kind)
+    reason = (edge.get("reason") or "").strip()
     if not node:
         to_id = (edge.get("to") or "?").strip()
-        return f"- _(missing from graph)_ `{to_id}` ({kind})"
+        line = f"- _(missing from graph)_ `{to_id}` · _{kind_label}_"
+        if reason:
+            line += f" — {reason[:200]}"
+        return line
 
     ntype = (node.get("type") or "unknown").strip()
     title = (node.get("title") or "Untitled").strip()
@@ -62,7 +86,10 @@ def _format_link_row(edge: dict, node: Optional[dict]) -> str:
     snippet = (node.get("snippet") or "").strip()
     meta = node.get("meta") if isinstance(node.get("meta"), dict) else {}
 
-    parts = [f"- **{title}** · `{ntype}` · `{nid}` · _{kind}_"]
+    inhibitory = "INHIBITORY · " if is_inhibitory_kind(kind) else ""
+    parts = [f"- **{title}** · `{ntype}` · `{nid}` · _{inhibitory}{kind_label}_"]
+    if reason:
+        parts.append(f"  _Reason:_ {reason[:240]}")
     if ntype == "research" and meta.get("research_mode_label"):
         parts[0] += f" · {meta['research_mode_label']}"
     if snippet:
@@ -72,6 +99,84 @@ def _format_link_row(edge: dict, node: Optional[dict]) -> str:
         if zkey:
             parts.append(f"  Zotero key: `{zkey}`")
     return "\n".join(parts)
+
+
+def _link_sort_key(row: dict) -> tuple:
+    edge = row.get("edge") or {}
+    node = row.get("node") or {}
+    from src.edge_taxonomy import normalize_semantic_kind
+
+    ntype = (node.get("type") or "zzz").strip()
+    kind = normalize_semantic_kind(edge.get("kind"))
+    title = (node.get("title") or "").lower()
+    return (_EDGE_KIND_ORDER.get(kind, 50), _TYPE_ORDER.get(ntype, 99), title)
+
+
+def _cap_weak_relates(rows: List[dict], *, max_relates: int = DEFAULT_MAX_RELATES) -> List[dict]:
+    from src.edge_taxonomy import normalize_semantic_kind
+
+    out: List[dict] = []
+    relates_seen = 0
+    for row in rows:
+        kind = normalize_semantic_kind((row.get("edge") or {}).get("kind"))
+        if kind == "relates":
+            if relates_seen >= max_relates:
+                continue
+            relates_seen += 1
+        out.append(row)
+    return out
+
+
+DEFAULT_MAX_PROPOSED = 16
+
+
+def _format_proposed_row(row: dict) -> str:
+    from src.edge_taxonomy import edge_kind_label
+
+    fr = (row.get("from_title") or row.get("from") or "?").strip()
+    to = (row.get("to_title") or row.get("to") or "?").strip()
+    kind = edge_kind_label(row.get("kind"))
+    reason = (row.get("reason") or "").strip()
+    line = f"- **[PROPOSED]** `{row.get('from', '')}` → `{row.get('to', '')}` · _{kind}_ · {fr} → {to}"
+    if reason:
+        line += f"\n  _Reason:_ {reason[:240]}"
+    src = (row.get("source") or "").strip()
+    if src:
+        line += f" _(source: {src})_"
+    return line
+
+
+def build_proposed_connections_block(
+    owner: str,
+    project_id: str,
+    *,
+    max_rows: int = DEFAULT_MAX_PROPOSED,
+    max_chars: int = DEFAULT_MAX_CHARS,
+) -> str:
+    """Project-linked pending edges awaiting user approval (L4 preamble)."""
+    from src.pending_graph_edges import filter_pending_for_project, load_pending_edges
+
+    rows = filter_pending_for_project(owner, project_id, load_pending_edges(owner))
+    if not rows:
+        return ""
+
+    lines: List[str] = [
+        "### Proposed connections (awaiting user approval)",
+        "These edges are **not** in Links until the user accepts them in Connections "
+        "or the Projects Links rail. Do **not** call `link` or `merge_subgraph` phase=apply to "
+        "publish them — use `suggest_link` / `merge_subgraph` preview only unless the user "
+        "explicitly asks to save links.\n",
+    ]
+    shown = rows[: max(1, max_rows)]
+    for row in shown:
+        lines.append(_format_proposed_row(row))
+    if len(rows) > len(shown):
+        lines.append(
+            f"\n… and {len(rows) - len(shown)} more proposed connection(s) "
+            "(Connections or Projects Links rail)."
+        )
+    lines.append("")
+    return _truncate("\n".join(lines), max_chars)
 
 
 def build_linked_knowledge_block(
@@ -116,20 +221,19 @@ def build_linked_knowledge_block(
         )
 
     def _sort_key(row: dict) -> tuple:
-        node = row.get("node") or {}
-        ntype = (node.get("type") or "zzz").strip()
-        title = (node.get("title") or "").lower()
-        return (_TYPE_ORDER.get(ntype, 99), title)
+        return _link_sort_key(row)
 
-    rows = sorted(merged, key=_sort_key)
+    rows = _cap_weak_relates(sorted(merged, key=_sort_key))
+    total_after_cap = len(rows)
     lines: List[str] = [
         "### Linked knowledge (breadth boundary)",
-        "Curated graph links for this project. Use `search_knowledge` read/neighbors "
-        "for full bodies — linked entities below are in scope for breadth tools; "
-        "unlisted disk files are not.\n",
+        "Curated graph links for this project. Typed edges include a one-line reason when set. "
+        "Use `search_knowledge` read/neighbors for full bodies — linked entities below are in scope "
+        "for breadth tools; unlisted disk files are not.\n",
     ]
     missing = 0
-    for row in rows[: max(1, max_links)]:
+    shown = rows[: max(1, max_links)]
+    for row in shown:
         edge = row.get("edge") or {}
         node = row.get("node")
         if not node:
@@ -139,6 +243,12 @@ def build_linked_knowledge_block(
     if len(rows) > max_links:
         lines.append(
             f"\n… and {len(rows) - max_links} more linked node(s) (use search_knowledge)."
+        )
+    elif total_after_cap < len(merged):
+        skipped = len(merged) - total_after_cap
+        lines.append(
+            f"\n_{skipped} weak `relates` link(s) omitted from preamble (cap {DEFAULT_MAX_RELATES}). "
+            "Use search_knowledge neighbors for the full list._"
         )
     if missing:
         lines.append(
@@ -248,6 +358,7 @@ def build_project_session_preamble(
         + "\n\n"
         + build_project_description_block(project)
         + build_linked_knowledge_block(owner, project_id)
+        + build_proposed_connections_block(owner, project_id)
         + build_project_tool_routing_block()
         + build_active_project_file_block(owner, project_id, active_file_path or "")
         + "### Three file paradigms (follow strictly)\n"

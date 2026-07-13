@@ -855,6 +855,53 @@ body::after {{
 .stat {{ display: flex; align-items: center; gap: 0.35rem; }}
 .stat-value {{ font-weight: 600; color: var(--text); }}
 
+.verify-badge {{
+  max-width: 820px;
+  margin: 0.9rem auto 0;
+  padding: 0.7rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface-alt);
+  font-size: 0.82rem;
+}}
+.verify-head {{ display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }}
+.verify-dot {{
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--text-dim); flex: none;
+}}
+.verify-label {{ font-weight: 700; color: var(--text); }}
+.verify-meta {{ color: var(--text-dim); font-size: 0.76rem; }}
+.verify-counts {{ display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.45rem; }}
+.verify-count {{
+  padding: 0.12rem 0.5rem; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 600;
+  border: 1px solid var(--border-strong); color: var(--text-dim);
+}}
+.verify-ok {{ border-color: color-mix(in srgb, #4caf50 40%, var(--border)); color: color-mix(in srgb, #4caf50 75%, var(--text)); }}
+.verify-partial {{ border-color: color-mix(in srgb, var(--gold) 45%, var(--border)); color: color-mix(in srgb, var(--gold) 80%, var(--text)); }}
+.verify-bad {{ border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: color-mix(in srgb, var(--accent) 85%, var(--text)); }}
+.verify-adequate .verify-dot {{ background: #4caf50; }}
+.verify-abstract .verify-dot {{ background: var(--gold); }}
+.verify-thin .verify-dot {{ background: var(--accent); }}
+.verify-details {{ margin-top: 0.55rem; }}
+.verify-details summary {{
+  cursor: pointer; font-weight: 600; color: var(--accent);
+  font-size: 0.78rem;
+}}
+.verify-list {{ margin: 0.5rem 0 0; padding-left: 0; list-style: none; }}
+.verify-list li {{
+  padding: 0.4rem 0; border-top: 1px solid var(--border);
+  line-height: 1.4;
+}}
+.verify-tag {{
+  display: inline-block; padding: 0.05rem 0.4rem; border-radius: 6px;
+  font-size: 0.68rem; font-weight: 700; border: 1px solid currentColor;
+  margin-right: 0.3rem;
+}}
+.verify-cite {{ color: var(--accent); font-weight: 600; margin-right: 0.15rem; }}
+.verify-claim {{ color: var(--text); }}
+.verify-reason {{ color: var(--text-dim); font-style: italic; }}
+
 .sourcing-disclosure {{
   display: flex;
   justify-content: center;
@@ -1449,6 +1496,8 @@ body::after {{
 <div class="stats-bar">
   {stats_html}
 </div>
+
+{verification_badge_html}
 
 {sourcing_disclosure_html}
 
@@ -2424,6 +2473,18 @@ _GENERIC_HEADINGS = {
     "introduction", "overview", "abstract",
     "findings", "key findings", "results",
     "conclusion", "conclusions", "table of contents",
+    # Academic template section names — these are boilerplate section
+    # headings, never a real report title, so skip them when choosing the
+    # hero <h1> (otherwise every literature review is titled "Background").
+    "background", "methods", "methodology", "discussion",
+    "conflicting evidence", "conflicting or missing evidence",
+    "limitations", "limitations of the evidence", "limitations of this report",
+    "limitations compared", "references", "bibliography",
+    "seed papers overview", "related work by theme", "methods and designs",
+    "overlaps and distinctions vs seeds", "what the seed evidence covers",
+    "identified gaps", "evidence addressing gaps",
+    "papers compared", "methods comparison", "findings comparison",
+    "search coverage", "citation verification", "source retrieval limitations",
 }
 
 
@@ -2471,6 +2532,77 @@ def _is_icon_or_logo_url(url: str) -> bool:
     return bool(_ICON_LOGO_RE.search(url or ""))
 
 
+def build_verification_badge_html(verification: Optional[dict]) -> str:
+    """Structured badge summarizing the claim-grounding check.
+
+    Renders a compact, color-coded badge plus a collapsible list of any
+    flagged (unsupported/partial) claims. Returns "" when no check ran.
+    """
+    if not isinstance(verification, dict):
+        return ""
+    checked = int(verification.get("checked") or 0)
+    if checked <= 0:
+        return ""
+    supported = int(verification.get("supported") or 0)
+    partial = int(verification.get("partial") or 0)
+    unsupported = int(verification.get("unsupported") or 0)
+    confidence = verification.get("confidence")
+    flagged = verification.get("flagged") or []
+
+    if unsupported:
+        tone, label = "thin", "Citations need review"
+    elif partial:
+        tone, label = "abstract", "Citations mostly verified"
+    else:
+        tone, label = "adequate", "Citations verified"
+
+    conf_txt = f" · {int(confidence)}% supported" if isinstance(confidence, (int, float)) else ""
+    counts = (
+        f'<span class="verify-count verify-ok">{supported} supported</span>'
+        f'<span class="verify-count verify-partial">{partial} partial</span>'
+        f'<span class="verify-count verify-bad">{unsupported} unsupported</span>'
+    )
+
+    details_html = ""
+    if flagged:
+        rows = []
+        for item in flagged[:20]:
+            verdict = str(item.get("verdict") or "").upper()
+            vcls = "verify-bad" if verdict == "UNSUPPORTED" else "verify-partial"
+            cites = "".join(
+                f'<span class="verify-cite">[{int(n)}]</span>'
+                for n in (item.get("citations") or [])
+                if isinstance(n, int) or str(n).isdigit()
+            )
+            reason = item.get("reason") or ""
+            reason_html = f' — <span class="verify-reason">{html.escape(reason)}</span>' if reason else ""
+            rows.append(
+                f'<li><span class="verify-tag {vcls}">{html.escape(verdict.title())}</span> '
+                f'{cites} <span class="verify-claim">{html.escape(item.get("claim", ""))}</span>'
+                f'{reason_html}</li>'
+            )
+        details_html = (
+            '<details class="verify-details">'
+            f'<summary>Review {len(flagged)} flagged claim'
+            f'{"" if len(flagged) == 1 else "s"}</summary>'
+            f'<ul class="verify-list">{"".join(rows)}</ul>'
+            '</details>'
+        )
+
+    return (
+        f'<div class="verify-badge verify-{tone}" '
+        f'title="Automated claim-grounding check of inline citations">'
+        f'<div class="verify-head">'
+        f'<span class="verify-dot"></span>'
+        f'<span class="verify-label">{html.escape(label)}</span>'
+        f'<span class="verify-meta">{checked} claims checked{conf_txt}</span>'
+        f'</div>'
+        f'<div class="verify-counts">{counts}</div>'
+        f'{details_html}'
+        f'</div>'
+    )
+
+
 def generate_visual_report(
     question: str,
     report_markdown: str,
@@ -2480,6 +2612,7 @@ def generate_visual_report(
     session_id: Optional[str] = None,
     hidden_images: Optional[List[str]] = None,
     evidence_registry: Optional[dict] = None,
+    verification: Optional[dict] = None,
 ) -> str:
     sources = sources or []
     stats = stats or {}
@@ -2655,6 +2788,7 @@ def generate_visual_report(
         question_html=html.escape(synthesized),
         hero_image_html=hero_image_html,
         stats_html=stats_html,
+        verification_badge_html=build_verification_badge_html(verification),
         sourcing_disclosure_html=sourcing_disclosure_html,
         toc_html=toc_html,
         report_html=report_html,

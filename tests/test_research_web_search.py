@@ -135,6 +135,23 @@ def test_similar_paper_queries_from_findings():
 def test_infer_time_filter_matches_chat_heuristics():
     assert infer_time_filter("latest news on vaccines") == "day"
     assert infer_time_filter("recent peer-reviewed studies on X", "gap_filling") == "year"
+    assert infer_time_filter("protein structure prediction mechanisms", "gap_filling") is None
+    assert infer_time_filter("evidence on X 2024 cohort", "gap_filling") is None
+
+
+def test_enhance_discovery_skips_review_template_when_seeds():
+    plain = enhance_query_for_kind("cryo-EM map interpretation", "discovery", has_seeds=True)
+    assert "systematic review" not in plain.lower()
+    assert "pubmed" in plain.lower()
+
+
+def test_user_requests_recency_explicit_only():
+    from src.research_relevance import user_requests_recency
+
+    assert user_requests_recency("recent advances in cryo-EM")
+    assert user_requests_recency("state of the art protein design")
+    assert not user_requests_recency("compare AlphaFold and ESMFold methods")
+    assert not user_requests_recency("BLAST sequence alignment overview")
 
 
 def test_research_web_search_disabled(monkeypatch):

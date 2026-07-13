@@ -8,6 +8,9 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import spinnerModule from './spinner.js';
 import markdownModule from './markdown.js';
+import { showLoadingRow, showEmptyState, showError, ZOTERO_SETUP_MSG } from './ui/feedback.js';
+import contentViewer from './ui/contentViewer.js';
+import { isZoteroCatalogReady } from './setupStatus.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { langIcon } from './langIcons.js';
 import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
@@ -87,6 +90,7 @@ let _librarySelectedIds = new Set();
 let _libraryImportMode = false;
 let _libScrollBound = false;   // infinite-scroll listener attached once
 let _libraryArchivedView = false;   // Documents tab showing archived docs?
+let _libraryFetched = false;
 
 function _isZoteroPaper(doc) {
   return doc?.source === 'zotero' || (typeof doc?.id === 'string' && doc.id.startsWith('zotero:'));
@@ -395,6 +399,9 @@ function _librarySyncTypeFilters() {
     if (!append) {
       _libraryOffset = 0;
       _libraryPapersOffset = 0;
+      _libraryFetched = false;
+      const grid = document.getElementById('doclib-grid');
+      if (grid) showLoadingRow(grid, 'Loading…');
     } else if (section === 'papers') {
       _libraryOffset = _libraryPapers.length;
     } else {
@@ -433,6 +440,7 @@ function _librarySyncTypeFilters() {
       _libraryPapersTotal = data.papers_total ?? (_libraryPapers.length || 0);
       _libraryLanguages = data.languages || {};
       _librarySessionCount = data.session_count;
+      _libraryFetched = true;
 
       libraryRenderStats();
       libraryRenderLangChips();
@@ -441,6 +449,15 @@ function _librarySyncTypeFilters() {
       libraryRenderLoadMore();
     } catch (e) {
       console.error('Library fetch error:', e);
+      if (!append) {
+        const grid = document.getElementById('doclib-grid');
+        if (grid) {
+          showError(grid, {
+            message: 'Failed to load library',
+            retry: () => { void libraryFetch(false); },
+          });
+        }
+      }
     }
   }
 
@@ -542,6 +559,7 @@ function _librarySyncTypeFilters() {
   function libraryRenderGrid() {
     const grid = document.getElementById('doclib-grid');
     if (!grid) return;
+    if (!_libraryFetched) return;
     document.querySelectorAll('.doclib-card-dropdown').forEach(dismissOrRemove);
     grid.innerHTML = '';
     if (grid.parentElement) grid.parentElement.querySelectorAll(':scope > .doclib-inline-load-more').forEach(b => b.remove());
@@ -553,9 +571,22 @@ function _librarySyncTypeFilters() {
 
     if (!hasDocs && !hasPapers) {
       if (_librarySearch || _libraryActiveLanguage) {
-        grid.innerHTML = '<div class="doclib-empty">No items match your search.</div>';
+        showEmptyState(grid, { kind: 'empty', message: 'No items match your search.' });
       } else if (_libraryTypeFilter === 'paper') {
-        grid.innerHTML = '<div class="doclib-empty">No papers indexed — connect Zotero in Settings → Search, then Sync catalog.</div>';
+        void (async () => {
+          const ready = await isZoteroCatalogReady();
+          if (!ready) {
+            showEmptyState(grid, {
+              kind: 'setup',
+              title: 'Setup needed',
+              message: ZOTERO_SETUP_MSG,
+              actionLabel: 'Fix',
+              actionTab: 'search',
+            });
+          } else {
+            showEmptyState(grid, { kind: 'empty', message: 'No papers in catalog yet.' });
+          }
+        })();
       } else {
         const _impIco = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin:0 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
         grid.innerHTML =
@@ -1141,18 +1172,12 @@ function _librarySyncTypeFilters() {
         if (!res.ok) throw new Error('Failed');
         const full = await res.json();
         const content = full.body || full.output || full.content || '';
-        const pre = document.createElement('pre');
-        const code = document.createElement('code');
-        code.textContent = content;
-        pre.appendChild(code);
-        if (existingPre) existingPre.remove();
-        if (preview.querySelector('.doclib-card-pdf-frame')) preview.querySelector('.doclib-card-pdf-frame').remove();
-        pre.style.opacity = '0';
-        preview.insertBefore(pre, preview.firstChild);
-        if (actionsBar && !preview.contains(actionsBar)) preview.appendChild(actionsBar);
+        const body = contentViewer.createCode({ content, language: 'text' });
+        body.style.opacity = '0';
+        contentViewer.mountBody(preview, body, { actionsBar });
         requestAnimationFrame(() => {
-          pre.style.transition = 'opacity 0.15s ease';
-          pre.style.opacity = '1';
+          body.style.transition = 'opacity 0.15s ease';
+          body.style.opacity = '1';
         });
         return;
       }
@@ -1166,49 +1191,38 @@ function _librarySyncTypeFilters() {
       // PDF-backed docs have a marker comment in their markdown — show the
       // rendered PDF in an iframe instead of dumping markdown source.
       const isPdfDoc = /<!--\s*pdf_(?:form_)?source\s+upload_id="[^"]+"/.test(content);
-      const existingFrame = preview.querySelector('.doclib-card-pdf-frame');
 
       if (isPdfDoc) {
-        const frame = document.createElement('iframe');
-        frame.className = 'doclib-card-pdf-frame';
-        frame.src = `${API_BASE}/api/document/${doc.id}/render-pdf?t=${Date.now()}`;
-        frame.style.cssText = 'width:100%;height:60vh;border:1px solid var(--border);border-radius:6px;background:var(--bg);opacity:0;transition:opacity 0.15s ease;';
-        if (existingPre) existingPre.remove();
-        if (existingFrame) existingFrame.remove();
-        preview.insertBefore(frame, preview.firstChild);
-        if (actionsBar && !preview.contains(actionsBar)) preview.appendChild(actionsBar);
+        const frame = contentViewer.createPdf({
+          url: `${API_BASE}/api/document/${doc.id}/render-pdf?t=${Date.now()}`,
+          className: 'doclib-card-pdf-frame',
+        });
+        frame.style.opacity = '0';
+        frame.style.transition = 'opacity 0.15s ease';
+        contentViewer.mountBody(preview, frame, { actionsBar });
         requestAnimationFrame(() => { frame.style.opacity = '1'; });
         return;
       }
 
-      const pre = document.createElement('pre');
-      const code = document.createElement('code');
-      // Syntax highlighting is synchronous and O(n) — running it over a whole
-      // large document froze the main thread on click (the "lag"). Only
-      // highlight up to a cap; bigger docs render as plain text (still fully
-      // shown) so the preview opens instantly. Markdown gains little from
-      // highlighting anyway, so skip it there.
-      const HL_CAP = 20000;
-      try {
-        if (lang && lang !== 'text' && lang !== 'markdown' && window.hljs && content.length <= HL_CAP) {
-          code.innerHTML = window.hljs.highlight(content, { language: lang }).value;
-        } else {
-          code.textContent = content;
-        }
-      } catch {
-        code.textContent = content;
-      }
-      pre.appendChild(code);
+      // Route the body through the shared content viewer (U8a). Markdown docs
+      // now render as formatted HTML in the read-only preview; code highlights
+      // up to a size cap (skipped for markdown/large files to keep the preview
+      // snappy); everything else shows as plain text.
+      const body = (lang === 'markdown')
+        ? contentViewer.createMarkdown({ content })
+        : contentViewer.createCode({
+            content,
+            language: lang,
+            cap: contentViewer.HL_CAP,
+            skipHighlightLangs: ['markdown'],
+          });
 
       // Swap content — fade in the full version
-      if (existingPre) existingPre.remove();
-      if (existingFrame) existingFrame.remove();
-      pre.style.opacity = '0';
-      preview.insertBefore(pre, preview.firstChild);
-      if (actionsBar && !preview.contains(actionsBar)) preview.appendChild(actionsBar);
+      body.style.opacity = '0';
+      contentViewer.mountBody(preview, body, { actionsBar });
       requestAnimationFrame(() => {
-        pre.style.transition = 'opacity 0.15s ease';
-        pre.style.opacity = '1';
+        body.style.transition = 'opacity 0.15s ease';
+        body.style.opacity = '1';
       });
     } catch (e) {
       // On error, keep existing preview if available
@@ -1548,6 +1562,62 @@ function _librarySyncTypeFilters() {
     }
   }
 
+  function _selectedLibraryPaperKeys() {
+    return [...new Set(
+      [..._librarySelectedIds]
+        .map((id) => _libraryDocs.find((d) => d.id === id))
+        .filter((d) => d && _isZoteroPaper(d))
+        .map((d) => _libraryPaperKey(d))
+        .filter(Boolean),
+    )];
+  }
+
+  async function libraryBulkComparePapers() {
+    const keys = _selectedLibraryPaperKeys();
+    if (keys.length < 2) {
+      if (uiModule) uiModule.showToast('Select at least 2 Zotero papers to compare', 3000);
+      return;
+    }
+    if (keys.length > 3) {
+      if (uiModule) {
+        uiModule.showToast('Select up to 3 papers — use Research for larger compares', 4000);
+      }
+      return;
+    }
+    if (uiModule) uiModule.showToast('Comparing papers…', 2500);
+    try {
+      const res = await fetch(`${API_BASE}/api/knowledge/compare-papers`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paper_keys: keys, focus: 'methods' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || data.error || 'Compare failed');
+      if (data.defer_to_research) {
+        if (uiModule) uiModule.showToast(data.output || 'Too many papers — use Research compare mode', 5000);
+        return;
+      }
+      libraryExitSelectMode();
+      const proposals = data.suggested_edges || [];
+      if (proposals.length) {
+        const kg = await import('./knowledge.js');
+        const handler = kg.handleConnectionProposals || kg.default?.handleConnectionProposals;
+        if (handler) handler({ proposals, source: 'library_compare' });
+      }
+      if (uiModule) {
+        uiModule.showToast(
+          proposals.length
+            ? `Comparison ready — ${proposals.length} proposed link${proposals.length === 1 ? '' : 's'}`
+            : 'Comparison complete (no new link proposals)',
+          4000,
+        );
+      }
+    } catch (e) {
+      if (uiModule) uiModule.showError(e.message || 'Compare failed');
+    }
+  }
+
   async function libraryBulkExport() {
     if (_librarySelectedIds.size === 0) return;
     // More than 5 → one server-built .zip (mirrors the gallery's bulk export;
@@ -1822,6 +1892,18 @@ function _librarySyncTypeFilters() {
     await libraryFetch(false);
   }
 
+  // Persist the last-viewed Library tab (U5). An explicit `opts.tab` (e.g.
+  // "Open in Library" → chats, research panel → research, import → documents)
+  // always wins; the persisted value is only the fallback for a plain open.
+  const _LIB_TAB_KEY = 'doclib.lastTab';
+  const _LIB_VALID_TABS = ['documents', 'chats', 'archive', 'research'];
+  function _loadLastLibTab() {
+    try {
+      const v = localStorage.getItem(_LIB_TAB_KEY);
+      return _LIB_VALID_TABS.includes(v) ? v : null;
+    } catch { return null; }
+  }
+
   export function openLibrary(opts) {
     if (_libraryOpen) {
       // Recover from stuck state: the swipe-to-dismiss in ui.js adds .hidden
@@ -1847,6 +1929,7 @@ function _librarySyncTypeFilters() {
     _libraryPapersOffset = 0;
     _libraryDocs = [];
     _libraryPapers = [];
+    _libraryFetched = false;
 
     // Create modal
     const modal = document.createElement('div');
@@ -1924,7 +2007,7 @@ function _librarySyncTypeFilters() {
             <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;margin-top:10px;">
               <h2 style="margin:0;padding:0;line-height:1;">Research <span id="doclib-research-stats" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal"></span></h2>
             </div>
-            <p class="memory-desc doclib-desc" style="position:relative;top:-1px;">Completed deep research reports. Click to view.</p>
+            <p class="memory-desc doclib-desc" style="position:relative;top:-1px;">Saved research reports. Click to view.</p>
             <div class="memory-toolbar">
               <div class="memory-category-filters">
                 <select class="memory-sort-select" id="doclib-research-sort">
@@ -2068,7 +2151,7 @@ function _librarySyncTypeFilters() {
     document.getElementById('doclib-close').addEventListener('click', closeLibrary);
 
     // Tab switching — Chats / Documents / Archive / Research
-    let _activeLibTab = (opts && opts.tab) || 'documents';
+    let _activeLibTab = (opts && opts.tab) || _loadLastLibTab() || 'documents';
     const _tabBtns = modal.querySelectorAll('[data-doclib-tab]');
     const _tabPanels = modal.querySelectorAll('[data-doclib-panel]');
 
@@ -2095,6 +2178,7 @@ function _librarySyncTypeFilters() {
 
     function _switchLibTab(tab) {
       _activeLibTab = tab;
+      try { localStorage.setItem(_LIB_TAB_KEY, tab); } catch {}
       _tabBtns.forEach(b => b.classList.toggle('active', b.dataset.doclibTab === tab));
       _tabPanels.forEach(p => {
         if (p.dataset.doclibPanel === tab) {
@@ -2123,14 +2207,15 @@ function _librarySyncTypeFilters() {
     function _renderLibChats() {
       const grid = document.getElementById('doclib-chats-grid');
       if (!grid) return;
-      grid.innerHTML = '';
-      grid.appendChild(spinnerModule.createLoadingRow('Loading…'));
+      showLoadingRow(grid, 'Loading…');
       fetch(API_BASE + '/api/sessions', { credentials: 'same-origin' }).then(r => r.json()).then(data => {
         const raw = Array.isArray(data) ? data : (data.sessions || []);
         _chatsSessions = raw.filter(s => !s.archived);
         _renderChatsGrid();
         _renderChatsChips();
-      }).catch(() => { grid.innerHTML = '<div class="doclib-empty">Failed to load</div>'; });
+      }).catch(() => {
+        showError(grid, { message: 'Failed to load chats', retry: () => _renderLibChats() });
+      });
     }
 
     // Tap a chat row to expand inline: fetches the recent messages and
@@ -2548,8 +2633,7 @@ function _librarySyncTypeFilters() {
     function _renderLibArchive() {
       const grid = document.getElementById('doclib-arc-grid');
       if (!grid) return;
-      grid.innerHTML = '';
-      grid.appendChild(spinnerModule.createLoadingRow('Loading…'));
+      showLoadingRow(grid, 'Loading…');
       // Archive tab is the home for ALL archived items — chats, documents, and
       // research — each rendered with its own icon. Load the three in parallel.
       Promise.all([
@@ -2564,7 +2648,9 @@ function _librarySyncTypeFilters() {
         _arcResearch = (r.research || []).map(x => ({ ...x, archived: true }));
         _renderArcGrid();
         _renderArcChips();
-      }).catch(() => { grid.innerHTML = '<div class="doclib-empty">Failed to load</div>'; });
+      }).catch(() => {
+        showError(grid, { message: 'Failed to load archive', retry: () => _renderLibArchive() });
+      });
     }
 
     // Inline expand/collapse for an archived DOCUMENT card (chat-style). Loads
@@ -3037,21 +3123,18 @@ function _librarySyncTypeFilters() {
       const grid = document.getElementById('doclib-research-grid');
       const stats = document.getElementById('doclib-research-stats');
       if (!grid) return;
-      // Show our whirlpool spinner instead of the plain "Loading..." text.
-      grid.innerHTML = '';
-      try {
-        const _spm = (await import('./spinner.js')).default;
-        const _sp = _spm.createWhirlpool(22);
-        _sp.element.style.cssText = 'margin:18px auto;display:block;';
-        grid.appendChild(_sp.element);
-      } catch { grid.innerHTML = '<div class="hwfit-loading">Loading…</div>'; }
+      showLoadingRow(grid, 'Loading research…');
       try {
         const res = await fetch('/api/research/library' + (_researchArchivedView ? '?archived=true' : ''), { credentials: 'same-origin' });
         if (!res.ok) throw new Error(res.statusText);
         const data = await res.json();
         _researchItems = data.research || data || [];
       } catch (e) {
-        grid.innerHTML = `<div class="hwfit-loading">Failed to load: ${e.message}</div>`;
+        showError(grid, {
+          message: e.message || 'Failed to load research',
+          retry: () => { void _renderLibResearch(); },
+        });
+        if (stats) stats.textContent = '';
         return;
       }
       _renderResearchGrid();
@@ -3342,7 +3425,7 @@ function _librarySyncTypeFilters() {
           '<div class="hwfit-loading" style="display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;">' +
             '<span>No research yet</span>' +
             '<span style="opacity:0.7;font-size:11px;">' +
-              'create one in the <a href="#" data-doclib-open-research style="color:var(--accent,var(--red));text-decoration:underline;">Deep Research</a> tab' +
+              'create one in <a href="#" data-doclib-open-research style="color:var(--accent,var(--red));text-decoration:underline;">Research</a>' +
             '</span>' +
           '</div>';
         grid.querySelector('[data-doclib-open-research]')?.addEventListener('click', (e) => {
@@ -3833,6 +3916,9 @@ function _librarySyncTypeFilters() {
         return;
       }
       _showLibDropdown(e.currentTarget, [
+        ...(_selectedLibraryPaperKeys().length >= 2
+          ? [{ label: 'Compare & link', icon: 'open', action: libraryBulkComparePapers }]
+          : []),
         { label: _libraryArchivedView ? 'Restore' : 'Archive', icon: _libraryArchivedView ? 'restore' : 'archive', action: libraryBulkArchive },
         { label: 'Clone', icon: 'clone', action: libraryBulkClone },
         { label: 'Export', icon: 'open', action: libraryBulkExport },

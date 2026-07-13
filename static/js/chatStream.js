@@ -153,7 +153,7 @@ export function handleUIControl(uiData) {
       if (panel === 'documents') {
         import('./documentLibrary.js').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
-          if (fn) fn();
+          if (fn) fn({ tab: 'documents' });
         }).catch(function(){});
       } else if (panel === 'gallery') {
         import('./gallery.js').then(function(mod) {

@@ -50,7 +50,7 @@ def infer_search_kind(round_num: int) -> str:
 
 
 def infer_time_filter(query: str, search_kind: str = "discovery") -> Optional[str]:
-    """Match agent web_search freshness heuristics."""
+    """Freshness heuristics for web search — research avoids implicit year filters."""
     q_lc = (query or "").lower()
     if any(kw in q_lc for kw in ("today", "latest", "breaking", "this morning", "right now", "currently")):
         return "day"
@@ -60,20 +60,39 @@ def infer_time_filter(query: str, search_kind: str = "discovery") -> Optional[st
         return "month"
     if " news" in q_lc or q_lc.startswith("news ") or q_lc.endswith(" news"):
         return "week"
-    if search_kind == "gap_filling" and any(kw in q_lc for kw in ("recent", "last five years", "2020", "2021", "2022", "2023", "2024", "2025", "2026")):
+    # Only apply academic time bounds when the query itself asks for recency —
+    # not because gap-filling rounds echo the current calendar year.
+    from src.research_relevance import user_requests_recency
+
+    if user_requests_recency(query):
+        if any(kw in q_lc for kw in ("today", "this week", "last few days")):
+            return "week"
+        if any(kw in q_lc for kw in ("this month", "past month")):
+            return "month"
         return "year"
     return None
 
 
-def enhance_query_for_kind(query: str, search_kind: str) -> str:
+def enhance_query_for_kind(
+    query: str,
+    search_kind: str,
+    *,
+    has_seeds: bool = False,
+    scope: str = "balanced",
+) -> str:
     """Light academic template — one enhanced query per LLM suggestion."""
     q = (query or "").strip()
     if not q:
         return q
     lower = q.lower()
+    narrow = scope in ("narrow_compare", "gap_analysis")
 
     if search_kind == "discovery":
-        if not any(m in lower for m in _DISCOVERY_MARKERS):
+        if has_seeds or narrow:
+            if "site:pubmed" not in lower and "pubmed" not in lower and "doi" not in lower:
+                return f"{q} site:pubmed.ncbi.nlm.nih.gov"
+            return q
+        if scope == "field_overview" and not any(m in lower for m in _DISCOVERY_MARKERS):
             return f"{q} systematic review OR meta-analysis"
         if "site:pubmed" not in lower and "pubmed" not in lower and "doi" not in lower:
             return f"{q} site:pubmed.ncbi.nlm.nih.gov"
@@ -120,6 +139,9 @@ def apply_academic_query_templates(
     search_kind: str,
     question: str = "",
     research_plan: str = "",
+    has_seeds: bool = False,
+    scope: str = "balanced",
+    expansion_queries: Optional[List[str]] = None,
 ) -> List[str]:
     """Augment LLM queries with scholarly patterns; dedupe case-insensitively."""
     seen: set[str] = set()
@@ -133,7 +155,12 @@ def apply_academic_query_templates(
         if key in seen:
             return
         seen.add(key)
-        out.append(enhance_query_for_kind(text, search_kind))
+        out.append(enhance_query_for_kind(
+            text, search_kind, has_seeds=has_seeds, scope=scope,
+        ))
+
+    for q in expansion_queries or []:
+        _add(q)
 
     for q in queries or []:
         _add(q)
@@ -142,7 +169,13 @@ def apply_academic_query_templates(
         for sub in _parse_plan_sub_questions(research_plan, limit=2):
             _add(sub)
 
-    if search_kind == "discovery" and question and len(out) < 4:
+    if (
+        search_kind == "discovery"
+        and question
+        and len(out) < 4
+        and not has_seeds
+        and scope == "field_overview"
+    ):
         _add(f"{question} systematic review")
 
     return out
@@ -398,7 +431,7 @@ def research_web_search(
         logger.warning("Research web search empty for %r: %s", query, msg)
         return ResearchSearchOutcome([], winning_provider or provider, query, search_kind, time_filter, error=msg)
 
-    search_results = rank_search_results(query, search_results)
+    search_results = rank_search_results(query, search_results, recency_weight=0.0)
     return ResearchSearchOutcome(
         search_results,
         winning_provider,

@@ -113,6 +113,26 @@ def test_select_for_synthesis_keeps_seeds_and_recent_window():
     assert "One" not in titles
 
 
+def test_select_for_synthesis_prefers_relevant_when_query_given():
+    reg = EvidenceRegistry()
+    findings = [
+        _zotero_finding("SEED1", "Seed one", is_seed=True),
+        _web_finding("https://ex.com/1", "Unrelated sports analytics"),
+        _web_finding("https://ex.com/2", "AlphaFold protein structure prediction"),
+        _web_finding("https://ex.com/3", "Weather forecasting models"),
+    ]
+    reg.sync_findings(findings)
+    selected = reg.select_for_synthesis(
+        findings,
+        window=1,
+        relevance_query="protein structure prediction AlphaFold",
+    )
+    titles = [f["title"] for f in selected]
+    assert "Seed one" in titles
+    assert "AlphaFold protein structure prediction" in titles
+    assert "Unrelated sports analytics" not in titles
+
+
 def test_validate_and_repair_report_rebuilds_references():
     reg = EvidenceRegistry()
     reg.register(_web_finding("https://ex.com/a", "Alpha", authors="Smith", year="2024"))

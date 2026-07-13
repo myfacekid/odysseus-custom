@@ -3,6 +3,7 @@
  * Row actions mirror chat session menus: chevron menu, inline rename, no modals.
  */
 import uiModule from '../ui.js';
+import { showLoadingRow } from '../ui/feedback.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
@@ -627,7 +628,7 @@ async function _renderTreeBody({ silent = false } = {}) {
   if (!body) return;
   const scrollTop = body.scrollTop;
   if (!silent) {
-    body.innerHTML = '<div class="project-tree-empty">Loading…</div>';
+    showLoadingRow(body, 'Loading files…');
   }
   _removeActionMenusFromBody();
 

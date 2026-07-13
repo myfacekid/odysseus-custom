@@ -130,22 +130,32 @@ def test_semantic_scholar_paper_to_finding():
 
 
 def test_similar_papers_from_seeds_merged(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "src.research_similar_papers.openalex_similar_works",
-        lambda **k: [_finding_from_openalex_work({
-            "title": "Protein structure prediction benchmark",
-            "doi": "https://doi.org/10.1/oa",
-            "abstract_inverted_index": {"protein": [0], "structure": [1], "prediction": [2]},
-        })],
-    )
-    monkeypatch.setattr(
-        "src.research_similar_papers.semantic_scholar_recommendations",
-        lambda **k: [_finding_from_s2_paper({
-            "title": "AlphaFold accuracy assessment",
-            "abstract": "protein structure prediction methods",
-            "externalIds": {},
-        })],
-    )
+    oa_finding = _finding_from_openalex_work({
+        "title": "Protein structure prediction benchmark",
+        "doi": "https://doi.org/10.1/oa",
+        "abstract_inverted_index": {"protein": [0], "structure": [1], "prediction": [2]},
+    })
+    s2_finding = _finding_from_s2_paper({
+        "title": "AlphaFold accuracy assessment",
+        "abstract": "protein structure prediction methods",
+        "externalIds": {},
+    })
+
+    def _kw(queries, **kwargs):
+        from src.research_engines.keyword_search import KeywordSearchOutcome
+
+        engines = kwargs.get("engines") or ()
+        counts = {}
+        findings = []
+        if "openalex" in engines:
+            counts["openalex"] = 1
+            findings.append(oa_finding)
+        if "semantic_scholar" in engines:
+            counts["semantic_scholar"] = 1
+            findings.append(s2_finding)
+        return KeywordSearchOutcome(findings=findings, engine_counts=counts)
+
+    monkeypatch.setattr("src.research_engines.keyword_search.keyword_search_findings", _kw)
     seeds = [{
         "is_seed": True,
         "paper_key": "SEED1",
@@ -157,7 +167,28 @@ def test_similar_papers_from_seeds_merged(tmp_path, monkeypatch):
         seeds,
         total_limit=5,
         relevance_query="compare alphafold protein structure prediction",
+        use_semantic_scholar=True,
     )
     assert len(outcome.findings) == 2
     assert outcome.openalex_count >= 1
     assert outcome.semantic_scholar_count >= 1
+
+
+def test_similar_papers_from_seeds_skips_s2_with_seeds_by_default(tmp_path, monkeypatch):
+    engines_used = []
+
+    def _kw(queries, **kwargs):
+        from src.research_engines.keyword_search import KeywordSearchOutcome
+
+        engines_used.extend(kwargs.get("engines") or ())
+        return KeywordSearchOutcome(findings=[], engine_counts={})
+
+    monkeypatch.setattr("src.research_engines.keyword_search.keyword_search_findings", _kw)
+    seeds = [{
+        "is_seed": True,
+        "paper_key": "SEED1",
+        "doi_or_id": "10.1234/seed",
+        "title": "AlphaFold protein structure prediction",
+    }]
+    similar_papers_from_seeds(seeds, relevance_query="alphafold structure", research_mode="compare")
+    assert "semantic_scholar" not in engines_used

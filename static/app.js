@@ -39,12 +39,14 @@ import themeModule from './js/theme.js';
 import cookbookModule from './js/cookbook.js';
 import groupModule from './js/group.js';
 import * as researchPanelModule from './js/research/panel.js';
+import { initActivityStrip } from './js/activityStrip.js';
 import projectsModule from './js/projects/index.js';
 import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
+import { railToSidebarMap } from './js/nav/toolRegistry.js';
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -731,7 +733,7 @@ function initializeEventListeners() {
     if (active) {
       if (welcomeName) {
         if (!welcomeName.dataset.researchOrigHtml) welcomeName.dataset.researchOrigHtml = welcomeName.innerHTML;
-        welcomeName.innerHTML = _resIco + 'Academic Research';
+        welcomeName.innerHTML = _resIco + 'Research';
       }
       if (welcomeSub) {
         if (!welcomeSub.dataset.researchOrigText) welcomeSub.dataset.researchOrigText = welcomeSub.textContent;
@@ -986,7 +988,8 @@ function initializeEventListeners() {
     '/calendar': () => calendarModule && calendarModule.openCalendar(),
     '/cookbook': () => document.getElementById('tool-cookbook-btn')?.click(),
     '/memory':   () => document.getElementById('tool-memory-btn')?.click(),
-    '/links':    () => document.getElementById('tool-knowledge-btn')?.click(),
+    '/links':    () => document.getElementById('tool-knowledge-btn')?.click()
+      || document.getElementById('rail-knowledge')?.click(),
     '/gallery':  () => document.getElementById('tool-gallery-btn')?.click(),
     '/tasks':    () => document.getElementById('tool-tasks-btn')?.click(),
     '/library':  () => sessionModule && sessionModule.openLibrary && sessionModule.openLibrary(),
@@ -1019,11 +1022,15 @@ function initializeEventListeners() {
     });
   }
 
-  // Manage Chats — opens Full Library modal (decoupled from Chats accordion toggle)
-  const chatsLibraryBtn = el('chats-library-btn');
-  if (chatsLibraryBtn) {
-    chatsLibraryBtn.addEventListener('click', (e) => {
+  // Manage Chats — now lives inside the Chats "⋯" (sort/manage) menu as
+  // "Open in Library" so the section header keeps a single action grammar
+  // (⋯ = more). Opens the same Full Library modal, chats tab.
+  const chatsManageLibraryItem = el('session-manage-library');
+  if (chatsManageLibraryItem) {
+    chatsManageLibraryItem.addEventListener('click', (e) => {
       e.stopPropagation();
+      const dd = el('session-sort-dropdown');
+      if (dd) dd.style.display = 'none';
       if (sessionModule) sessionModule.openLibrary('chats');
     });
   }
@@ -1454,8 +1461,11 @@ function initializeEventListeners() {
   if (toolMemoryBtn && memoryModal) {
     toolMemoryBtn.addEventListener('click', () => {
       memoryModal.classList.remove('hidden');
+      if (memoryModule?.resetBrainChromeBrightness) memoryModule.resetBrainChromeBrightness();
+      else document.getElementById('tool-memory-btn')?.classList.remove('tool-disabled');
       if (memoryModule && memoryModule.renderMemoryList) memoryModule.renderMemoryList();
       if (memoryModule && memoryModule.updateMemoryCount) memoryModule.updateMemoryCount();
+      window.dispatchEvent(new CustomEvent('skills-refresh'));
     });
   }
 
@@ -1579,7 +1589,7 @@ function initializeEventListeners() {
     web: { role: 'Web Search', text: 'Searches the web for relevant information to include in the response. Results are fetched and summarized before the AI answers.' },
     bash: { role: 'Shell Access', text: 'Gives the AI access to a sandboxed shell for running commands, installing packages, and executing scripts. Use with caution.' },
     builder: { role: 'Tool Builder', text: 'Create custom mini-apps and tools the AI can use. Describe what you need and the AI will build a tool you can reuse across conversations.' },
-    research: { role: 'Academic Research', text: 'Multi-round scholarly literature synthesis with numbered citations and source analysis. Takes longer but produces rigorous, evidence-grounded reports. Your next message will trigger an academic research cycle.' },
+    research: { role: 'Research', text: 'Multi-round scholarly literature synthesis with numbered citations and source analysis. Takes longer but produces rigorous, evidence-grounded reports. Your next message will trigger a research cycle.' },
     zotero: { role: 'Zotero Library', text: 'Searches your synced Zotero library for papers and PDFs related to your message. Configure credentials in Settings → Search. Works alongside web search when both are enabled.' },
     vault: { role: 'Vault', text: 'Searches, reads, and writes your local markdown vault. The agent follows [[wikilinks]], links notes, appends to daily notes, and patches markdown — all via the filesystem. Configure the folder in Settings → Search.' },
   };
@@ -1743,6 +1753,58 @@ function initializeEventListeners() {
   }
   // External modules (compare) dispatch this when their overflow state changes
   document.addEventListener('overflow-state-change', () => updatePlusDot());
+
+  // ── U4: mobile — collapse active tool indicators into one summary chip ──
+  // Individual `.tool-indicator` chips are toggled (inline display) by their
+  // owning modules. On a narrow viewport, showing several at once wraps the
+  // composer, so when more than COLLAPSE_AT are active we hide them and show a
+  // single "{n} on" chip that opens the "+" tools menu to manage them.
+  (function initToolsActiveSummary() {
+    const left = document.querySelector('.chat-input-left');
+    const summary = el('tools-active-summary');
+    if (!left || !summary) return;
+    const countEl = summary.querySelector('.tools-active-count');
+    const COLLAPSE_AT = 3;
+    const mq = window.matchMedia('(max-width: 768px)');
+
+    function activeCount() {
+      return Array.from(left.querySelectorAll('.tool-indicator'))
+        .filter(n => !n.hidden && n.style.display !== 'none').length;
+    }
+    function sync() {
+      const n = activeCount();
+      // U2: collapse several active tool indicators into one "{n} on" pill on
+      // every viewport (not just mobile) so the composer never wraps.
+      const collapse = n > COLLAPSE_AT;
+      left.classList.toggle('tools-collapsed', collapse);
+      if (collapse) {
+        if (countEl) countEl.textContent = String(n);
+        const label = `${n} tools active — tap to manage`;
+        summary.title = label;
+        summary.setAttribute('aria-label', label);
+      }
+    }
+    let _raf = 0;
+    function schedule() {
+      if (_raf) return;
+      _raf = requestAnimationFrame(() => { _raf = 0; sync(); });
+    }
+    // Recompute whenever an indicator's inline visibility changes.
+    new MutationObserver(schedule).observe(left, {
+      subtree: true, childList: true,
+      attributes: true, attributeFilter: ['style', 'hidden'],
+    });
+    summary.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const plus = el('overflow-plus-btn');
+      if (plus) plus.click();
+    });
+    if (mq.addEventListener) mq.addEventListener('change', schedule);
+    document.addEventListener('overflow-state-change', schedule);
+    window.addEventListener('resize', schedule);
+    sync();
+  })();
 
   // ── Prevent toolbar buttons from stealing focus (avoids mobile keyboard bounce) ──
   const chatInputBar = document.querySelector('.chat-input-bar');
@@ -1976,71 +2038,15 @@ function initializeEventListeners() {
       updatePlusDot();
     }
 
+    // U2: Web + Shell now live permanently inside the "+" tools menu so the
+    // composer stays at its minimal resting peak (model · + · send). They are
+    // kept collapsed at every width via their overflow mirrors instead of being
+    // measured in and out of the bar. The underlying #web-toggle-btn /
+    // #bash-toggle-btn stay in the DOM (hidden) and remain the source of truth
+    // for toggle state; the mirrors proxy their clicks and reflect their state.
     function checkToolbarOverflow() {
-      const inputBottom = inputLeft.parentElement;
-      if (!inputBottom) return;
-      const rightEl = document.querySelector('.chat-input-right');
-      const available = inputBottom.clientWidth -
-        (rightEl ? rightEl.offsetWidth : 0) - 16;
-
-      // Uncollapse all to measure natural widths
-      collapsibleBtns.forEach(btn => btn.classList.remove('toolbar-collapsed'));
-      overflowMirrors.forEach(m => m.style.display = 'none');
-
-      // Temporarily allow overflow for accurate measurement
-      const prevOverflow = inputLeft.style.overflow;
-      inputLeft.style.overflow = 'visible';
-      inputLeft.style.flexWrap = 'nowrap';
-
-      // Force reflow then measure each child
-      void inputLeft.offsetWidth;
-
-      // Measure the overflow wrapper (always visible)
-      const wrapperWidth = overflowWrapper.offsetWidth + 4;
-
-      // Measure each collapsible button's natural width
-      const btnWidths = collapsibleBtns.map(btn => btn.offsetWidth + 4);
-
-      // Measure non-collapsible, non-wrapper children (tool indicators etc)
-      let otherWidth = 0;
-      Array.from(inputLeft.children).forEach(c => {
-        if (c === overflowWrapper) return;
-        if (collapsibleBtns.includes(c)) return;
-        if (c.offsetWidth) otherWidth += c.offsetWidth + 4;
-      });
-
-      let totalWidth = wrapperWidth + otherWidth + btnWidths.reduce((a, b) => a + b, 0);
-
-      // Force-collapse shell & search when research mode + doc panel are both active
-      const _resChk = el('research-toggle');
-      const _researchOn = _resChk && _resChk.checked;
-      const _docViewOn = document.body.classList.contains('doc-view');
-      if (_researchOn && _docViewOn) {
-        collapsibleBtns.forEach(btn => {
-          btn.classList.add('toolbar-collapsed');
-          const mirror = overflowMirrors.get(btn.id);
-          if (mirror) mirror.style.display = '';
-        });
-        inputLeft.style.overflow = prevOverflow;
-        inputLeft.style.flexWrap = '';
-        syncMirrorStates();
-        return;
-      }
-
-      // Collapse from lowest priority until it fits
-      if (totalWidth > available) {
-        for (let i = 0; i < collapsibleBtns.length; i++) {
-          collapsibleBtns[i].classList.add('toolbar-collapsed');
-          const mirror = overflowMirrors.get(collapsibleBtns[i].id);
-          if (mirror) mirror.style.display = '';
-          totalWidth -= btnWidths[i];
-          if (totalWidth <= available) break;
-        }
-      }
-
-      // Restore
-      inputLeft.style.overflow = prevOverflow;
-      inputLeft.style.flexWrap = '';
+      collapsibleBtns.forEach(btn => btn.classList.add('toolbar-collapsed'));
+      overflowMirrors.forEach(m => { m.style.display = ''; });
       syncMirrorStates();
     }
 
@@ -3477,6 +3483,9 @@ function startNobodyApp() {
     compareModule.init(API_BASE);
   }
   researchPanelModule.init(API_BASE, markdownModule, sessionModule);
+  // U8c: unified Activity strip — aggregates running Research/Cookbook/Task state
+  // from the modules initialized above; self-mounts a hidden floating pill.
+  try { initActivityStrip(); } catch (e) { console.warn('activity strip init failed', e); }
   // Initialize document editor module
   if (documentModule) {
     documentModule.init(API_BASE);
@@ -3499,23 +3508,17 @@ function startNobodyApp() {
     });
   }
 
-  // Rail tool buttons — delegate to sidebar tool buttons
-  const _railToolMap = {
-    'rail-compare':   'tool-compare-btn',
-    'rail-research':  'tool-research-btn',
-    'rail-cookbook':   'tool-cookbook-btn',
-    'rail-archive':   'tool-library-btn',
-    'rail-gallery':   'tool-gallery-btn',
-    'rail-tasks':     'tool-tasks-btn',
-    'rail-calendar':  'tool-calendar-btn',
-    'rail-notes':     'tool-notes-btn',
-    'rail-memory':    'tool-memory-btn',
-    'rail-theme':     'tool-theme-btn',
-  };
+  // Rail tool buttons — delegate to sidebar tool buttons. The mapping is
+  // derived from the single-source-of-truth tool registry (see
+  // static/js/nav/toolRegistry.js) so the rail and sidebar cannot drift apart.
+  const _railToolMap = railToSidebarMap();
   Object.entries(_railToolMap).forEach(([railId, toolId]) => {
     const railBtn = el(railId);
     if (railBtn) {
       railBtn.addEventListener('click', () => {
+        if (window.innerWidth >= 768) {
+          import('./js/tourHints.js').then((m) => m.maybeNavHint?.('desktopRail')).catch(() => {});
+        }
         const toolBtn = el(toolId);
         if (toolBtn) toolBtn.click();
       });
@@ -3995,6 +3998,10 @@ function startNobodyApp() {
     });
 
     // Load sessions first (critical path) — remove loader when done
+    const _loaderSlowTimer = setTimeout(() => {
+      const slow = document.getElementById('app-loader-slow');
+      if (slow) slow.hidden = false;
+    }, 8000);
     sessionModule.loadSessions()
       .then(async () => {
         if (window._pendingProjectRestore && window.openProjectWorkspace) {
@@ -4005,6 +4012,7 @@ function startNobodyApp() {
       })
       .catch(e => console.warn('loadSessions error:', e))
       .finally(() => {
+        clearTimeout(_loaderSlowTimer);
         const loader = document.getElementById('app-loader');
         if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 300); }
         // Fire any URL route opener now that sessions + module wiring are

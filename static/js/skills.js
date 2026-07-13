@@ -81,15 +81,10 @@ export async function loadSkills(cascade = false) {
   // Play the domino-in entrance on this load (set when the tab is opened,
   // not for the silent re-loads after an edit/delete).
   if (cascade) _cascadeNext = true;
-  if (cascade && loaded && !_loadPromise && _playSkillsCascade()) {
-    _cascadeNext = false;
-    updateCount();
-    return;
-  }
   if (_loadPromise) return _loadPromise;
   _loadPromise = (async () => {
   try {
-    const res = await fetch(`${API}/api/skills`);
+    const res = await fetch(`${API}/api/skills`, { credentials: 'same-origin', cache: 'no-store' });
     const data = await res.json();
     skills = data.skills || [];
     _loadSkillApprovalThreshold();
@@ -1898,6 +1893,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('new-skill-name')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') addSkill();
+  });
+
+  window.addEventListener('skills-refresh', () => {
+    loaded = false;
+    _loadPromise = null;
+    void loadSkills();
   });
 });
 

@@ -606,6 +606,8 @@ class ZoteroClient:
         attachment_key: str,
         fallback_url: str = "",
         max_bytes: int = 16_000_000,
+        *,
+        max_extract_chars: int = 15000,
     ) -> str:
         """Download a PDF attachment and extract text.
 
@@ -662,7 +664,7 @@ class ZoteroClient:
                     attachment_key,
                     len(data),
                 )
-            text = _extract_pdf_text(data, max_chars=15000)
+            text = _extract_pdf_text(data, max_chars=max_extract_chars)
             if text:
                 return text
             logger.info(
@@ -899,11 +901,14 @@ def _extract_pdf_text_for_item(
     full_item: Optional[dict] = None,
     *,
     catalog_row: Optional[dict] = None,
+    max_extract_chars: int = 15000,
 ) -> str:
     for ck, fallback_url in _pdf_attachment_keys_for_item(
         client, item_key, full_item, catalog_row=catalog_row,
     ):
-        text = client.download_attachment_pdf(ck, fallback_url=fallback_url)
+        text = client.download_attachment_pdf(
+            ck, fallback_url=fallback_url, max_extract_chars=max_extract_chars,
+        )
         if text:
             return text
     return ""
@@ -1059,12 +1064,13 @@ def search_zotero_for_chat(query: str, owner: str = "", limit: int = 5) -> Tuple
             "Add your User ID and API key in Settings → Search, then Save.",
             [],
         )
+    single_key = _resolve_zotero_key(query, owner)
     findings = fetch_zotero_findings(
         query,
         owner=owner,
         limit=limit,
-        extract_pdfs=True,
-        seed_library=True,
+        extract_pdfs=bool(single_key),
+        seed_library=not single_key,
     )
     return format_zotero_search_context(findings)
 
@@ -1188,7 +1194,7 @@ def fetch_paper_pdf_text(
     if not item:
         return "", f"Paper {key} not found via the Zotero API (sync Zotero to cloud)."
 
-    pdf_text = _extract_pdf_text_for_item(client, key, item, catalog_row=row)
+    pdf_text = _extract_pdf_text_for_item(client, key, item, catalog_row=row, max_extract_chars=max_chars)
     if pdf_text:
         if len(pdf_text) > max_chars:
             pdf_text = pdf_text[:max_chars] + "\n… [PDF truncated]"
@@ -1208,6 +1214,115 @@ def fetch_paper_pdf_text(
             "Do not substitute web_search unless the user explicitly asks for outside sources."
         )
     return "", "No PDF attached to this paper in Zotero."
+
+
+def fetch_paper_section_text(
+    owner: str,
+    zotero_key: str,
+    section: str,
+    *,
+    max_chars: int = 8000,
+) -> Tuple[str, str, dict]:
+    """Extract one PDF section for a catalog paper.
+
+    Returns (text, error_or_note, meta). Meta includes matched_slug, available_sections, from_cache.
+    """
+    from datetime import datetime, timezone
+
+    from src.paper_retrieval import PAPER_SECTION_PARSE_MAX_CHARS
+    from src.paper_sections import (
+        normalize_section_slug,
+        parse_pdf_sections,
+        section_display_label,
+    )
+    from src.zotero_catalog import (
+        load_catalog,
+        load_section_cache,
+        save_section_cache,
+        section_cache_valid,
+    )
+
+    key = (zotero_key or "").strip()
+    slug = normalize_section_slug(section)
+    meta: dict = {"requested": (section or "").strip(), "matched_slug": slug or ""}
+    if not key:
+        return "", "No Zotero item key provided.", meta
+    if not slug:
+        return "", f"Unrecognized section {section!r}. Try: methods, introduction, results, discussion.", meta
+
+    creds = resolve_zotero_credentials(owner)
+    if not creds:
+        return "", "Zotero is not configured for this account.", meta
+
+    row = next(
+        (r for r in load_catalog(owner) if (r.get("zotero_key") or "") == key),
+        None,
+    )
+    cache = load_section_cache(owner, key)
+    sections_map: dict = {}
+    from_cache = False
+
+    if section_cache_valid(cache, row):
+        sections_map = dict(cache.get("sections") or {})
+        from_cache = True
+    else:
+        client = ZoteroClient(creds["api_key"], creds["user_id"])
+        item = client.get_item(key)
+        if not item:
+            return "", f"Paper {key} not found via the Zotero API (sync Zotero to cloud).", meta
+
+        full_text = _extract_pdf_text_for_item(
+            client,
+            key,
+            item,
+            catalog_row=row,
+            max_extract_chars=PAPER_SECTION_PARSE_MAX_CHARS,
+        )
+        if not full_text:
+            att_keys = _pdf_attachment_keys_for_item(client, key, item, catalog_row=row)
+            if att_keys or (row and row.get("has_pdf")):
+                return "", (
+                    "A PDF is attached but text could not be extracted for section parsing. "
+                    "Try abstract-only read or include_pdf=true for full text."
+                ), meta
+            return "", "No PDF attached to this paper in Zotero.", meta
+
+        sections_map = parse_pdf_sections(full_text)
+        if sections_map:
+            save_section_cache(
+                owner,
+                key,
+                {
+                    "zotero_key": key,
+                    "date_modified": (row or {}).get("date_modified") or "",
+                    "parsed_at": datetime.now(timezone.utc).isoformat(),
+                    "sections": sections_map,
+                },
+            )
+
+    available = sorted(sections_map.keys())
+    meta["available_sections"] = available
+    meta["from_cache"] = from_cache
+
+    if not sections_map:
+        return "", (
+            "Could not detect section headings in this PDF. "
+            "Use abstract-only read (default) or include_pdf=true for full text."
+        ), meta
+
+    body = sections_map.get(slug, "")
+    if not body:
+        hint = ", ".join(available) if available else "none detected"
+        return "", (
+            f"Section {section_display_label(slug)!r} not found in PDF. "
+            f"Detected sections: {hint}."
+        ), meta
+
+    if len(body) > max_chars:
+        body = body[:max_chars] + "\n… [section truncated]"
+    meta["matched_slug"] = slug
+    meta["matched_label"] = section_display_label(slug)
+    return body, "", meta
 
 
 def _resolve_zotero_key(query: str, owner: str) -> str:
@@ -1294,12 +1409,36 @@ def execute_search_zotero_tool(args: dict, owner: str = "") -> Dict[str, Any]:
         start = int(args.get("start", 0))
     except (TypeError, ValueError):
         start = 0
-    include_pdf = args.get("include_pdf", True)
-    if isinstance(include_pdf, str):
+    include_pdf = args.get("include_pdf")
+    section_query = (args.get("section") or "").strip()
+    if include_pdf is None:
+        include_pdf = bool(zotero_key) and not section_query
+    elif isinstance(include_pdf, str):
         include_pdf = include_pdf.lower() not in ("false", "0", "no")
+    else:
+        include_pdf = bool(include_pdf)
 
     limit = min(max(limit, 1), 25)
     start = max(start, 0)
+
+    if zotero_key and section_query:
+        from src.paper_retrieval import PAPER_SECTION_DEFAULT_MAX_CHARS
+
+        try:
+            sec_max = int(args.get("max_chars", PAPER_SECTION_DEFAULT_MAX_CHARS))
+        except (TypeError, ValueError):
+            sec_max = PAPER_SECTION_DEFAULT_MAX_CHARS
+        sec_text, sec_note, sec_meta = fetch_paper_section_text(
+            owner, zotero_key, section_query, max_chars=sec_max,
+        )
+        if sec_text:
+            label = sec_meta.get("matched_label") or section_query
+            header = f"Zotero paper:{zotero_key} — section: {label}"
+            return {"output": f"{header}\n\n{sec_text}", "exit_code": 0}
+        return {
+            "output": sec_note or f"Section {section_query!r} not found.",
+            "exit_code": 1,
+        }
 
     from src.zotero_catalog import load_catalog, search_catalog, catalog_row_to_item
 

@@ -325,6 +325,7 @@ const _TASK_ICONS = {
   // Skills
   test_skills:         '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
   audit_skills:        '<path d="M9 11l3 3L22 4"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v15H6.5A2.5 2.5 0 0 0 4 19.5z"/>',
+  audit_links:         '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   // Assistant
   daily_brief:         '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   // Generic action fallback (gear)
@@ -484,6 +485,7 @@ const _CATEGORY_MAP = {
   daily_brief:                'Assistant',
   test_skills:                'Skills',
   audit_skills:               'Skills',
+  audit_links:                'Memory',
   ssh_command:          'System',
   run_script:           'System',
   run_local:            'System',

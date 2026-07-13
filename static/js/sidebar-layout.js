@@ -137,6 +137,9 @@ export function initSidebarLayout(Storage, opts) {
     sidebar.classList.remove('hidden');
     if (backdrop && window.innerWidth < 768) backdrop.classList.add('visible');
     syncRailSide();
+    if (window.innerWidth < 768) {
+      import('./tourHints.js').then((m) => m.maybeNavHint?.('mobileMenu')).catch(() => {});
+    }
   };
 
   if (hamburgerBtn) {
@@ -186,6 +189,9 @@ export function initSidebarLayout(Storage, opts) {
           }
         }
         syncRailSide();
+        if (!isSidebarVisible && window.innerWidth < 768) {
+          import('./tourHints.js').then((m) => m.maybeNavHint?.('mobileMenu')).catch(() => {});
+        }
         return;
       }
 

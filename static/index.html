@@ -226,10 +226,11 @@
   <link rel="modulepreload" href="/static/js/markdown.js">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content, viewport-fit=cover" />
 </head>
-<body>
+<body class="projects-ui-hidden">
   <!-- Loading overlay — hides all flashing until app is ready -->
   <div id="app-loader" style="position:fixed;inset:0;z-index:99999;background:var(--bg,#282c34);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;transition:opacity .3s">
     <div id="loader-wave" style="color:var(--brand-color,var(--red,#e06c75));font-family:monospace;font-size:11px;opacity:.5">▁▂▃</div>
+    <div id="app-loader-slow" hidden style="font-size:11px;opacity:0.45;margin-top:4px">Still loading…</div>
   </div>
   <script nonce="{{CSP_NONCE}}">
   (function(){
@@ -242,20 +243,20 @@
       el.textContent=frames[i%frames.length];
       i++;
     },150);
-    setTimeout(function(){var l=document.getElementById('app-loader');if(l){l.style.opacity='0';setTimeout(function(){l.remove()},300)}},5000);
   })();
   </script>
   <!-- Memory Management Modal -->
   <div id="memory-modal" class="modal hidden">
-    <div class="modal-content memory-modal-content" role="dialog" aria-label="Brain" style="background:var(--bg)">
+    <div class="modal-content memory-modal-content" role="dialog" aria-label="Memory" style="background:var(--bg)">
       <div class="modal-header">
-        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg>Brain</h4>
+        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg>Memory</h4>
         <button class="close-btn" id="close-memory-modal" aria-label="Close memory modal">✖</button>
       </div>
       <div class="modal-body memory-modal-body">
         <div class="memory-tabs">
           <button class="memory-tab active" data-memory-tab="browse"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4.5-3 5.7V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.3C6.2 13.5 5 11.4 5 9a7 7 0 0 1 7-7z"/><line x1="10" y1="22" x2="14" y2="22"/></svg>Memories <span id="memory-count" class="memory-count" style="font-size:0.8em;opacity:0.6;font-weight:normal;margin-left:4px">0</span></button>
           <button class="memory-tab" data-memory-tab="skills"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Skills <span id="skills-count" class="memory-count" style="font-size:0.8em;opacity:0.6;font-weight:normal;margin-left:4px">0</span></button>
+          <button class="memory-tab" data-memory-tab="connections"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><line x1="7" y1="12" x2="17" y2="7"/><line x1="7" y1="12" x2="17" y2="17"/></svg>Connections <span id="connections-count" class="memory-count" style="font-size:0.8em;opacity:0.6;font-weight:normal;margin-left:4px">0</span></button>
           <button class="memory-tab" data-memory-tab="add"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Add</button>
           <button class="memory-tab" data-memory-tab="settings"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
         </div>
@@ -388,6 +389,41 @@
             <div id="skills-list" class="memory-list"></div>
           </div>
         </div>
+        <!-- ── Connections tab (learned graph links) ── -->
+        <div class="memory-tab-panel hidden" data-memory-panel="connections">
+          <div class="admin-card" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
+              <h2 style="margin:0;padding:0;line-height:1;">Connections <span id="connections-count-h2" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal">0</span></h2>
+            </div>
+            <p class="memory-desc doclib-desc" style="margin-top:6px;">Pending connections from chat, compare, and research. Accept to add to Links; reject to dismiss.</p>
+            <div id="connections-toolbar" class="memory-toolbar">
+              <div class="memory-toolbar-row">
+                <select id="connections-filter-kind" class="memory-sort-select" aria-label="Filter by kind">
+                  <option value="">All kinds</option>
+                  <option value="relates">Relates</option>
+                  <option value="derives_from">Derives from</option>
+                  <option value="refutes">Refutes</option>
+                  <option value="supports">Supports</option>
+                  <option value="depends_on">Depends on</option>
+                  <option value="summarizes">Summarizes</option>
+                </select>
+                <select id="connections-filter-source" class="memory-sort-select" aria-label="Filter by source">
+                  <option value="">All sources</option>
+                  <option value="research">Research</option>
+                  <option value="compare_papers">Compare</option>
+                  <option value="library_compare">Library</option>
+                  <option value="session_extract">Session</option>
+                  <option value="agent">Chat</option>
+                </select>
+                <button type="button" class="memory-toolbar-btn" id="connections-bulk-accept">Accept filtered</button>
+                <button type="button" class="memory-toolbar-btn" id="connections-bulk-reject">Reject filtered</button>
+                <button type="button" class="memory-toolbar-btn" id="connections-edit-table">Edit in table</button>
+              </div>
+              <input type="search" id="connections-filter-q" class="memory-search-input" placeholder="Filter connections…" autocomplete="off" aria-label="Filter connections" />
+            </div>
+            <div id="connections-list" class="connections-links-list"></div>
+          </div>
+        </div>
         <!-- ── Settings tab ── -->
         <div class="memory-tab-panel hidden" data-memory-panel="settings">
           <div class="admin-card">
@@ -430,12 +466,33 @@
               </span>
             </div>
           </div>
+          <div class="admin-card">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+              <h2 style="margin:0">Auto-learn graph connections</h2>
+              <label class="admin-switch" style="flex-shrink:0"><input type="checkbox" id="auto-learn-links-toggle" checked /><span class="admin-slider"></span></label>
+            </div>
+            <span class="admin-toggle-sub" style="display:block;margin-top:6px;opacity:0.6">When on, Research, compare, and batch merge proposals queue for your review. When off, only explicit link suggestions from the agent appear — nothing is auto-enqueued.</span>
+          </div>
+          <div class="admin-card">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+              <h2 style="margin:0">Auto-approve graph connections</h2>
+              <label class="admin-switch" style="flex-shrink:0"><input type="checkbox" id="auto-approve-links-toggle" /><span class="admin-slider"></span></label>
+            </div>
+            <span class="admin-toggle-sub" style="display:block;margin-top:6px;opacity:0.6">Reserved for a future release — connections are never published without your approval in this version.</span>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:6px">
+              <span class="admin-toggle-sub" style="margin:0">Minimum confidence</span>
+              <span style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+                <span id="link-confidence-label" class="admin-toggle-sub" style="margin:0;min-width:42px;text-align:right;font-variant-numeric:tabular-nums">&ge; 85%</span>
+                <input type="range" id="link-confidence-slider" class="preset-range" min="50" max="100" step="5" value="85" style="width:120px;margin:0" />
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Knowledge graph / Links browser -->
+  <!-- Links browser -->
   <div id="knowledge-modal" class="modal hidden">
     <div class="modal-content knowledge-modal-content" role="dialog" aria-label="Links" style="background:var(--bg)">
       <div class="modal-header">
@@ -443,9 +500,10 @@
         <button class="close-btn" id="close-knowledge-modal" aria-label="Close links browser">✖</button>
       </div>
       <div class="modal-body knowledge-modal-body">
-        <p class="admin-toggle-sub" style="margin:0 0 10px">Browse conceptual connections across todos, documents, memories, skills, and Zotero papers. Sync your library in Settings → Search → Zotero. Stored as portable JSON under <code>data/knowledge/</code> and <code>data/zotero/</code>.</p>
+        <p class="admin-toggle-sub" style="margin:0 0 10px">Browse your confirmed links across todos, documents, memories, skills, and papers. Sync your library in <strong>Settings → Search → Zotero</strong>, then <strong>Rebuild</strong>.</p>
         <div class="kg-toolbar">
           <input type="search" id="kg-search-input" class="settings-input kg-search-input" placeholder="Search the graph…" autocomplete="off">
+          <button type="button" class="admin-btn-sm" id="kg-merge-btn" title="Review batch edge proposals">Batch merge</button>
           <button type="button" class="admin-btn-sm" id="kg-rebuild-btn">Rebuild</button>
           <span id="kg-stats" class="kg-stats"></span>
         </div>
@@ -460,9 +518,35 @@
           <button type="button" class="kg-type-filter" data-type="skill">Skills</button>
         </div>
         <div class="kg-panels">
-          <div id="kg-node-list" class="kg-node-list"></div>
+          <div id="kg-graph" class="kg-graph"></div>
           <div id="kg-detail" class="kg-detail"></div>
+          <div id="kg-node-list" class="kg-node-list"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch graph edge merge review (Edge Taxonomy T2) -->
+  <div id="kg-merge-modal" class="modal hidden">
+    <div class="modal-content kg-merge-modal-content" role="dialog" aria-label="Batch merge graph edges" style="background:var(--bg)">
+      <div class="modal-header">
+        <h4>Batch merge</h4>
+        <button class="close-btn" id="close-kg-merge-modal" aria-label="Close batch merge">✖</button>
+      </div>
+      <div class="modal-body kg-merge-modal-body">
+        <p class="admin-toggle-sub" style="margin:0 0 10px">Review up to 20 proposed edges at once. Conflicts and duplicates are flagged before writing.</p>
+        <div class="kg-merge-toolbar">
+          <div class="kg-merge-toolbar-actions" style="margin-bottom:8px">
+            <button type="button" class="admin-btn-sm" id="kg-merge-preview-btn">Preview</button>
+            <button type="button" class="admin-btn-sm kg-merge-apply-btn" id="kg-merge-apply-btn" disabled>Apply selected</button>
+          </div>
+          <details class="kg-merge-advanced" id="kg-merge-advanced">
+            <summary class="admin-toggle-sub" style="cursor:pointer;margin-bottom:6px">Advanced · Import JSON</summary>
+            <textarea id="kg-merge-json-input" class="settings-input kg-merge-json-input" rows="4" placeholder='[{"from":"paper:A","to":"paper:B","kind":"relates","reason":"Same benchmark"}]' spellcheck="false"></textarea>
+          </details>
+        </div>
+        <div id="kg-merge-summary" class="kg-merge-summary"></div>
+        <div id="kg-merge-table-mount" class="kg-merge-table-mount"></div>
       </div>
     </div>
   </div>
@@ -689,17 +773,9 @@
     <!-- Dynamic contextual indicators (shown only while active) -->
     <button class="icon-rail-btn rail-dynamic" id="rail-chats" title="Chat ready" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
     <button class="icon-rail-btn rail-dynamic" id="rail-documents" title="Documents" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></button>
-    <!-- Tool launchers — always visible, alphabetical -->
-    <button class="icon-rail-btn" id="rail-calendar" title="Calendar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
-    <button class="icon-rail-btn" id="rail-compare" title="Compare"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg></button>
-    <button class="icon-rail-btn" id="rail-cookbook" title="Cookbook"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg></button>
-    <button class="icon-rail-btn" id="rail-research" title="Deep Research"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>
-    <button class="icon-rail-btn" id="rail-gallery" title="Gallery"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
-    <button class="icon-rail-btn" id="rail-archive" title="Library"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/></svg></button>
-    <button class="icon-rail-btn" id="rail-memory" title="Brain"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg></button>
-    <button class="icon-rail-btn" id="rail-notes" title="Todos"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg></button>
-    <button class="icon-rail-btn" id="rail-tasks" title="Tasks"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg></button>
-    <button class="icon-rail-btn" id="rail-theme" title="Theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 5-5 3 3 0 0 0-3-3h-2a3 3 0 0 1-3-3 5 5 0 0 1 5-5"/></svg></button>
+    <!-- Tool launchers — generated from static/js/nav/toolRegistry.js (single
+         source of truth). See static/js/nav/railProjection.js. -->
+    <div id="rail-tools-mount" style="display:contents"></div>
     <div style="flex:1"></div>
     <!-- Static: bottom -->
     <button class="icon-rail-btn" id="rail-settings" title="Settings"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
@@ -718,6 +794,10 @@
         <svg class="sidebar-action-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="position:relative;left:-2px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         <span class="grow" style="position:relative;left:-3px;">New Chat</span>
       </div>
+      <div class="list-item" id="sidebar-new-project-btn" title="New project" hidden aria-hidden="true">
+        <svg class="sidebar-action-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="position:relative;left:-2px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span class="grow" style="position:relative;left:-3px;">New Project</span>
+      </div>
       <div class="list-item" id="sidebar-search-btn" title="Search conversations (Ctrl+K)">
         <svg class="sidebar-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
         <span class="grow" style="position:relative;left:-1px;">Search</span>
@@ -731,25 +811,19 @@
         <div class="section-header-flex">
           <span class="section-title" id="chats-section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span id="chats-section-label" class="section-title-label">Chats</span><span id="chats-notif-dot" class="sidebar-notif-dot" style="display:none"></span></span>
           <div style="position:relative; display:inline-block; display:flex; gap:4px; align-items:center;">
-            <button type="button" class="section-header-btn chats-manage-btn" id="chats-library-btn" title="Manage Chats (Library)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-                <path d="M9 7h6M9 11h4"/>
-              </svg>
-            </button>
-            <button type="button" class="section-header-btn" id="session-sort-btn" title="Sort sessions">
-              <svg class="sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="4" y1="6" x2="20" y2="6"/>
-                <line x1="4" y1="12" x2="14" y2="12"/>
-                <line x1="4" y1="18" x2="9" y2="18"/>
+            <button type="button" class="section-header-btn" id="session-sort-btn" title="Sort &amp; manage chats">
+              <svg class="sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <circle cx="12" cy="5" r="1.8"/>
+                <circle cx="12" cy="12" r="1.8"/>
+                <circle cx="12" cy="19" r="1.8"/>
               </svg>
               <svg class="sort-spinner" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="display:none; animation: spin 0.7s linear infinite;">
                 <path d="M12 2a10 10 0 0 1 10 10" />
               </svg>
             </button>
             <div id="session-sort-dropdown" class="dropdown sort-dropdown" style="display:none;">
-              <div class="dropdown-item sort-option sort-dropdown-item" data-sort="active">Last Active</div>
+              <div class="dropdown-item sort-dropdown-item" id="session-manage-library">Open in Library</div>
+              <div class="dropdown-item sort-option sort-dropdown-item sort-dropdown-sep" data-sort="active">Last Active</div>
               <div class="dropdown-item sort-option sort-dropdown-item" data-sort="newest">Newest First</div>
               <div class="dropdown-item sort-option sort-dropdown-item" data-sort="group">By Folder</div>
               <div class="dropdown-item sort-dropdown-item sort-dropdown-sep" id="auto-sort-sessions-row" style="display:flex;align-items:center;padding:0;">
@@ -782,12 +856,31 @@
         <div id="session-list" role="listbox"></div>
       </div>
 
-      <div class="section" id="projects-section">
+      <div class="section" id="projects-section" hidden aria-hidden="true">
         <div class="section-header-flex">
           <span class="section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg><span class="section-title-label">Projects</span></span>
-          <button type="button" class="section-header-btn" id="project-create-btn" title="New project">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          </button>
+          <div style="position:relative; display:inline-block; display:flex; gap:4px; align-items:center;">
+            <button type="button" class="section-header-btn" id="project-sort-btn" title="Sort &amp; manage projects" aria-label="Sort and manage projects">
+              <svg class="sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <circle cx="12" cy="5" r="1.8"/>
+                <circle cx="12" cy="12" r="1.8"/>
+                <circle cx="12" cy="19" r="1.8"/>
+              </svg>
+            </button>
+            <div id="project-sort-dropdown" class="dropdown sort-dropdown" style="display:none;">
+              <div class="dropdown-item sort-option sort-dropdown-item" data-sort="active">Last Active</div>
+              <div class="dropdown-item sort-option sort-dropdown-item" data-sort="name">Name</div>
+              <div class="dropdown-item sort-dropdown-item sort-dropdown-sep" id="project-select-from-dropdown">● Select</div>
+            </div>
+          </div>
+        </div>
+        <div id="project-bulk-bar" class="session-bulk-bar project-bulk-bar hidden">
+          <span id="project-select-all-dot" style="cursor:pointer;font-size:14px;opacity:0.4;user-select:none;">○</span>
+          <span style="font-size:10px;cursor:pointer;opacity:0.5;" id="project-select-all-label">All</span>
+          <div style="margin-left:auto;display:flex;gap:2px;align-items:center;">
+            <button class="session-bulk-btn" id="project-bulk-archive" title="Archive selected"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></button>
+            <button class="session-bulk-btn" id="project-bulk-cancel" title="Cancel"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
         </div>
         <div id="project-list" role="listbox"></div>
       </div>
@@ -811,11 +904,11 @@
         <div class="section-header-flex">
           <span class="section-title"> Models</span>
           <div style="position:relative; display:inline-block;">
-            <button type="button" class="section-header-btn" id="model-sort-btn" title="Sort models">
-              <svg class="sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="4" y1="6" x2="20" y2="6"/>
-                <line x1="4" y1="12" x2="14" y2="12"/>
-                <line x1="4" y1="18" x2="9" y2="18"/>
+            <button type="button" class="section-header-btn" id="model-sort-btn" title="Model options">
+              <svg class="sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <circle cx="12" cy="5" r="1.8"/>
+                <circle cx="12" cy="12" r="1.8"/>
+                <circle cx="12" cy="19" r="1.8"/>
               </svg>
             </button>
             <div id="model-sort-dropdown" class="dropdown sort-dropdown" style="display:none;">
@@ -840,7 +933,8 @@
         <div class="section-header-flex">
           <span class="section-title"><svg class="section-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Tools</span>
         </div>
-        <div class="list-item" id="tool-memory-btn">
+        <div class="tool-subgroup-label">Knowledge</div>
+        <div class="list-item tool-group-item tool-group-item-first" id="tool-memory-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
@@ -848,9 +942,10 @@
             <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
             <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
           </svg>
-          <span class="grow">Brain</span>
+          <span class="grow">Memory</span>
+          <span class="brain-connections-badge" hidden aria-label="Pending connections"></span>
         </div>
-        <div class="list-item" id="tool-knowledge-btn">
+        <div class="list-item tool-group-item tool-group-item-last" id="tool-knowledge-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
@@ -859,7 +954,39 @@
           </svg>
           <span class="grow">Links</span>
         </div>
-        <div class="list-item" id="tool-calendar-btn">
+        <div class="tool-subgroup-sep" aria-hidden="true"></div>
+        <div class="tool-subgroup-label">Explore</div>
+        <div class="list-item tool-group-item tool-group-item-first" id="tool-research-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.5;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+          <span class="grow">Research</span>
+        </div>
+        <div class="list-item tool-group-item" id="tool-compare-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>
+          <span class="grow">Compare</span>
+        </div>
+        <div class="list-item tool-group-item" id="tool-gallery-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="flex-shrink:0;opacity:0.5;">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <circle cx="8.5" cy="8.5" r="1.5"/>
+            <path d="M21 15l-5-5L5 21"/>
+          </svg>
+          <span class="grow">Gallery</span>
+        </div>
+        <div class="list-item tool-group-item tool-group-item-last" id="tool-library-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/>
+          </svg>
+          <span class="grow">Library</span>
+          <button type="button" class="list-item-plus-btn" id="library-new-doc-btn" title="New document">
+            <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span class="list-item-plus-label">new</span>
+          </button>
+        </div>
+        <div class="tool-subgroup-sep" aria-hidden="true"></div>
+        <div class="tool-subgroup-label">Plan</div>
+        <div class="list-item tool-group-item tool-group-item-first" id="tool-calendar-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
@@ -870,46 +997,7 @@
           </svg>
           <span class="grow">Calendar</span>
         </div>
-        <div class="list-item" id="tool-compare-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>
-          <span class="grow">Compare</span>
-        </div>
-        <div class="list-item" id="tool-cookbook-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <path d="M12 7v14"/>
-            <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>
-          </svg>
-          <span class="grow">Cookbook</span>
-          <span id="cookbook-bg-status" style="display:none;font-size:9px;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:12px;flex-shrink:1;min-width:0;position:relative;top:-1px;"></span>
-          <span class="cookbook-notif-dot" id="cookbook-notif-dot" style="display:none;margin-left:6px;margin-right:4px;position:relative;top:-1px;left:0px;"></span>
-        </div>
-        <div class="list-item" id="tool-research-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.5;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-          <span class="grow">Deep Research</span>
-        </div>
-        <div class="list-item" id="tool-gallery-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <circle cx="8.5" cy="8.5" r="1.5"/>
-            <path d="M21 15l-5-5L5 21"/>
-          </svg>
-          <span class="grow">Gallery</span>
-        </div>
-        <div class="list-item" id="tool-library-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/>
-          </svg>
-          <span class="grow">Library</span>
-          <button type="button" class="list-item-plus-btn" id="library-new-doc-btn" title="New document">
-            <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span class="list-item-plus-label">new</span>
-          </button>
-        </div>
-        <div class="list-item" id="tool-notes-btn">
+        <div class="list-item tool-group-item" id="tool-notes-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
@@ -919,7 +1007,7 @@
           </svg>
           <span class="grow">Todos</span>
         </div>
-        <div class="list-item" id="tool-tasks-btn">
+        <div class="list-item tool-group-item tool-group-item-last" id="tool-tasks-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
@@ -932,8 +1020,20 @@
           <span class="grow">Tasks</span>
           <span id="assistant-notif-dot" class="sidebar-notif-dot" style="display:none"></span>
         </div>
-
-        <div class="list-item" id="tool-theme-btn">
+        <div class="tool-subgroup-sep" aria-hidden="true"></div>
+        <div class="tool-subgroup-label">Customize</div>
+        <div class="list-item tool-group-item tool-group-item-first" id="tool-cookbook-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+            style="flex-shrink:0;opacity:0.5;">
+            <path d="M12 7v14"/>
+            <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>
+          </svg>
+          <span class="grow">Cookbook</span>
+          <span id="cookbook-bg-status" style="display:none;font-size:9px;opacity:0.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:12px;flex-shrink:1;min-width:0;position:relative;top:-1px;"></span>
+          <span class="cookbook-notif-dot" id="cookbook-notif-dot" style="display:none;margin-left:6px;margin-right:4px;position:relative;top:-1px;left:0px;"></span>
+        </div>
+        <div class="list-item tool-group-item tool-group-item-last" id="tool-theme-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="flex-shrink:0;opacity:0.5;">
@@ -969,7 +1069,24 @@
     <div class="chat-top-bar">
       <button type="button" class="incognito-indicator" id="incognito-indicator" title="Nobody mode active — click to deactivate" style="display:none;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg></button>
       <div class="chat-meta-overlay"><span id="current-meta">Nobody Chat</span><span id="current-meta-count" class="chat-meta-count" aria-hidden="true"></span><span id="session-cost-display" class="session-cost-display" style="display:none;"></span><span class="export-dropdown-wrap" id="export-dropdown-wrap"><button type="button" class="export-dl-btn" id="export-dl-btn" title="More"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button><div class="export-dropdown-menu" id="export-dropdown-menu"><div class="export-dropdown-item" id="export-rename-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span><span>Rename</span></div><div class="export-dropdown-item" id="export-copy-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span><span>Copy Chat</span></div><div class="export-dropdown-item" id="export-pdf-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15v-2h2a1.5 1.5 0 0 1 0 3H9z"/></svg></span><span>PDF</span></div><div class="export-dropdown-item" id="export-doc-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span><span>Save to Documents</span></div></div></span></div>
-      <span id="project-mode-pill" class="project-mode-pill hidden" title="Project workspace">
+      <span class="export-dropdown-wrap hidden" id="project-overflow-wrap">
+        <button type="button" class="export-dl-btn" id="project-overflow-btn" title="Project actions" aria-label="Project actions">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="export-dropdown-menu" id="project-overflow-menu">
+          <div class="export-dropdown-item" id="project-overflow-rename"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span><span>Rename</span></div>
+          <div class="export-dropdown-item" id="project-overflow-dir"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span><span>Change folder</span></div>
+          <div class="export-dropdown-item" id="project-overflow-close"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span><span>Close workspace</span></div>
+          <div class="export-dropdown-item export-dropdown-sep" aria-hidden="true"></div>
+          <div class="export-dropdown-item" data-layout-preset="research"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4"/></svg></span><span>Layout: Research</span></div>
+          <div class="export-dropdown-item" data-layout-preset="code"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span><span>Layout: Code</span></div>
+          <div class="export-dropdown-item" data-layout-preset="focus"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg></span><span>Layout: Focus</span></div>
+          <div class="export-dropdown-item" data-layout-preset="split"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></svg></span><span>Layout: Split</span></div>
+          <div class="export-dropdown-item export-dropdown-sep" aria-hidden="true"></div>
+          <div class="export-dropdown-item export-dropdown-item-danger" id="project-overflow-archive"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg></span><span>Archive project</span></div>
+        </div>
+      </span>
+      <span id="project-mode-pill" class="project-mode-pill hidden" title="Project workspace" aria-hidden="true">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>
         <span id="project-mode-pill-label">Project</span>
       </span>
@@ -1049,6 +1166,9 @@
         <div class="project-workspace-grid" id="project-workspace-grid">
           <aside class="project-workspace-left" id="project-workspace-left">
             <div class="project-tab-bar project-left-tab-bar" role="tablist" aria-label="Project sidebar">
+              <button type="button" class="project-left-collapse-btn" id="project-left-collapse-btn" title="Toggle sidebar" aria-label="Toggle sidebar">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
               <button type="button" role="tab" class="project-left-tab project-left-tab--links active" data-left-tab="links" aria-selected="true">Links</button>
               <button type="button" role="tab" class="project-left-tab project-left-tab--files" data-left-tab="files" aria-selected="false">Files</button>
             </div>
@@ -1087,25 +1207,32 @@
               <div id="project-editor-pane" class="project-editor-pane hidden"></div>
             </div>
           </section>
-          <footer class="project-workspace-footer" id="project-workspace-footer">
-            <div class="project-resize-handle project-resize-handle--row" id="project-resize-row" role="separator" aria-orientation="horizontal" aria-label="Resize chat and run panel"></div>
-            <div class="project-tab-bar project-bottom-tab-bar" role="tablist" aria-label="Chat and run">
+          <aside class="project-workspace-companion" id="project-workspace-footer">
+            <div class="project-resize-handle project-resize-handle--companion" id="project-resize-row" role="separator" aria-orientation="vertical" aria-label="Resize chat and run panel"></div>
+            <div class="project-tab-bar project-companion-tab-bar project-bottom-tab-bar" role="tablist" aria-label="Chat and run">
               <button type="button" role="tab" class="project-bottom-tab active" data-bottom-tab="chat" aria-selected="true">Chat</button>
               <button type="button" role="tab" class="project-bottom-tab project-bottom-tab--run" data-bottom-tab="run" aria-selected="false">Run<span class="project-bottom-tab-badge" aria-hidden="true"></span></button>
               <button type="button" class="project-footer-expand-btn" id="project-footer-expand-btn" title="Expand panel" aria-label="Expand chat and run panel" aria-pressed="false">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
               </button>
             </div>
-            <div class="project-bottom-pane" id="project-bottom-pane-chat" data-bottom-pane="chat">
-              <div id="project-chat-pane" class="project-chat-pane"></div>
+            <div class="project-companion-body">
+              <div class="project-bottom-pane" id="project-bottom-pane-chat" data-bottom-pane="chat">
+                <div id="project-chat-pane" class="project-chat-pane"></div>
+              </div>
+              <div class="project-bottom-pane hidden" id="project-bottom-pane-run" data-bottom-pane="run">
+                <div id="project-run-pane" class="project-run-pane"></div>
+              </div>
+              <div id="project-workspace-composer" class="project-workspace-composer hidden"></div>
             </div>
-            <div class="project-bottom-pane hidden" id="project-bottom-pane-run" data-bottom-pane="run">
-              <div id="project-run-pane" class="project-run-pane"></div>
-            </div>
-          </footer>
+            <button type="button" class="project-mobile-footer-grabber" id="project-mobile-footer-grabber" aria-label="Open chat and run panel">
+              <span class="project-mobile-footer-grabber-bar"></span>
+              <span class="project-mobile-footer-grabber-label">Chat</span>
+            </button>
+          </aside>
         </div>
       </div>
-      <div id="project-workspace-composer" class="project-workspace-composer hidden"></div>
+      <div id="project-left-drawer-backdrop" class="project-left-drawer-backdrop" aria-hidden="true"></div>
     </div>
 
     <!-- Attachments strip -->
@@ -1138,7 +1265,6 @@
           </div>
         </div>
       </div>
-      <div id="pinned-tools-bar"></div>
       <div class="chat-input-bottom" style="visibility:hidden">
         <div class="chat-input-left">
           <!-- Overflow menu (+) — always first/left -->
@@ -1235,7 +1361,7 @@
             <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
           </button>
           <!-- 6. Deep Research (hidden until active) -->
-          <button type="button" class="input-icon-btn tool-indicator" title="Deep Research active — click to deactivate" id="research-toggle-btn" style="display:none;">
+          <button type="button" class="input-icon-btn tool-indicator" title="Research active — click to deactivate" id="research-toggle-btn" style="display:none;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
             <span style="font-size:11px;margin-left:2px;">Research</span>
             <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
@@ -1258,6 +1384,14 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>
             <span style="font-size:11px;margin-left:2px;">Compare</span>
             <svg class="tool-indicator-x" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+          </button>
+          <!-- U4: mobile summary — replaces the individual tool-indicators above
+               when more than a few are active, so the composer stays compact.
+               Tapping it opens the "+" tools menu to manage/deactivate them. -->
+          <button type="button" class="input-icon-btn tools-active-summary" id="tools-active-summary" style="display:none;" title="Active tools — tap to manage" aria-label="Active tools — tap to manage">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            <span class="tools-active-count" style="font-size:11px;margin-left:3px;font-weight:600;">0</span>
+            <span style="font-size:11px;margin-left:2px;opacity:0.8;">on</span>
           </button>
         </div>
         <div class="chat-input-right">
@@ -1475,8 +1609,14 @@
       <div class="admin-toggle-sub" style="padding:0 12px 8px;opacity:0.6;font-size:11px;">Toggle on/off visibility of tools and modules across the interface.</div>
       <div class="settings-layout">
         <div class="settings-sidebar">
+          <!-- Section 0: Setup checklist -->
+          <button class="settings-nav-item active" data-settings-tab="getting-started">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span>Getting started</span>
+          </button>
+          <div class="settings-sidebar-divider"></div>
           <!-- Section 1: AI plumbing (Add Models → AI Defaults → Search) -->
-          <button class="settings-nav-item active" data-settings-tab="services">
+          <button class="settings-nav-item" data-settings-tab="services">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
             <span>Add Models</span>
           </button>
@@ -1531,6 +1671,17 @@
         </div>
         <div class="settings-panels">
 
+        <!-- ═══ GETTING STARTED ═══ -->
+        <div data-settings-panel="getting-started">
+          <div class="admin-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Getting started</h2>
+            <p class="admin-toggle-sub" style="margin:0 0 12px">Three essentials for chat, Research, and Links. Fix anything marked below, then you’re ready.</p>
+            <div id="setup-checklist" class="setup-checklist" aria-live="polite">
+              <div class="setup-checklist-loading">Checking setup…</div>
+            </div>
+          </div>
+        </div>
+
         <!-- ═══ AI TAB ═══ -->
 
         <div data-settings-panel="ai" class="hidden">
@@ -1583,7 +1734,7 @@
           </div>
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>Research Model</h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px">Model used for Deep Research. Falls back to the default chat model if not set.</div>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">Model used for Research. Falls back to the default chat model if not set.</div>
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">Endpoint</label>
@@ -1890,7 +2041,7 @@
                 <span class="vis-label">Chats <span class="vis-hint">Chat history list</span></span>
                 <input type="checkbox" checked data-ui-key="sessions-section"><span class="vis-switch"></span>
               </label>
-              <label class="vis-row">
+              <label class="vis-row" hidden aria-hidden="true">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg></span>
                 <span class="vis-label">Projects <span class="vis-hint">Computational workspaces</span></span>
                 <input type="checkbox" checked data-ui-key="projects-section"><span class="vis-switch"></span>
@@ -1907,7 +2058,7 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg></span>
-                <span class="vis-label">Brain</span>
+                <span class="vis-label">Memory</span>
                 <input type="checkbox" checked data-ui-key="tool-memory"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -1927,7 +2078,7 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span>
-                <span class="vis-label">Deep Research</span>
+                <span class="vis-label">Research</span>
                 <input type="checkbox" checked data-ui-key="tool-research"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -2047,7 +2198,7 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span>
-                <span class="vis-label">Deep Research</span>
+                <span class="vis-label">Research</span>
                 <input type="checkbox" checked data-ui-key="research-btn"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -2076,6 +2227,16 @@
           </div>
           <div class="admin-card">
             <div id="shortcuts-list"></div>
+          </div>
+          <div class="admin-card">
+            <h2 style="margin:0 0 2px;font-size:13px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Desktop-only features</h2>
+            <p style="font-size:10px;opacity:0.4;margin:0 0 10px;">These need a mouse and a wider screen, so they're unavailable on phones.</p>
+            <ul style="margin:0;padding-left:18px;font-size:11px;line-height:1.7;opacity:0.75;">
+              <li><b>Snap &amp; dock windows</b> — drag a tool window's title bar to a screen edge to dock it, or to the top for fullscreen.</li>
+              <li><b>Drag to reorder</b> — reorder sidebar sections and list items by dragging their handles.</li>
+              <li><b>Rearrange lists</b> — the <i>Rearrange</i> option in list menus (Chats, Models).</li>
+              <li><b>Side-by-side Compare</b> — runs on mobile but is designed for a wide layout.</li>
+            </ul>
           </div>
         </div>
 
@@ -2193,7 +2354,7 @@
         </div>
 
         <!-- ═══ SERVICES TAB ═══ -->
-        <div data-settings-panel="services">
+        <div data-settings-panel="services" class="hidden">
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>Add Models <span style="opacity:0.45;font-weight:normal;font-size:0.82em">(Endpoints)</span></h2>
             <div class="admin-toggle-sub" style="margin-bottom:10px">Connect local models first, or add a cloud API.</div>
@@ -2310,7 +2471,7 @@
         <!-- ═══ INTEGRATIONS TAB ═══ -->
         <div data-settings-panel="integrations" class="hidden">
           <div class="admin-card">
-            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Connections</h2>
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Integrations</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">All external service connections in one place.</div>
             <div id="unified-integrations-list"></div>
             <div id="unified-intg-form" style="display:none"></div>
@@ -2433,6 +2594,7 @@
 
 
 <!-- Load modules in this order -->
+<script type="module" src="/static/js/nav/railProjection.js"></script>  <!-- generates icon-rail tool launchers before app.js -->
 <script type="module" src="/static/js/storage.js"></script>
 <script type="module" src="/static/js/ui.js"></script>
 <script type="module" src="/static/js/markdown.js"></script>

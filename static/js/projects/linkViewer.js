@@ -3,6 +3,7 @@
  */
 import uiModule from '../ui.js';
 import knowledgeModule from '../knowledge.js';
+import contentViewer from '../ui/contentViewer.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
@@ -39,16 +40,13 @@ function _snippetLang(type) {
 function _highlightSnippet(snippet, type) {
   const trimmed = (snippet || '').trim();
   if (!trimmed) return '';
-  const lang = _snippetLang(type);
-  if (window.hljs && lang && lang !== 'plaintext') {
-    try {
-      const { value } = window.hljs.highlight(trimmed, { language: lang });
-      return `<pre class="project-link-viewer-snippet"><code class="hljs language-${esc(lang)}">${value}</code></pre>`;
-    } catch {
-      /* fall through */
-    }
-  }
-  return `<pre class="project-link-viewer-snippet">${esc(trimmed)}</pre>`;
+  // Shared content viewer (U8a): highlights code-like snippets, plain-renders
+  // the rest. Keeps this breadth-tab preview in step with the Library viewer.
+  return contentViewer.createCode({
+    content: trimmed,
+    language: _snippetLang(type),
+    className: 'project-link-viewer-snippet',
+  }).outerHTML;
 }
 
 async function _fetchNeighbors(nodeId) {
@@ -93,7 +91,7 @@ function _metaGrid(type, meta) {
 
 function _typeIntro(type) {
   const t = (type || '').toLowerCase();
-  if (t === 'paper') return 'Linked paper from your knowledge graph.';
+  if (t === 'paper') return 'Linked paper from Links.';
   if (t === 'research') return 'Deep research session linked to this project.';
   if (t === 'document') return 'Document node — open in Links for full editing.';
   if (t === 'task') return 'Task linked to this project.';

@@ -2427,7 +2427,7 @@ async function _cmdTourCompare(args, ctx) {
   // bounding-rect was putting the tooltip in the top-left corner.
   const phase1 = [
     { sel: '#compare-model-overlay .modal-body',
-      text: 'Pick what type of test you want to run. <b>Chat</b>, <b>Agent</b>, <b>Search</b> or <b>Deep Research</b>.',
+      text: 'Pick what type of test you want to run. <b>Chat</b>, <b>Agent</b>, <b>Search</b> or <b>Research</b>.',
       placement: 'center-above',
       before: () => {
         const modalBody = document.querySelector('#compare-model-overlay .modal-body');
@@ -3488,7 +3488,7 @@ async function _cmdTourNotes(args, ctx) {
     }
   }
   if (!pane) {
-    slashReply('Could not open Notes. Try clicking the Notes tool first.');
+    slashReply('Could not open Todos. Try clicking the Todos tool first.');
     return true;
   }
 
@@ -3615,7 +3615,7 @@ async function _cmdTourNotes(args, ctx) {
 
   const steps = [
     { sel: '#notes-pane',
-      text: '<b>Notes</b> is your basic todo list, and also where reminders are managed.',
+      text: '<b>Todos</b> is your basic todo list, and also where reminders are managed.',
       placement: 'center-above' },
     { sel: '#notes-pane .notes-pane-body',
       text: 'Your notes show up here. You can also <b>ask Nobody in chat</b> to take a note for you.' },
@@ -3688,7 +3688,7 @@ async function _cmdTourBrain(args, ctx) {
     }
   }
   if (!modal || modal.classList.contains('hidden')) {
-    slashReply('Could not open Brain. Try clicking the Brain tool first.');
+    slashReply('Could not open Memory. Try clicking the Memory tool first.');
     return true;
   }
 
@@ -3816,7 +3816,7 @@ async function _cmdTourBrain(args, ctx) {
   const _tab = (name) => document.querySelector(`.memory-tab[data-memory-tab="${name}"]`)?.click();
   const steps = [
     { sel: '#memory-modal .memory-modal-content',
-      text: '<b>Brain</b> is where your memories are. You can edit them, or add new ones under <b>Add</b>. Wow.',
+      text: '<b>Memory</b> is where your memories are. You can edit them, or add new ones under <b>Add</b>. Wow.',
       before: () => _tab('browse'),
       placement: 'center-above' },
     { sel: '#memory-tidy-btn',
@@ -3843,7 +3843,7 @@ async function _cmdTourBrain(args, ctx) {
   }
 
   _clear();
-  await typewriterReply('That’s Brain — memories, skills, tidy, and settings in one place.');
+  await typewriterReply('That’s Memory — memories, skills, tidy, and settings in one place.');
   return true;
 }
 
@@ -4133,7 +4133,7 @@ async function _cmdTourResearch(args, ctx) {
     }
   }
   if (!overlay) {
-    slashReply('Could not open Deep Research. Try clicking the Deep Research tool first.');
+    slashReply('Could not open Research. Try clicking the Research tool first.');
     return true;
   }
 
@@ -4257,7 +4257,7 @@ async function _cmdTourResearch(args, ctx) {
 
   const steps = [
     { sel: '#research-pane',
-      text: '<b>Welcome to Deep Research!</b> An LLM-in-the-loop agent that plans the search, queries the web, extracts findings, and writes you a full report.',
+      text: '<b>Welcome to Research!</b> An LLM-in-the-loop agent that plans the search, queries the web, extracts findings, and writes you a full report.',
       placement: 'center-above' },
     { sel: '#research-query',
       text: 'Type what you want to researched here. Be specific — <i>"compare X vs Y for Z"</i> beats <i>"tell me about X"</i>.' },
@@ -4283,10 +4283,10 @@ async function _cmdTourResearch(args, ctx) {
 
   _clear();
   {
-    const _body = await typewriterReply('That’s Deep Research — hit Start or queue up many. You can also view past research in your ');
+    const _body = await typewriterReply('That’s Research — hit Start or queue up many. Past reports live in ');
     const libLink = document.createElement('button');
     libLink.type = 'button';
-    libLink.textContent = 'Library';
+    libLink.textContent = 'Library → Research';
     libLink.style.cssText = 'background:none;border:none;padding:0;margin:0;color:var(--accent,var(--red));font:inherit;text-decoration:underline;cursor:pointer;';
     libLink.addEventListener('click', () => {
       if (window.documentModule && window.documentModule.openLibrary) {
@@ -5481,7 +5481,7 @@ const COMMANDS = {
   'tour-research': {
     alias: ['research-tour'],
     category: 'Tours',
-    help: 'Deep Research tour',
+    help: 'Research tour',
     handler: _cmdTourResearch,
     usage: '/tour-research'
   },
@@ -5516,7 +5516,7 @@ const COMMANDS = {
   'tour-brain': {
     alias: ['brain-tour', 'tour-memory', 'memory-tour'],
     category: 'Tours',
-    help: 'Brain tour: memories, tidy, skills, settings',
+    help: 'Memory tour: memories, tidy, skills, settings',
     handler: _cmdTourBrain,
     usage: '/tour-brain'
   },
@@ -5578,11 +5578,11 @@ const COMMANDS = {
     usage: '/email'
   },
   notes: {
-    alias: [],
+    alias: ['todos', 'todo'],
     category: 'Tools',
-    help: 'Open Notes',
+    help: 'Open Todos',
     handler: (args, ctx) => _cmdToolPanel('notes', args, ctx),
-    usage: '/notes'
+    usage: '/todos'
   },
   tasks: {
     alias: [],
@@ -5592,11 +5592,11 @@ const COMMANDS = {
     usage: '/tasks'
   },
   brain: {
-    alias: ['memories'],
+    alias: ['memories', 'memory'],
     category: 'Tools',
-    help: 'Open Brain',
+    help: 'Open Memory',
     handler: (args, ctx) => _cmdToolPanel('brain', args, ctx),
-    usage: '/brain'
+    usage: '/memory'
   },
   library: {
     alias: ['docs', 'documents'],
@@ -5615,7 +5615,7 @@ const COMMANDS = {
   research: {
     alias: [],
     category: 'Tools',
-    help: 'Open Deep Research',
+    help: 'Open Research',
     handler: (args, ctx) => _cmdToolPanel('research', args, ctx),
     usage: '/research'
   },

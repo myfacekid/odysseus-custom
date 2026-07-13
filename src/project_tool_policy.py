@@ -33,6 +33,7 @@ PROJECT_MCP_FILESYSTEM_PREFIX = "mcp__filesystem__"
 PROJECT_BREADTH_TOOL_EXAMPLES: FrozenSet[str] = frozenset({
     "search_knowledge",
     "search_zotero",
+    "compare_papers",
     "trigger_research",
     "manage_research",
     "create_document",

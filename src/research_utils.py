@@ -92,8 +92,8 @@ def get_research_synthesis_window() -> int:
     from src.settings import get_setting
 
     return _bounded_int(
-        get_setting("research_synthesis_window", 10),
-        default=10,
+        get_setting("research_synthesis_window", 20),
+        default=20,
         minimum=1,
         maximum=50,
     )

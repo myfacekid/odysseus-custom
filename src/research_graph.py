@@ -174,62 +174,108 @@ def upsert_research_node(owner: str, session_id: str, data: dict) -> None:
     save_graph(owner, nodes, edges)
 
 
-def sync_research_graph_links(owner: str, session_id: str, data: dict) -> Dict[str, Any]:
-    """Upsert research node and auto-link to seed papers + top cited sources."""
-    from src.knowledge_graph import (
-        _sync_edges_from_manual,
-        get_node,
-        load_manual_edges,
-        node_id,
-        save_manual_edges,
-    )
+def propose_research_graph_links(owner: str, session_id: str, data: dict) -> Dict[str, Any]:
+    """Upsert research node and enqueue typed edge proposals for user review (L2)."""
+    from src.knowledge_graph import get_node, node_id
+    from src.pending_graph_edges import enqueue_proposals
+    from src.research_typed_edges import build_research_graph_edges
 
     if not owner or not session_id:
-        return {"ok": False, "error": "owner and session_id required"}
+        return {"ok": False, "error": "owner and session_id required", "proposals": []}
 
     upsert_research_node(owner, session_id, data)
     rid = node_id("research", session_id)
-    targets = collect_research_link_targets(data)
+    raw_edges = build_research_graph_edges(session_id, data)
+    proposals: List[dict] = []
+    skipped_missing: List[str] = []
 
-    manual = load_manual_edges(owner)
-    manual = [
-        e for e in manual
-        if not (e.get("from") == rid and (e.get("source") or "") == RESEARCH_EDGE_SOURCE)
-    ]
-    linked: List[str] = []
-    skipped: List[str] = []
-    for to in targets:
-        if not get_node(owner, to):
-            skipped.append(to)
+    project_id = ((data or {}).get("project_id") or "").strip()
+    for edge in raw_edges:
+        fr = edge.get("from") or ""
+        to = edge.get("to") or ""
+        if not get_node(owner, fr) or not get_node(owner, to):
+            if to:
+                skipped_missing.append(to)
+            elif fr:
+                skipped_missing.append(fr)
             continue
-        key = (rid, to, "related")
-        if any((e.get("from"), e.get("to"), e.get("kind")) == key for e in manual):
-            linked.append(to)
-            continue
-        manual.append({
-            "from": rid,
-            "to": to,
-            "kind": "related",
-            "source": RESEARCH_EDGE_SOURCE,
+        proposals.append({
+            **edge,
+            "source": "research",
+            "source_session": session_id,
+            **({"project_id": project_id} if project_id else {}),
         })
-        linked.append(to)
 
-    save_manual_edges(owner, manual)
-    _sync_edges_from_manual(owner)
-    return {"ok": True, "research_id": rid, "linked": linked, "skipped_missing": skipped}
+    from src.learned_link_prefs import producer_enqueue_allowed
+
+    enqueue_out = (
+        enqueue_proposals(owner, proposals, source="research")
+        if proposals and producer_enqueue_allowed(owner)
+        else {
+            "ok": True,
+            "added": 0,
+            "skipped": len(proposals),
+            "rows": [],
+            "gated": proposals and not producer_enqueue_allowed(owner),
+        }
+    )
+    rows = enqueue_out.get("rows") or []
+    return {
+        "ok": True,
+        "research_id": rid,
+        "proposals": rows,
+        "proposal_count": len(rows),
+        "skipped_missing": skipped_missing,
+        "added": enqueue_out.get("added", 0),
+        "skipped_duplicates": enqueue_out.get("skipped", 0),
+    }
 
 
-def link_research_on_complete(owner: str, session_id: str, data: dict) -> None:
-    """Hook after research JSON is written — graph node + edges."""
+def sync_research_graph_links(owner: str, session_id: str, data: dict) -> Dict[str, Any]:
+    """Backward-compatible alias — research edges are proposals until accepted."""
+    return propose_research_graph_links(owner, session_id, data)
+
+
+def link_research_on_complete(owner: str, session_id: str, data: dict) -> Dict[str, Any]:
+    """Hook after research JSON is written — graph node, pending edges, paper summaries."""
     if not owner:
-        return
+        return {"ok": False, "error": "owner required", "proposals": []}
+
+    graph_out: Dict[str, Any] = {"ok": False, "proposals": [], "proposal_count": 0}
     try:
-        result = sync_research_graph_links(owner, session_id, data)
+        graph_out = propose_research_graph_links(owner, session_id, data)
         logger.info(
-            "Research graph links for %s: %d edge(s), %d target(s) missing from graph",
+            "Research graph proposals for %s: %d enqueued, %d target(s) missing from graph",
             session_id,
-            len(result.get("linked") or []),
-            len(result.get("skipped_missing") or []),
+            graph_out.get("proposal_count") or 0,
+            len(graph_out.get("skipped_missing") or []),
         )
     except Exception as e:
         logger.warning("Research graph linking failed for %s: %s", session_id, e)
+        graph_out = {"ok": False, "error": str(e), "proposals": [], "proposal_count": 0}
+
+    summary_out: Dict[str, Any] = {"ok": True, "summaries": [], "proposals": []}
+    try:
+        from src.paper_summaries import sync_paper_summaries_on_complete
+
+        summary_out = sync_paper_summaries_on_complete(owner, session_id, data)
+        if summary_out.get("summaries"):
+            logger.info(
+                "Paper summaries for %s: %d document(s)",
+                session_id,
+                len(summary_out.get("summaries") or []),
+            )
+    except Exception as e:
+        logger.warning("Paper summary pipeline failed for %s: %s", session_id, e)
+        summary_out = {"ok": False, "error": str(e), "summaries": [], "proposals": []}
+
+    all_proposals = list(graph_out.get("proposals") or []) + list(summary_out.get("proposals") or [])
+    return {
+        "ok": graph_out.get("ok", False) or summary_out.get("ok", False),
+        "research_id": graph_out.get("research_id"),
+        "proposals": all_proposals,
+        "proposal_count": len(all_proposals),
+        "graph": graph_out,
+        "summaries": summary_out.get("summaries") or [],
+        "skipped_missing": graph_out.get("skipped_missing") or [],
+    }

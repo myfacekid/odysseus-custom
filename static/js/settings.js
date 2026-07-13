@@ -7,6 +7,8 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { clearDockSide } from './modalSnap.js';
 import { sortModelIds } from './modelSort.js';
 import { isAltGrEvent } from './platform.js';
+import { fetchSetupStatus, notifySetupStatusChanged } from './setupStatus.js';
+import { openSettingsTab } from './ui/feedback.js';
 
 let initialized = false;
 let modalEl = null;
@@ -14,7 +16,49 @@ let modalEl = null;
 function el(id) { return document.getElementById(id); }
 function esc(s) { return uiModule.esc(s); }
 
-/* ── Tab switching ── */
+/* ── Getting started checklist (U1) ── */
+async function refreshGettingStarted() {
+  const host = el('setup-checklist');
+  if (!host) return;
+  host.innerHTML = '<div class="setup-checklist-loading">Checking setup…</div>';
+  try {
+    const status = await fetchSetupStatus();
+    const rows = [status.endpoint, status.webSearch, status.zotero];
+    host.innerHTML = rows.map((row) => {
+      const icon = row.ok ? '✓' : '!';
+      const mod = row.ok ? 'ok' : 'warn';
+      const fixBtn = row.ok
+        ? ''
+        : `<button type="button" class="admin-btn-sm setup-checklist-fix" data-settings-fix-tab="${esc(row.fixTab)}">Fix</button>`;
+      return `<div class="setup-checklist-row setup-checklist-row--${mod}">
+        <span class="setup-checklist-icon" aria-hidden="true">${icon}</span>
+        <div class="setup-checklist-copy">
+          <div class="setup-checklist-label">${esc(row.label)}</div>
+          <div class="setup-checklist-detail">${esc(row.detail)}</div>
+        </div>
+        ${fixBtn}
+      </div>`;
+    }).join('');
+    host.querySelectorAll('.setup-checklist-fix').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tab = btn.getAttribute('data-settings-fix-tab');
+        if (tab) openSettingsTab(tab);
+      });
+    });
+  } catch (e) {
+    host.innerHTML = `<div class="setup-checklist-error">${esc(e.message || 'Could not load setup status')}</div>`;
+  }
+}
+
+function initGettingStarted() {
+  if (!el('setup-checklist')) return;
+  void refreshGettingStarted();
+  window.addEventListener('setup-status-changed', () => {
+    const panel = modalEl?.querySelector('[data-settings-panel="getting-started"]');
+    if (panel && !panel.classList.contains('hidden')) void refreshGettingStarted();
+  });
+}
+
 const ADMIN_TABS = new Set(['services', 'integrations', 'tools', 'users', 'system']);
 
 function initTabs() {
@@ -34,6 +78,7 @@ function initTabs() {
       document.body.classList.toggle('settings-appearance-open', tab === 'appearance');
       syncAppearanceOpacity(tab === 'appearance');
       if (tab === 'ai') refreshAiModelEndpoints();
+      if (tab === 'getting-started') void refreshGettingStarted();
     });
   });
 }
@@ -241,6 +286,7 @@ export async function refreshAiModelEndpoints() {
       _aiEndpointRefreshers.forEach(function(fn) {
         try { fn(endpoints); } catch (e) { console.warn('[settings] endpoint refresh handler failed', e); }
       });
+      notifySetupStatusChanged();
     } catch (e) {
       console.warn('[settings] failed to refresh model endpoints', e);
     } finally {
@@ -1193,6 +1239,7 @@ async function initSearchSettings() {
       });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
       setTimeout(refreshStatus, 2000);
+      notifySetupStatusChanged();
       if (searchModule && searchModule.refresh) searchModule.refresh();
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
   }
@@ -1601,6 +1648,7 @@ async function initZoteroSettings() {
       renderCatalogStatus(data.catalog);
       msg.textContent = (data.message || 'Saved');
       msg.style.color = 'var(--fg)';
+      notifySetupStatusChanged();
     } catch (e) {
       msg.textContent = '✗ ' + (e.message || e);
       msg.style.color = 'var(--red)';
@@ -1635,6 +1683,7 @@ async function initZoteroSettings() {
       msg.textContent = '✓ ' + (data.message || 'Connected') + extra;
       msg.style.color = 'var(--fg)';
       window.dispatchEvent(new CustomEvent('knowledge-graph-refresh'));
+      notifySetupStatusChanged();
     } catch (e) {
       msg.textContent = '✗ ' + (e.message || e);
       msg.style.color = 'var(--red)';
@@ -1646,6 +1695,7 @@ async function initZoteroSettings() {
       var data = await runSync('Syncing catalog…');
       msg.textContent = '✓ Catalog synced — ' + (data.items || 0) + ' papers, ' + (data.collections || 0) + ' folders';
       msg.style.color = 'var(--fg)';
+      notifySetupStatusChanged();
     } catch (e) {
       msg.textContent = '✗ ' + (e.message || e);
       msg.style.color = 'var(--red)';
@@ -1662,6 +1712,7 @@ async function initZoteroSettings() {
       renderCatalogStatus(null);
       msg.textContent = 'Cleared';
       msg.style.color = 'var(--fg)';
+      notifySetupStatusChanged();
     } catch (e) {
       msg.textContent = '✗ Clear failed';
       msg.style.color = 'var(--red)';
@@ -1861,9 +1912,55 @@ async function initAgentSettings() {
 /* ═══════════════════════════════════════════
    APPEARANCE TAB
    ═══════════════════════════════════════════ */
+// U4: Appearance groups collapse into scannable headers. Which groups are
+// expanded is remembered per user (by group title); default is all collapsed.
+var _APPEARANCE_OPEN_KEY = 'nobody-appearance-open-groups';
+function _loadAppearanceOpen() {
+  try { return JSON.parse(localStorage.getItem(_APPEARANCE_OPEN_KEY) || '[]'); }
+  catch (_) { return []; }
+}
+function _saveAppearanceOpen(arr) {
+  try { localStorage.setItem(_APPEARANCE_OPEN_KEY, JSON.stringify(arr)); } catch (_) {}
+}
+function initAppearanceCollapse() {
+  var panel = modalEl && modalEl.querySelector('.settings-appearance-panel');
+  if (!panel) return;
+  panel.querySelectorAll('.admin-card').forEach(function(card) {
+    var body = card.querySelector('.vis-toggles');
+    var h2 = card.querySelector('h2');
+    if (!body || !h2 || card.dataset.collapsibleReady) return;
+    card.dataset.collapsibleReady = '1';
+    card.classList.add('settings-collapsible');
+    var title = (h2.textContent || '').trim();
+    var chev = document.createElement('span');
+    chev.className = 'settings-collapse-chevron';
+    chev.setAttribute('aria-hidden', 'true');
+    chev.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    h2.appendChild(chev);
+    h2.setAttribute('role', 'button');
+    h2.setAttribute('tabindex', '0');
+    var isOpen = _loadAppearanceOpen().indexOf(title) !== -1;
+    card.classList.toggle('settings-collapsed', !isOpen);
+    h2.setAttribute('aria-expanded', String(isOpen));
+    function toggle() {
+      var willOpen = card.classList.contains('settings-collapsed');
+      card.classList.toggle('settings-collapsed', !willOpen);
+      h2.setAttribute('aria-expanded', String(willOpen));
+      var cur = _loadAppearanceOpen().filter(function(t) { return t !== title; });
+      if (willOpen) cur.push(title);
+      _saveAppearanceOpen(cur);
+    }
+    h2.addEventListener('click', toggle);
+    h2.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+  });
+}
+
 function initAppearance() {
   syncAppearanceCheckboxes();
   syncPrivacyCheckboxes();
+  initAppearanceCollapse();
 
   modalEl.querySelectorAll('[data-ui-key]').forEach(function(chk) {
     chk.addEventListener('change', async function() {
@@ -2008,7 +2105,7 @@ const SHORTCUT_LABELS = {
   open_calendar:  'Open Calendar',
   open_compare:   'Open Compare',
   open_cookbook:  'Open Cookbook',
-  open_research:  'Open Deep Research',
+  open_research:  'Open Research',
   open_gallery:   'Open Gallery',
   open_library:   'Open Library',
   open_memory:    'Open Memory',
@@ -2432,6 +2529,7 @@ function initAll() {
   initClose();
   initOpacityToggle();
   initialized = true;
+  initGettingStarted();
   initDefaultChat();
   initTeacherModel();
   initUtilityModel();
@@ -3387,10 +3485,11 @@ export function open(tab) {
     modalEl.querySelectorAll('[data-settings-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.settingsPanel !== tab));
   }
   // Auto-init admin data if showing an admin tab
-  const activeTab = tab || (modalEl.querySelector('[data-settings-tab].active') || {}).dataset?.settingsTab || 'services';
+  const activeTab = tab || (modalEl.querySelector('[data-settings-tab].active') || {}).dataset?.settingsTab || 'getting-started';
   document.body.classList.toggle('settings-appearance-open', activeTab === 'appearance');
   syncAppearanceOpacity(activeTab === 'appearance');
   if (activeTab === 'ai') refreshAiModelEndpoints();
+  if (activeTab === 'getting-started') void refreshGettingStarted();
   if (ADMIN_TABS.has(activeTab) && window.adminModule && !window.adminModule._initialized) {
     window.adminModule._initData();
   }

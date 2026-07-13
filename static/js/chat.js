@@ -35,6 +35,25 @@ function _dispatchLinkSuggestion(data) {
     if (handler) handler(data);
   }).catch(() => {});
 }
+
+function _dispatchGraphMergeProposals(data) {
+  if (!data?.rows?.length && !data?.proposals?.length) return;
+  import('./knowledge.js').then((kg) => {
+    const handler = kg.handleConnectionProposals || kg.default?.handleConnectionProposals;
+    if (handler) {
+      handler({
+        ...data,
+        source: data.source || (data.rows?.length ? 'merge_subgraph' : 'compare_papers'),
+      });
+      return;
+    }
+    const open = kg.openGraphMergeReview || kg.default?.openGraphMergeReview;
+    if (open) {
+      if (data.rows?.length) open([], { rows: data.rows });
+      else open(data.proposals || []);
+    }
+  }).catch(() => {});
+}
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
 import createResearchSynapse from './researchSynapse.js';
   const RESEARCH_TIMEOUT_MS = 360000;
@@ -2146,12 +2165,21 @@ import createResearchSynapse from './researchSynapse.js';
                   window._manageMemoryTimer = setTimeout(
                     () => window.dispatchEvent(new CustomEvent('memory-refresh')), 600);
                 }
+                // --- Live-refresh Skills after manage_skills changes ---
+                if (json.tool === 'manage_skills') {
+                  if (window._manageSkillsTimer) clearTimeout(window._manageSkillsTimer);
+                  window._manageSkillsTimer = setTimeout(
+                    () => window.dispatchEvent(new CustomEvent('skills-refresh')), 600);
+                }
                 // --- Apply UI control actions embedded in tool_output ---
                 if (json.ui_event) {
                   chatStream.handleUIControl(json);
                 }
                 if (json.link_suggestion) {
                   _dispatchLinkSuggestion(json.link_suggestion);
+                }
+                if (json.graph_merge_proposals) {
+                  _dispatchGraphMergeProposals(json.graph_merge_proposals);
                 }
 
                 // Schedule a thinking spinner between tool rounds (short delay so
@@ -2202,6 +2230,10 @@ import createResearchSynapse from './researchSynapse.js';
               } else if (json.type === 'link_suggestion') {
                 if (_isBg) continue;
                 _dispatchLinkSuggestion(json);
+
+              } else if (json.type === 'graph_merge_proposals') {
+                if (_isBg) continue;
+                _dispatchGraphMergeProposals(json);
 
               } else if (json.type === 'ui_control') {
                 if (_isBg) continue;
@@ -2290,6 +2322,7 @@ import createResearchSynapse from './researchSynapse.js';
                 note.innerHTML = `<strong>Skill learned:</strong> <code>${esc(json.name || '')}</code>${json.category ? ` <span style="opacity:0.6">[${esc(json.category)}]</span>` : ''}`;
                 chatBox.appendChild(note);
                 uiModule.scrollHistory();
+                window.dispatchEvent(new CustomEvent('skills-refresh', { detail: { name: json.name } }));
 
               } else if (json.type === 'escalation_failed' || json.type === 'skill_save_failed') {
                 if (_isBg) continue;

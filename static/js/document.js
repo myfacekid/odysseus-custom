@@ -2564,17 +2564,14 @@ import * as Modals from './modalManager.js';
           <button id="doc-fontsize-btn" class="doc-action-icon-btn" title="Font size" style="position:relative;width:28px;height:26px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;"><path d="M4 7V4h16v3"/><path d="M12 4v16"/><path d="M8 20h8"/></svg><span class="doc-fontsize-levels"><i data-sz="s">S</i><i data-sz="m">M</i><i data-sz="l">L</i></span></button>
           <button id="doc-diff-toggle-btn" class="doc-action-icon-btn" title="Compare changes" style="opacity:0.7;display:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M5 12H2l5-5 5 5H9"/><path d="M19 12h3l-5 5-5-5h3"/></svg></button>
           <span class="md-toolbar-sep"></span>
-          <button type="button" data-md="bold" title="Bold (Ctrl+B)"><b>B</b></button>
-          <button type="button" data-md="italic" title="Italic (Ctrl+I)"><i>I</i></button>
-          <button type="button" data-md="strike" title="Strikethrough"><s>S</s></button>
+          <!-- U3: all markdown formatting (headings, bold/italic/strike, lists,
+               code, link, rule) is grouped behind one "Format" popover so the
+               writing surface stays calm. Bold/italic/link keep their
+               Ctrl+B/I/K shortcuts; the dropdown is built in _showMdDropdown()
+               under the format group. -->
+          <button type="button" class="md-dd-toggle" data-dd="format" title="Format"><b style="font-style:italic;">A</b><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
           <span class="md-toolbar-sep"></span>
-          <button type="button" class="md-dd-toggle" data-dd="heading" title="Heading"><b>H</b><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
-          <button type="button" class="md-dd-toggle" data-dd="list" title="List"><span style="font-variant-numeric:tabular-nums;">1.</span><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
-          <span class="md-toolbar-sep"></span>
-          <button type="button" data-md="link" title="Link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
           <button type="button" id="md-toolbar-attach-btn" class="md-toolbar-attach-btn" title="Attach files"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-          <button type="button" class="md-dd-toggle md-toolbar-email-hide" data-dd="code" title="Code">\`<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
-          <button type="button" data-md="hr" title="Horizontal rule">—</button>
           <span class="md-toolbar-sep"></span>
           <span id="md-toolbar-emoji-slot"></span>
           <span class="md-toolbar-sep md-toolbar-pdf-only" style="display:none"></span>
@@ -2809,7 +2806,7 @@ import * as Modals from './modalManager.js';
     // Wire up events
     document.getElementById('doc-close-btn')?.addEventListener('click', () => closePanel('down'));
     document.getElementById('doc-footer-close-btn')?.addEventListener('click', () => { if (activeDocId) closeTab(activeDocId); });
-    document.getElementById('doc-import-btn')?.addEventListener('click', () => openLibrary());
+    document.getElementById('doc-import-btn')?.addEventListener('click', () => openLibrary({ tab: 'documents' }));
     document.getElementById('doc-footer-copy-btn')?.addEventListener('click', (e) => {
       if (e.currentTarget.dataset.mode === 'reply') { if (activeDocId) _sendSignedReply(activeDocId); }
       else copyDocument();
@@ -3814,6 +3811,15 @@ import * as Modals from './modalManager.js';
       heading: [['h1', 'Heading 1', 'H1'], ['h2', 'Heading 2', 'H2'], ['h3', 'Heading 3', 'H3']],
       code: [['code', 'Inline code', '`'], ['codeblock', 'Code block', '```']],
       list: [['ul', 'Bullet list', '•'], ['ol', 'Numbered list', '1.']],
+      // U3: single "Format" popover — the full markdown formatting set that
+      // used to be a row of loose buttons + separate heading/list/code menus.
+      format: [
+        ['bold', 'Bold', '**'], ['italic', 'Italic', '*'], ['strike', 'Strikethrough', '~~'],
+        ['h1', 'Heading 1', 'H1'], ['h2', 'Heading 2', 'H2'], ['h3', 'Heading 3', 'H3'],
+        ['ul', 'Bullet list', '•'], ['ol', 'Numbered list', '1.'],
+        ['code', 'Inline code', '`'], ['codeblock', 'Code block', '```'],
+        ['link', 'Link', '[ ]'], ['hr', 'Horizontal rule', '—'],
+      ],
     };
     const items = groups[kind];
     if (!items) return;
@@ -6623,7 +6629,7 @@ import * as Modals from './modalManager.js';
       const isPdf = ext === '.pdf';
       // Spreadsheets need the library's per-sheet split — defer to it.
       if (isSpreadsheet) {
-        openLibrary();
+        openLibrary({ tab: 'documents' });
         requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('doclib-import-file-btn')?.click()));
         return;
       }
@@ -6726,7 +6732,7 @@ import * as Modals from './modalManager.js';
     // Import lives at the top of the same dropdown — it's a sibling action
     // ("bring something IN" vs "send something OUT"), and the footer was
     // getting too cramped for dedicated icons.
-    options.push({ label: 'Import from library', fn: () => openLibrary() });
+    options.push({ label: 'Import from library', fn: () => openLibrary({ tab: 'documents' }) });
     options.push({ label: 'Import from device', fn: () => _importFromDevice(), _divider: true });
     if (isForm) options.push({ label: 'Filled PDF (.pdf)', fn: _downloadFilledPdf });
     options.push(

@@ -17,6 +17,14 @@ _STOPWORDS = frozenset({
     "research", "paper", "papers", "analysis", "review", "results", "methods",
     "data", "based", "report", "findings", "evidence", "sources", "source",
     "compare", "between", "related", "work", "recent", "current", "latest",
+    # Conversational / instructional verbs and framing words. These describe
+    # what the user wants DONE, not the topic, so they must never count as
+    # distinctive relevance tokens (otherwise "please find the most cited
+    # papers that use X" gates candidates on "please/find/cited").
+    "please", "find", "finding", "identify", "list", "show", "give", "tell",
+    "want", "need", "needed", "looking", "kindly", "provide", "gather",
+    "cite", "cited", "citing", "citation", "citations", "reference",
+    "referenced", "referencing", "help", "please", "get", "fetch",
 })
 
 # Over-broad terms shared across unrelated bioinformatics papers.
@@ -29,6 +37,42 @@ _GENERIC_SCIENCE_TERMS = frozenset({
     "highly", "high", "level", "atomic", "evolutionary", "folding", "fold",
     "rna", "dna", "alignment", "assembly", "phylogenetic", "taxonomic",
 })
+
+# Terms that appear in anchor extraction but are too broad for overlap gating.
+_WEAK_ANCHOR_TERMS = frozenset({
+    "function", "functions", "protein", "proteins", "trained", "search",
+    "structure", "structural", "methods", "method", "compare", "comparison",
+    "handle", "lab", "laboratory", "papers", "paper", "answer", "chosen",
+    "generative", "evolution", "simulating", "million", "years", "fast",
+    "accurate", "clearly", "understand", "newly", "designed", "alphabet",
+    "architecture", "models", "model", "specifically", "questions", "other",
+    "same", "there", "please", "transfers", "point", "cloud", "space",
+    "language", "uses", "use", "more", "while", "does", "which", "how",
+    "handle", "questions", "work", "life", "uncharacterized", "determining",
+    "fundamental", "structured", "vocabularies", "classification", "multi",
+    "label", "fusion", "pretrained", "compare", "contrasts", "contrast",
+    "overview", "background", "related", "similar", "recent", "novel",
+    "representation", "representations", "vocabulary", "vocabularies",
+    "annotation", "annotations", "classification", "ontology",
+})
+
+RECENCY_REQUEST_MARKERS = (
+    "latest",
+    "recent",
+    "last five years",
+    "last 5 years",
+    "past five years",
+    "past 5 years",
+    "past decade",
+    "this year",
+    "current literature",
+    "state of the art",
+    "state-of-the-art",
+    "cutting edge",
+    "new developments",
+    "since 201",
+    "since 202",
+)
 
 IRRELEVANCE_MARKERS = [
     "not relevant",
@@ -63,9 +107,20 @@ IRRELEVANCE_MARKERS = [
 ]
 
 
+def user_requests_recency(text: str) -> bool:
+    """True when the user explicitly asks for recent or time-bounded literature."""
+    q = (text or "").lower()
+    return any(marker in q for marker in RECENCY_REQUEST_MARKERS)
+
+
 def tokenize_query(text: str) -> List[str]:
     tokens = [w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) >= 3]
     return [t for t in tokens if t not in _STOPWORDS]
+
+
+def specific_query_tokens(question: str) -> List[str]:
+    """Distinctive tokens for gating — drops field-wide vocabulary shared by unrelated papers."""
+    return [t for t in tokenize_query(question) if t not in _GENERIC_SCIENCE_TERMS]
 
 
 def score_text_relevance(text: str, question: str) -> float:
@@ -89,15 +144,41 @@ def score_text_relevance(text: str, question: str) -> float:
     return min(base, 1.0)
 
 
-def score_finding_relevance(finding: dict, question: str) -> float:
+def score_specific_text_relevance(text: str, question: str) -> float:
+    """Overlap on distinctive terms only — rejects generic bioinformatics matches."""
+    if not text or not question:
+        return 0.0
+    tokens = specific_query_tokens(question)
+    if not tokens:
+        return score_text_relevance(text, question)
+    hay = (text or "").lower()
+    hits = sum(1 for t in tokens if t in hay)
+    if hits == 0:
+        return 0.0
+    base = hits / len(tokens)
+    min_hits = 2 if len(tokens) >= 4 else 1
+    if hits < min_hits:
+        return base * 0.35
+    return min(base, 1.0)
+
+
+def finding_text(finding: dict, *, evidence_chars: int = 800) -> str:
     parts = [
         finding.get("title") or "",
         finding.get("summary") or "",
         (finding.get("rational") or "")[:500],
-        (finding.get("evidence") or "")[:800],
+        (finding.get("evidence") or "")[:evidence_chars],
         finding.get("abstract") or "",
     ]
-    return score_text_relevance(" ".join(p for p in parts if p), question)
+    return " ".join(p for p in parts if p)
+
+
+def score_specific_finding_relevance(finding: dict, question: str) -> float:
+    return score_specific_text_relevance(finding_text(finding), question)
+
+
+def score_finding_relevance(finding: dict, question: str) -> float:
+    return score_text_relevance(finding_text(finding), question)
 
 
 def score_node_relevance(node: dict, question: str) -> float:
@@ -131,11 +212,28 @@ def is_extraction_irrelevant(parsed: dict) -> bool:
     return any(marker in combined for marker in IRRELEVANCE_MARKERS)
 
 
+def matches_avoid_topics(
+    finding: dict,
+    avoid_topics: Optional[Iterable[str]],
+) -> bool:
+    """True when the finding text hits a planner-derived avoid-topic phrase."""
+    if not avoid_topics:
+        return False
+    hay = finding_text(finding).lower()
+    for topic in avoid_topics:
+        t = (topic or "").strip().lower()
+        if len(t) >= 4 and t in hay:
+            return True
+    return False
+
+
 def is_finding_relevant(
     finding: dict,
     question: str,
     *,
     min_score: float = 0.2,
+    avoid_topics: Optional[Iterable[str]] = None,
+    plan_anchor_terms: Optional[Iterable[str]] = None,
 ) -> bool:
     if finding.get("is_seed"):
         return True
@@ -143,7 +241,20 @@ def is_finding_relevant(
         return False
     if not (question or "").strip():
         return True
-    return score_finding_relevance(finding, question) >= min_score
+    if matches_avoid_topics(finding, avoid_topics):
+        return False
+    generic = score_finding_relevance(finding, question)
+    specific = score_specific_finding_relevance(finding, question)
+    if specific >= min_score:
+        return True
+    anchors = list(plan_anchor_terms or []) or strong_anchor_terms(question)
+    if anchors and _finding_has_anchor_overlap(
+        finding, anchors, plan_anchors=plan_anchor_terms,
+    ):
+        return specific >= 0.08
+    if generic >= min_score and specific < 0.08:
+        return False
+    return False
 
 
 def filter_relevant_findings(
@@ -151,10 +262,18 @@ def filter_relevant_findings(
     question: str,
     *,
     min_score: float = 0.2,
+    avoid_topics: Optional[Iterable[str]] = None,
+    plan_anchor_terms: Optional[Iterable[str]] = None,
 ) -> List[dict]:
     out: List[dict] = []
     for finding in findings or []:
-        if is_finding_relevant(finding, question, min_score=min_score):
+        if is_finding_relevant(
+            finding,
+            question,
+            min_score=min_score,
+            avoid_topics=avoid_topics,
+            plan_anchor_terms=plan_anchor_terms,
+        ):
             out.append(finding)
     return out
 
@@ -188,10 +307,14 @@ def parse_relevance_yes_no(response: str) -> Optional[bool]:
 
 def heuristic_relevance_decision(title: str, preview: str, question: str) -> Optional[bool]:
     """Fast accept/reject before an LLM gate. None = needs LLM."""
-    score = score_text_relevance(f"{title} {preview}", question)
-    if score >= 0.42:
+    text = f"{title} {preview}"
+    generic = score_text_relevance(text, question)
+    specific = score_specific_text_relevance(text, question)
+    if specific >= 0.18:
         return True
-    if score < 0.1:
+    if generic >= 0.42 and specific < 0.08:
+        return False
+    if generic < 0.1:
         return False
     return None
 
@@ -238,7 +361,14 @@ def extract_anchor_terms(*texts: str, exclude_terms: Optional[Iterable[str]] = N
 
     def _add(raw: str) -> None:
         term = (raw or "").strip().lower()
-        if len(term) < 3 or term in _STOPWORDS or term in seen or term in blocked:
+        if (
+            len(term) < 3
+            or term in _STOPWORDS
+            or term in _GENERIC_SCIENCE_TERMS
+            or term in _WEAK_ANCHOR_TERMS
+            or term in seen
+            or term in blocked
+        ):
             return
         seen.add(term)
         anchors.append(term)
@@ -358,7 +488,38 @@ def score_seed_overlap(finding: dict, seed_findings: Iterable[dict]) -> float:
     return score_finding_relevance(finding, fingerprint)
 
 
-def _finding_has_anchor_overlap(finding: dict, anchor_terms: List[str]) -> bool:
+def strong_anchor_terms(*texts: str, exclude_terms: Optional[Iterable[str]] = None) -> List[str]:
+    """Distinctive anchors suitable for topical overlap checks."""
+    return [
+        a for a in extract_anchor_terms(*texts, exclude_terms=exclude_terms)
+        if a not in _WEAK_ANCHOR_TERMS
+    ]
+
+
+def _is_distinctive_anchor(
+    term: str,
+    *,
+    plan_anchors: Optional[Iterable[str]] = None,
+) -> bool:
+    """Single-token anchor match is only meaningful for method names, not broad nouns."""
+    t = (term or "").strip().lower()
+    if not t or t in _WEAK_ANCHOR_TERMS or t in _GENERIC_SCIENCE_TERMS:
+        return False
+    if plan_anchors and t in {a.lower() for a in plan_anchors if a}:
+        return True
+    if any(ch.isdigit() for ch in t):
+        return True
+    if len(t) >= 7 and t not in _WEAK_ANCHOR_TERMS:
+        return True
+    return False
+
+
+def _finding_has_anchor_overlap(
+    finding: dict,
+    anchor_terms: List[str],
+    *,
+    plan_anchors: Optional[Iterable[str]] = None,
+) -> bool:
     if not anchor_terms:
         return False
     hay = " ".join([
@@ -369,7 +530,17 @@ def _finding_has_anchor_overlap(finding: dict, anchor_terms: List[str]) -> bool:
     ]).lower()
     specific = [t for t in anchor_terms if t not in _GENERIC_SCIENCE_TERMS]
     pool = specific or anchor_terms
-    return any(term in hay for term in pool)
+    hits = [term for term in pool if term in hay]
+    if not hits:
+        return False
+    strong_hits = [h for h in hits if h not in _WEAK_ANCHOR_TERMS]
+    if len(strong_hits) >= 2:
+        return True
+    if len(strong_hits) == 1 and _is_distinctive_anchor(
+        strong_hits[0], plan_anchors=plan_anchors,
+    ):
+        return True
+    return False
 
 
 def is_similar_paper_relevant(
@@ -377,28 +548,37 @@ def is_similar_paper_relevant(
     question: str,
     seed_findings: Iterable[dict],
     *,
-    min_seed_score: float = 0.22,
-    min_question_score: float = 0.2,
+    min_specific_score: float = 0.12,
+    research_mode: str = "",
+    avoid_topics: Optional[Iterable[str]] = None,
+    plan_anchor_terms: Optional[Iterable[str]] = None,
 ) -> bool:
-    """Similar-paper APIs often return broad co-citation noise — require seed overlap."""
+    """Similar-paper APIs often return broad co-citation noise — require topical focus."""
     if finding.get("is_seed"):
         return True
     seeds = list(seed_findings or [])
-    if not seeds:
-        return is_finding_relevant(finding, question, min_score=min_question_score)
+    combined = build_relevance_query(question, seed_findings=seeds) if seeds else (question or "")
+    if matches_avoid_topics(finding, avoid_topics):
+        return False
+    if research_mode == "compare":
+        min_specific_score = max(min_specific_score, 0.14)
 
-    seed_score = score_seed_overlap(finding, seeds)
-    if seed_score >= min_seed_score:
+    specific = score_specific_finding_relevance(finding, combined)
+    if specific >= min_specific_score:
         return True
 
-    anchors = extract_anchor_terms(
+    anchors = list(plan_anchor_terms or []) or strong_anchor_terms(
         build_seed_fingerprint(seeds),
         question or "",
     )
-    if _finding_has_anchor_overlap(finding, anchors):
-        q_score = score_finding_relevance(finding, build_relevance_query(question, seed_findings=seeds))
-        return q_score >= min_question_score
+    if anchors and _finding_has_anchor_overlap(
+        finding, anchors, plan_anchors=plan_anchor_terms,
+    ):
+        return specific >= 0.08
 
+    generic = score_finding_relevance(finding, combined)
+    if generic >= 0.25 and specific < 0.08:
+        return False
     return False
 
 
@@ -418,6 +598,9 @@ Preview:
 
 Is this source materially relevant to the research question and the seed papers' topics?
 Reject author profile pages, citation dashboards, and papers unrelated to the seed topics.
+Reject papers that only share broad field vocabulary (protein, machine learning, bioinformatics)
+but address a different sub-problem than the question or seeds (e.g. GO function prediction when
+the question compares structure representations).
 Reply with ONLY "YES" or "NO"."""
 
 

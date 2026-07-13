@@ -68,7 +68,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_zotero",
-            "description": "Search the user's personal Zotero library (saved papers, citations, PDF excerpts). Uses a local metadata catalog when synced (Settings → Zotero → Sync catalog). For browsing linked papers in folders, prefer search_knowledge with types=[\"paper\"]. NOT for general web lookups (web_search) or deep multi-source research jobs (trigger_research). If the folder name is ambiguous, call action=list_collections first.",
+            "description": "Search the user's personal Zotero library (saved papers, citations, PDF excerpts). Uses a local metadata catalog when synced (Settings → Zotero → Sync catalog). For browsing linked papers in folders, prefer search_knowledge with types=[\"paper\"]. Broad search returns metadata/abstracts only — pass zotero_key (or include_pdf=true) to extract PDF text for one paper. NOT for general web lookups (web_search) or deep multi-source research jobs (trigger_research). If the folder name is ambiguous, call action=list_collections first.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -88,7 +88,15 @@ FUNCTION_TOOL_SCHEMAS = [
                     },
                     "limit": {"type": "integer", "description": "Max items to return (1-25, default 10)"},
                     "start": {"type": "integer", "description": "Pagination offset (default 0)"},
-                    "include_pdf": {"type": "boolean", "description": "Extract text from attached PDFs (default true)"},
+                    "include_pdf": {
+                        "type": "boolean",
+                        "description": "Extract PDF text (default false for broad search; true when zotero_key targets one paper unless section is set)",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "With zotero_key: extract one PDF section (methods, introduction, results, discussion, limitations)",
+                    },
+                    "max_chars": {"type": "integer", "description": "Max chars returned (default 8000 for section extract)"},
                 },
             },
         },
@@ -165,24 +173,47 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_knowledge",
-            "description": "Search the unified knowledge graph: todos, documents, memories, skills, Zotero papers — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use types=[\"paper\"] for saved Zotero items. Use read action for full bodies. Use suggest_link (not link) when proposing connections the user should confirm.",
+            "description": "Search the unified knowledge graph: todos, documents, memories, skills, Zotero papers — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use types=[\"paper\"] for saved Zotero items. For papers: read returns abstract + cached Deep Research summary (when available) by default — set include_pdf=true only when full PDF text is needed. Use suggest_link (not link) when proposing connections the user should confirm. merge_subgraph preview queues batch proposals for UI review — apply only when the user explicitly asks to save links.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["search", "read", "neighbors", "suggest_link", "link", "unlink", "rebuild"],
-                        "description": "search=compact hits; read=full body; neighbors=linked nodes; suggest_link=propose link for user approval; link/unlink=explicit edges (link only when user asked); rebuild=re-index graph",
+                        "enum": [
+                            "search", "read", "neighbors", "suggest_link", "link", "unlink",
+                            "rebuild", "merge_subgraph", "list_pending", "manage_graph_proposals",
+                        ],
+                        "description": "search=compact hits; read=full body; neighbors=confirmed linked nodes (pending excluded unless include_proposed); suggest_link=propose link for user approval; link/unlink=explicit edges; merge_subgraph=preview/apply batch proposals (≤20); list_pending=review queue",
                     },
                     "query": {"type": "string", "description": "Search terms"},
-                    "id": {"type": "string", "description": "Node id for read/neighbors (e.g. task:uuid, paper:zotero_key, document:id)"},
+                    "id": {"type": "string", "description": "Node id for read/neighbors/list_pending filter (e.g. task:uuid, paper:zotero_key, document:id)"},
                     "from": {"type": "string", "description": "Source node id for suggest_link/link/unlink"},
                     "to": {"type": "string", "description": "Target node id for suggest_link/link/unlink"},
-                    "reason": {"type": "string", "description": "Brief reason shown to the user when suggesting a link"},
+                    "reason": {"type": "string", "description": "Required for suggest_link — one-line explanation shown to the user (max ~280 chars). Optional but recommended on explicit link."},
                     "kind": {
                         "type": "string",
-                        "enum": ["link", "related", "supports"],
-                        "description": "Edge kind for link/unlink (default link)",
+                        "enum": ["derives_from", "refutes", "supports", "relates", "depends_on", "link", "related"],
+                        "description": "Semantic edge kind for link/unlink/suggest (default relates). Legacy link/related map to relates.",
+                    },
+                    "kinds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "For neighbors: filter edges by kind (e.g. refutes, supports)",
+                    },
+                    "phase": {
+                        "type": "string",
+                        "enum": ["preview", "apply"],
+                        "description": "For merge_subgraph: preview validates proposals; apply writes accepted rows",
+                    },
+                    "proposals": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "For merge_subgraph preview: [{from, to, kind, reason}] up to 20 edges",
+                    },
+                    "accepted": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "For merge_subgraph apply: subset of preview rows to write (partial accept)",
                     },
                     "types": {
                         "type": "array",
@@ -192,11 +223,52 @@ FUNCTION_TOOL_SCHEMAS = [
                     "limit": {"type": "integer", "description": "Max hits (default 12)"},
                     "include_pdf": {
                         "type": "boolean",
-                        "description": "For read on paper:… nodes, extract Zotero PDF text (default true)",
+                        "description": "For read on paper:… nodes, extract Zotero PDF text (default false — abstract+metadata only)",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "For read on paper:… nodes, extract one PDF section (Tier 2): methods, introduction, results, discussion, limitations",
                     },
                     "expand_hops": {"type": "integer", "description": "Include 1-hop linked neighbors (default 1)"},
-                    "max_chars": {"type": "integer", "description": "Max chars for read action"},
+                    "include_proposed": {
+                        "type": "boolean",
+                        "description": "For neighbors: include [PROPOSED] rows from the review queue (default false)",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "For list_pending: filter to proposals relevant to a project workspace",
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Max chars for read action (default 3000 for papers, 8000 for other nodes)",
+                    },
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_papers",
+            "description": "Side-by-side comparison of 2–3 saved Zotero papers at section-level token cost. Reuses cached Deep Research summaries (R2) and PDF section extracts (R1). For 4+ papers, automatically starts an async Deep Research compare job. NOT for general web research (trigger_research) or reading one paper (search_knowledge read).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paper_keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Zotero item keys or paper:KEY refs (minimum 2). Sync compare supports up to 3; more routes to Deep Research compare mode.",
+                    },
+                    "focus": {
+                        "type": "string",
+                        "description": "Comparison focus / section: methods (default), results, introduction, discussion, limitations, or overview for full summary/abstract.",
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "Optional framing question shown in the comparison header.",
+                    },
+                },
+                "required": ["paper_keys"],
             },
         },
     },
@@ -1029,6 +1101,47 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "generate_image",
+            "description": "Generate an AI image from a text prompt. Use for art, illustrations, photos, diagrams. NOT for editing an existing gallery image (edit_image).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Description of the image to generate"},
+                    "model": {"type": "string", "description": "Image model name (optional; auto-detects gpt-image / dall-e if omitted)"},
+                    "size": {"type": "string", "description": "Dimensions e.g. 1024x1024 (optional, default 1024x1024)"},
+                    "quality": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high", "auto"],
+                        "description": "Quality level (optional, default medium)",
+                    },
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_research",
+            "description": "List, read/open, or delete saved DEEP RESEARCH results from the Library. action='list' returns clickable [query](#research-<id>) rows (most-recent first). action='read' with id returns the report text + sources. Use for EXISTING research; to START new research use trigger_research instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "read", "delete", "open", "view", "get"],
+                        "description": "list=library index; read/open/view/get=report body; delete=remove saved report",
+                    },
+                    "id": {"type": "string", "description": "Research id from list (required for read/delete)"},
+                    "search": {"type": "string", "description": "Filter list results by query substring"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "edit_image",
             "description": "Edit a gallery image: upscale, remove background, inpaint, or harmonize.",
             "parameters": {
@@ -1236,10 +1349,19 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type in ("manage_tasks", "manage_skills", "api_call",
                         "manage_endpoints", "manage_mcp", "manage_webhooks",
                         "manage_tokens", "manage_documents", "manage_settings",
-                        "search_vault", "search_knowledge", "search_zotero", "manage_research", "trigger_research"):
+                        "search_vault", "search_knowledge", "search_zotero", "compare_papers", "manage_research", "trigger_research"):
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")
+    elif tool_type == "generate_image":
+        parts = [args.get("prompt", "")]
+        if args.get("model"):
+            parts.append(args["model"])
+        if args.get("size"):
+            parts.append(args["size"])
+        if args.get("quality"):
+            parts.append(args["quality"])
+        content = "\n".join(parts)
     else:
         content = json.dumps(args)
 

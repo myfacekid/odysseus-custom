@@ -1,10 +1,8 @@
 # src/research_handler.py
 """Handler for research service integration with expandable UI support.
 
-Uses the IterResearch-style DeepResearcher (LLM-in-the-loop) as the primary
-engine, falling back to the legacy ResearchOrchestrator or basic web search
-if needed.
-
+Dispatches to LDR LangGraph by default (``research_engine=ldr``), with IterResearch
+(``src.research.iterresearch``) and legacy ResearchOrchestrator as fallbacks.
 Includes a task registry so research survives page refreshes and can be cancelled.
 """
 import asyncio
@@ -167,7 +165,7 @@ class ResearchHandler:
     ) -> Optional[dict]:
         """Generate a research plan for user review before starting research."""
         try:
-            from src.deep_research import RESEARCH_PLAN_PROMPT, current_date_context
+            from src.research.research_prompts import RESEARCH_PLAN_PROMPT, current_date_context
             from src.llm_core import llm_call_async
 
             prompt = current_date_context() + RESEARCH_PLAN_PROMPT.format(question=query)
@@ -209,6 +207,46 @@ class ResearchHandler:
             logger.warning(f"Research plan generation failed: {e}")
             return None
 
+    async def generate_research_plan(
+        self,
+        query: str,
+        llm_endpoint: str,
+        llm_model: str,
+        llm_headers: dict = None,
+        *,
+        owner: str = "",
+        seed_papers: Optional[list] = None,
+        research_mode: str = "literature_review",
+        include_zotero: bool = True,
+        max_content_chars: int = 15000,
+    ) -> Optional[dict]:
+        """Build structured retrieval plan for HITL review before a research run."""
+        from src.research.ldr_planning import build_retrieval_plan, load_seed_findings
+        from src.research_retrieval_plan import plan_to_dict
+
+        seed_findings: list = []
+        seed_note = ""
+        if seed_papers and owner:
+            seed_findings, seed_note = await load_seed_findings(
+                owner=owner,
+                seed_papers=seed_papers,
+                max_content_chars=max_content_chars,
+            )
+
+        plan, display = await build_retrieval_plan(
+            question=query,
+            llm_endpoint=llm_endpoint,
+            llm_model=llm_model,
+            llm_headers=llm_headers,
+            research_mode=research_mode,
+            seed_findings=seed_findings or None,
+        )
+        return {
+            "retrieval_plan": plan_to_dict(plan),
+            "display": display,
+            "seed_note": seed_note or "",
+        }
+
     # ------------------------------------------------------------------
     # Task registry — background research with persistence
     # ------------------------------------------------------------------
@@ -239,6 +277,7 @@ class ResearchHandler:
         research_mode: str = "literature_review",
         report_length: str = "standard",
         project_id: Optional[str] = None,
+        approved_plan: Optional[dict] = None,
     ) -> dict:
         """Start research as a background task. Returns task info dict.
 
@@ -289,9 +328,18 @@ class ResearchHandler:
             "research_mode": research_mode or "literature_review",
             "report_length": report_length or "standard",
             "project_id": (project_id or "").strip() or None,
+            "approved_plan": approved_plan,
             # SECURITY: track ownership so all reads / saves can filter by user.
             "owner": owner or "",
         }
+        try:
+            from src.research.ldr_availability import research_engine_mode
+
+            entry["research_engine"] = research_engine_mode()
+        except Exception:
+            from src.research.ldr_availability import DEFAULT_RESEARCH_ENGINE
+
+            entry["research_engine"] = DEFAULT_RESEARCH_ENGINE
         self._active_tasks[session_id] = entry
 
         def on_progress(event):
@@ -333,6 +381,7 @@ class ResearchHandler:
                         seed_papers=seed_papers,
                         research_mode=research_mode,
                         report_length=report_length,
+                        approved_plan=entry.get("approved_plan"),
                     ),
                     timeout=hard_timeout,
                 )
@@ -554,6 +603,8 @@ class ResearchHandler:
                 pass
 
     def _save_result(self, session_id: str, entry: dict):
+        from src.research.ldr_availability import research_engine_mode
+
         """Persist completed research result to disk."""
         try:
             # Extract and cache sources + raw findings
@@ -605,6 +656,10 @@ class ResearchHandler:
                 "sources": sources,
                 "raw_findings": raw_findings,
                 "evidence_registry": evidence_registry,
+                "verification": (
+                    getattr(researcher, "verification_summary", None)
+                    if researcher else entry.get("verification")
+                ),
                 "stats": entry.get("stats"),
                 "category": entry.get("category") or "academic",
                 "include_preprints": entry.get("include_preprints", True),
@@ -616,19 +671,23 @@ class ResearchHandler:
                 "research_mode": entry.get("research_mode") or "literature_review",
                 "report_length": entry.get("report_length") or "standard",
                 "project_id": entry.get("project_id") or "",
+                "research_engine": entry.get("research_engine") or research_engine_mode(),
                 "started_at": entry["started_at"],
                 "completed_at": time.time(),
                 # SECURITY: stamp owner so route handlers can filter by user.
                 "owner": entry.get("owner", ""),
             }
-            path.write_text(json.dumps(data), encoding="utf-8")
-            logger.info(f"Research result saved to {path}")
             try:
                 from src.research_graph import link_research_on_complete
 
-                link_research_on_complete(entry.get("owner") or "", session_id, data)
+                hook = link_research_on_complete(entry.get("owner") or "", session_id, data)
+                if hook and hook.get("proposal_count"):
+                    data["graph_connection_proposals"] = hook
+                    entry["graph_connection_proposals"] = hook
             except Exception:
                 logger.debug("Research graph hook failed", exc_info=True)
+            path.write_text(json.dumps(data), encoding="utf-8")
+            logger.info(f"Research result saved to {path}")
             try:
                 from src.event_bus import fire_event
                 fire_event("research_completed", entry.get("owner") or None)
@@ -668,6 +727,7 @@ class ResearchHandler:
                 session_id=session_id,
                 hidden_images=data.get("hidden_images") or [],
                 evidence_registry=data.get("evidence_registry"),
+                verification=data.get("verification"),
             )
             logger.info(f"Visual report generated for {session_id}")
             return html_content
@@ -803,6 +863,7 @@ class ResearchHandler:
         seed_papers: list = None,
         research_mode: str = "literature_review",
         report_length: str = "standard",
+        approved_plan: Optional[dict] = None,
     ) -> str:
         """
         Run iterative deep research using the LLM-in-the-loop DeepResearcher.
@@ -821,7 +882,13 @@ class ResearchHandler:
             Formatted research report with expandable section and summary
         """
         is_continuation = bool(prior_report)
-        logger.info(f"{'Continuing' if is_continuation else 'Starting'} IterResearch Deep Research")
+        from src.research.ldr_availability import research_engine_mode
+
+        engine = research_engine_mode()
+        logger.info(
+            f"{'Continuing' if is_continuation else 'Starting'} Deep Research "
+            f"(engine={engine})"
+        )
         logger.info(f"Query: {query}")
         logger.info(f"LLM: {llm_endpoint} / {llm_model}")
         logger.info(f"Max time: {max_time}s")
@@ -833,8 +900,52 @@ class ResearchHandler:
             progress_callback({"phase": "probing", "model": llm_model})
         await self._probe_endpoint(llm_endpoint, llm_model, llm_headers)
 
+        if engine == "ldr":
+            from src.research.ldr_runner import run_ldr_research
+
+            _holder: dict = {}
+            report = await run_ldr_research(
+                query,
+                llm_endpoint=llm_endpoint,
+                llm_model=llm_model,
+                llm_headers=llm_headers,
+                progress_callback=progress_callback,
+                seed_papers=seed_papers,
+                research_mode=research_mode,
+                owner=owner or (_task_entry.get("owner") if _task_entry else ""),
+                max_iterations=max_rounds or 50,
+                max_time=max_time,
+                search_provider=search_provider,
+                prior_report=prior_report,
+                prior_findings=prior_findings,
+                prior_urls=prior_urls,
+                include_preprints=include_preprints,
+                include_zotero=include_zotero,
+                include_knowledge=include_knowledge,
+                report_length=report_length or (
+                    _task_entry.get("report_length") if _task_entry else "standard"
+                ),
+                approved_plan=approved_plan,
+                result_holder=_holder,
+            )
+            if _task_entry is not None:
+                researcher = _holder.get("researcher")
+                if researcher is not None:
+                    _task_entry["researcher"] = researcher
+                    _task_entry["raw_report"] = strip_thinking(report)
+                    _task_entry["stats"] = researcher.get_stats()
+                    _task_entry["evidence_registry"] = researcher.evidence_registry.to_dict()
+            elapsed = 0.0
+            stats = _holder.get("researcher").get_stats() if _holder.get("researcher") else {}
+            if stats.get("Duration"):
+                try:
+                    elapsed = float(str(stats["Duration"]).rstrip("s"))
+                except ValueError:
+                    elapsed = 0.0
+            return self._format_research_report(query, report, stats, elapsed)
+
         try:
-            from src.deep_research import DeepResearcher
+            from src.research.iterresearch import DeepResearcher
 
             from src.settings import get_setting
             from src.research_utils import (
@@ -879,6 +990,7 @@ class ResearchHandler:
                 seed_papers=seed_papers or (_task_entry.get("seed_papers") if _task_entry else None),
                 research_mode=research_mode or (_task_entry.get("research_mode") if _task_entry else "literature_review"),
                 report_length=report_length or (_task_entry.get("report_length") if _task_entry else "standard"),
+                approved_plan=approved_plan,
             )
             if _task_entry is not None:
                 _task_entry["researcher"] = researcher

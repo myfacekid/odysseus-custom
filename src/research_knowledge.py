@@ -53,7 +53,7 @@ def node_to_finding(
     *,
     graph_source: str,
     content_max_chars: int = 15000,
-    include_pdf: bool = True,
+    include_pdf: bool = False,
 ) -> Optional[dict]:
     """Convert a graph node into a Deep Research finding dict."""
     from src.knowledge_graph import read_knowledge_content

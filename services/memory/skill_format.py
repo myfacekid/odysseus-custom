@@ -362,7 +362,8 @@ class Skill:
         fm["confidence"] = round(float(self.confidence), 3)
         fm["source"] = self.source
         if self.teacher_model: fm["teacher_model"] = self.teacher_model
-        if self.owner:         fm["owner"] = self.owner
+        if self.owner:
+            fm["owner"] = self.owner
         fm["created"] = self.created or _now_iso()
         return fm
 

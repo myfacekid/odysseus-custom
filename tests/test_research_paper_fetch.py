@@ -3,10 +3,113 @@
 from unittest.mock import patch
 
 from src.research_paper_fetch import (
+    doi_urls,
+    fetch_doi_article_html,
+    fetch_doi_pdf_text,
+    fetch_pmc_article_html,
+    fetch_pmc_pdf_text,
     is_usable_paper_content,
     normalize_doi,
+    normalize_pmcid,
+    pmc_article_urls,
     resolve_paper_content_by_doi,
 )
+
+
+def test_doi_urls():
+    urls = doi_urls("10.1038/s41587-023-01773-0")
+    assert urls["doi"] == "10.1038/s41587-023-01773-0"
+    assert urls["html"] == "https://doi.org/10.1038/s41587-023-01773-0"
+    assert urls["pdf"] == urls["html"]
+
+
+def test_fetch_doi_pdf_text_mocked(monkeypatch):
+    body = b"%PDF-1.4 mock"
+    monkeypatch.setattr(
+        "src.research_paper_fetch._http_get",
+        lambda url, accept="*/*", timeout=25: (body, "application/pdf", url),
+    )
+    monkeypatch.setattr(
+        "src.research_paper_fetch._extract_pdf_from_bytes",
+        lambda raw, max_chars=50000: "DOI negotiated PDF full text about proteins. " * 40,
+    )
+    out = fetch_doi_pdf_text("10.1038/s41587-023-01773-0", title="Foldseek")
+    assert out.get("source") == "doi_pdf"
+    assert len(out.get("fulltext", "")) > 900
+
+
+def test_resolve_paper_content_uses_doi_routes_when_no_pmc(monkeypatch):
+    monkeypatch.setattr("src.research_paper_fetch.fetch_pubmed_abstract", lambda doi: {})
+    monkeypatch.setattr("src.research_paper_fetch.fetch_europe_pmc_record", lambda doi: {})
+    monkeypatch.setattr(
+        "src.research_paper_fetch.fetch_doi_pdf_text",
+        lambda doi, title="", max_chars=50000: {
+            "fulltext": "Publisher PDF via doi.org content negotiation. " * 50,
+            "source": "doi_pdf",
+            "source_url": "https://doi.org/10.1038/s41587-023-01773-0",
+        },
+    )
+    monkeypatch.setattr("src.research_paper_fetch.fetch_doi_article_html", lambda *a, **k: {})
+
+    out = resolve_paper_content_by_doi("10.1038/s41587-023-01773-0", fetch_fulltext=True)
+    assert out.get("fulltext")
+    assert out.get("source") == "doi_pdf"
+
+
+def test_normalize_pmcid():
+    assert normalize_pmcid("5817331") == "PMC5817331"
+    assert normalize_pmcid("pmc5817331") == "PMC5817331"
+    assert normalize_pmcid("https://pmc.ncbi.nlm.nih.gov/articles/PMC5817331/") == "PMC5817331"
+
+
+def test_pmc_article_urls():
+    urls = pmc_article_urls("PMC5817331")
+    assert urls["html"] == "https://pmc.ncbi.nlm.nih.gov/articles/PMC5817331/"
+    assert urls["pdf"] == "https://pmc.ncbi.nlm.nih.gov/articles/PMC5817331/pdf/"
+
+
+def test_fetch_pmc_pdf_text_mocked(monkeypatch):
+    body = b"%PDF-1.4 mock"
+    monkeypatch.setattr("src.research_paper_fetch._http_bytes", lambda url, timeout=25: body)
+    monkeypatch.setattr(
+        "src.research_paper_fetch._extract_pdf_from_bytes",
+        lambda raw, max_chars=50000: "PMC PDF extracted full text about proteins. " * 40,
+    )
+    out = fetch_pmc_pdf_text("PMC5817331", title="Example")
+    assert out.get("source") == "pmc_pdf"
+    assert len(out.get("fulltext", "")) > 900
+    assert out.get("source_url", "").endswith("/pdf/")
+
+
+def test_resolve_paper_content_uses_pmc_routes(monkeypatch):
+    monkeypatch.setattr("src.research_paper_fetch.fetch_pubmed_abstract", lambda doi: {})
+    monkeypatch.setattr(
+        "src.research_paper_fetch.fetch_europe_pmc_record",
+        lambda doi: {
+            "abstract": "Europe PMC abstract for a protein structure search method. " * 12,
+            "source": "europe_pmc",
+            "pmcid": "PMC5817331",
+            "pmc_html_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5817331/",
+            "pmc_pdf_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5817331/pdf/",
+            "source_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5817331/",
+        },
+    )
+    monkeypatch.setattr("src.research_paper_fetch._pmc_xml_text", lambda pmcid: "")
+    monkeypatch.setattr(
+        "src.research_paper_fetch.fetch_pmc_pdf_text",
+        lambda pmcid, title="", max_chars=50000: {
+            "fulltext": "Full PMC PDF text for structure alignment and remote homology. " * 50,
+            "source": "pmc_pdf",
+            "source_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5817331/pdf/",
+        },
+    )
+    monkeypatch.setattr("src.research_paper_fetch.fetch_pmc_article_html", lambda *a, **k: {})
+    monkeypatch.setattr("src.research_paper_fetch.fetch_doi_pdf_text", lambda *a, **k: {})
+    monkeypatch.setattr("src.research_paper_fetch.fetch_doi_article_html", lambda *a, **k: {})
+
+    out = resolve_paper_content_by_doi("10.1038/s41587-023-01773-0", fetch_fulltext=True)
+    assert out.get("fulltext")
+    assert out.get("source") == "pmc_pdf"
 
 
 def test_normalize_doi_from_url():

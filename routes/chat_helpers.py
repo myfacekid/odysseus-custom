@@ -478,7 +478,10 @@ async def build_chat_context(
         fire_message_event(request, webhook_manager, session_id, sess, message, compare_mode)
 
     # Resolve user prefs
-    user = get_current_user(request)
+    from src.auth_helpers import effective_user
+    user = effective_user(request)
+    if user in ("api", "internal-tool"):
+        user = get_current_user(request)
     uprefs = load_prefs_for_user(user)
 
     # Memory enabled?
@@ -836,6 +839,7 @@ def run_post_response_tasks(
     skills_manager=None,
     owner: str = None,
     extract_skills: bool = True,
+    extract_links: bool = True,
 ):
     """Fire background tasks after a completed response: memory extraction, webhooks, auto-name, skill extraction."""
     # Memory extraction — only every 4th message pair to avoid excess LLM calls
@@ -891,6 +895,29 @@ def run_post_response_tasks(
                 agent_rounds, agent_tool_calls,
                 owner=owner,
             ))
+
+    # Learned link extraction after graph-heavy agent runs (L6).
+    auto_links_enabled = bool(uprefs.get("auto_learn_links", True))
+    if (
+        extract_links
+        and auto_links_enabled
+        and not incognito
+        and not compare_mode
+        and (agent_rounds >= 2 or agent_tool_calls >= 2)
+    ):
+        from src.link_extractor import maybe_extract_links
+        from src.task_endpoint import resolve_task_endpoint
+        l_url, l_model, l_headers = resolve_task_endpoint(
+            sess.endpoint_url, sess.model, sess.headers, owner=owner,
+        )
+        logger.debug("[link-extract] dispatching extractor (model=%s)", l_model)
+        asyncio.create_task(maybe_extract_links(
+            sess,
+            l_url, l_model, l_headers,
+            agent_rounds, agent_tool_calls,
+            owner=owner,
+            session_id=session_id,
+        ))
 
     # Token accumulation
     if last_metrics:

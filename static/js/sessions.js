@@ -10,6 +10,7 @@ import { initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
 import { getLastOpenProject, clearLastOpenProject } from './projects/workspaceState.js';
+import { isProjectsUiEnabled } from './projects/featureFlag.js';
 
 const API_BASE = window.location.origin;
 
@@ -1458,7 +1459,8 @@ export async function loadSessions() {
     const _isFirstLoad = !sessionStorage.getItem('ody-session-active');
     if (_isFirstLoad) {
       sessionStorage.setItem('ody-session-active', '1');
-      const lastProject = getLastOpenProject();
+      const lastProject = isProjectsUiEnabled() ? getLastOpenProject() : null;
+      if (!isProjectsUiEnabled()) clearLastOpenProject();
       if (lastProject && !hashId) {
         targetId = null;
         window._pendingProjectRestore = lastProject;
@@ -2699,9 +2701,11 @@ function _arcRenderLoadMore() {
 const _lib = { tab: 'chats', search: '', sort: 'recent', debounce: null, selectMode: false, selected: new Set() };
 
 export function openLibrary(defaultTab) {
-  // Delegate everything to the document module's library (has tabs for Chats/Documents/Archive)
+  // Delegate everything to the document module's library (has tabs for Chats/Documents/Archive).
+  // Pass an explicit tab only when the caller asked for one; otherwise let the
+  // Library restore the user's last-viewed tab (U5 persistence).
   if (window.documentModule && window.documentModule.openLibrary) {
-    window.documentModule.openLibrary({ tab: defaultTab || 'documents' });
+    window.documentModule.openLibrary(defaultTab ? { tab: defaultTab } : {});
     return;
   }
   if (document.getElementById('library-modal')) return;

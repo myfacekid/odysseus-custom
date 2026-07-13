@@ -176,6 +176,8 @@ _TOOL_NAME_MAP = {
     "vault_search_notes": "search_vault",
     "obsidian": "search_knowledge",
     "search_zotero": "search_zotero",
+    "compare_papers": "compare_papers",
+    "compare papers": "compare_papers",
     "zotero": "search_zotero",
     "zotero_search": "search_zotero",
     "manage_settings": "manage_settings",

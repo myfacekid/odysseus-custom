@@ -3,7 +3,7 @@
 
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
-import spinnerModule from './spinner.js';
+import { showLoadingRow, showError as showPanelError } from './ui/feedback.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
@@ -14,6 +14,9 @@ let activeCategory = 'all';
 let sortOrder = 'newest';
 let selectMode = false;
 let selectedIds = new Set();
+let _memoriesFetched = false;
+let _memoriesLoading = false;
+let _memoriesLoadError = null;
 
 
 const MEMORY_CATEGORIES = ['fact', 'identity', 'preference', 'contact', 'project', 'goal', 'task'];
@@ -99,38 +102,40 @@ async function syncToggles() {
   await syncPrefToggle('auto-approve-skills-toggle', 'auto_approve_skills', 'Auto-approve skills enabled', 'Auto-approve skills disabled', false);
   await syncPrefSlider('skill-confidence-slider', 'skill_min_confidence', 'skill-confidence-label', 0.85);
   await syncPrefNumber('skill-max-input', 'skill_max_injected', 3);
+  await syncPrefToggle(
+    'auto-learn-links-toggle',
+    'auto_learn_links',
+    'Auto-learn connections enabled',
+    'Auto-learn connections disabled',
+    false,
+  );
+  await syncPrefToggle(
+    'auto-approve-links-toggle',
+    'auto_approve_links',
+    'Auto-approve connections enabled',
+    'Auto-approve connections disabled',
+    false,
+    false,
+  );
+  await syncPrefSlider('link-confidence-slider', 'link_min_confidence', 'link-confidence-label', 0.85);
 
-  // Reflect the header toggle into the sidebar dim + modal body opacity.
-  const headerToggle = document.getElementById('memory-enabled-header-toggle');
-  if (headerToggle) {
-    const modalBody = document.querySelector('.memory-modal-body');
-    if (modalBody) modalBody.style.opacity = headerToggle.checked ? '' : '0.3';
-    reflectMemoryToggleInSidebar(headerToggle.checked);
-    if (!headerToggle.dataset.boundUx) {
-      headerToggle.dataset.boundUx = '1';
-      headerToggle.addEventListener('change', () => {
-        if (modalBody) modalBody.style.opacity = headerToggle.checked ? '' : '0.3';
-        reflectMemoryToggleInSidebar(headerToggle.checked);
-      });
-    }
-  }
-
-  // Same dim treatment for the Skills toggle — dims the skills panel when off.
-  const skillsToggle = document.getElementById('skills-enabled-header-toggle');
-  if (skillsToggle) {
-    const skillsPanel = document.querySelector('[data-memory-panel="skills"]');
-    const applyDim = () => { if (skillsPanel) skillsPanel.style.opacity = skillsToggle.checked ? '' : '0.3'; };
-    applyDim();
-    if (!skillsToggle.dataset.boundUx) {
-      skillsToggle.dataset.boundUx = '1';
-      skillsToggle.addEventListener('change', applyDim);
-    }
-  }
+  // Header toggles only control chat injection — do not dim Brain chrome or panels.
+  // (Browse/skills remain fully usable for review even when injection is off.)
+  resetBrainChromeBrightness();
 }
 
-function reflectMemoryToggleInSidebar(enabled) {
-  const btn = document.getElementById('tool-memory-btn');
-  if (btn) btn.classList.toggle('tool-disabled', !enabled);
+/** Clear legacy dim styles from older builds that tied injection toggles to UI opacity. */
+function resetBrainChromeBrightness() {
+  document.getElementById('tool-memory-btn')?.classList.remove('tool-disabled');
+  const modalBody = document.querySelector('.memory-modal-body');
+  if (modalBody) modalBody.style.removeProperty('opacity');
+  for (const panel of ['browse', 'skills', 'connections', 'settings']) {
+    const el = document.querySelector(`.memory-tab-panel[data-memory-panel="${panel}"]`);
+    if (el) {
+      el.style.removeProperty('opacity');
+      el.style.removeProperty('pointer-events');
+    }
+  }
 }
 
 function syncToggleDim(toggle) {
@@ -232,14 +237,14 @@ async function syncPrefNumber(elementId, prefKey, defaultVal) {
   }
 }
 
-async function syncPrefToggle(elementId, prefKey, onMsg, offMsg, dimBelow = true) {
+async function syncPrefToggle(elementId, prefKey, onMsg, offMsg, dimBelow = true, defaultOn = true) {
   const toggle = document.getElementById(elementId);
   if (!toggle) return;
   try {
     const res = await fetch(`${window.location.origin}/api/prefs/${prefKey}`);
     if (res.ok) {
       const data = await res.json();
-      toggle.checked = data.value !== false;
+      toggle.checked = data.value !== undefined ? !!data.value : defaultOn;
     }
   } catch (e) {
     console.error(`Failed to load ${prefKey} pref:`, e);
@@ -274,14 +279,17 @@ async function syncPrefToggle(elementId, prefKey, onMsg, offMsg, dimBelow = true
 }
 
 export async function loadMemories() {
+  _memoriesLoading = true;
+  _memoriesLoadError = null;
+  renderMemoryList();
   try {
     const response = await fetch(`${window.location.origin}/api/memory`);
 
     if (!response.ok) {
       console.error('Memory fetch failed with status:', response.status);
       memories = [];
+      _memoriesLoadError = new Error(`Failed to load memories (${response.status})`);
       buildCategoryChips();
-      renderMemoryList();
       updateMemoryCount();
       syncToggles();
       return;
@@ -298,17 +306,19 @@ export async function loadMemories() {
     }
 
     buildCategoryChips();
-    renderMemoryList();
     updateMemoryCount();
   } catch (error) {
     console.error('Failed to load memories:', error);
     memories = [];
+    _memoriesLoadError = error;
     buildCategoryChips();
-    renderMemoryList();
     updateMemoryCount();
+  } finally {
+    _memoriesLoading = false;
+    _memoriesFetched = true;
+    renderMemoryList();
+    syncToggles();
   }
-  // Always wire toggles, even if memory API failed
-  syncToggles();
 }
 
 // ---- Bulk select mode ----
@@ -580,6 +590,19 @@ export function renderMemoryList() {
   const memoryList = document.getElementById('memory-list');
   if (!memoryList) {
     console.error('Memory list element not found');
+    return;
+  }
+
+  if (_memoriesLoading || !_memoriesFetched) {
+    showLoadingRow(memoryList, 'Loading…');
+    return;
+  }
+
+  if (_memoriesLoadError && !memories.length) {
+    showPanelError(memoryList, {
+      message: _memoriesLoadError.message || 'Failed to load memories',
+      retry: () => { void loadMemories(); },
+    });
     return;
   }
 
@@ -1335,6 +1358,12 @@ var showError = uiModule.showError;
 // Event listeners
 document.addEventListener('DOMContentLoaded', () => {
   _wireMemoryDrag();
+  import('./learned_connections.js').then((m) => {
+    const init = m.initLearnedConnectionsListeners || m.default?.initLearnedConnectionsListeners;
+    const badge = m.updatePendingCountBadge || m.default?.updatePendingCountBadge;
+    if (init) init();
+    if (badge) void badge();
+  }).catch(() => {});
 
   // Memory modal tabs
   document.querySelectorAll('.memory-tab[data-memory-tab]').forEach(tab => {
@@ -1347,6 +1376,12 @@ document.addEventListener('DOMContentLoaded', () => {
       // Lazy-load skills tab (cascade=true → play the domino-in entrance)
       if (target === 'skills') {
         import('./skills.js').then(m => { if (m.loadSkills) m.loadSkills(true); else if (m.default?.loadSkills) m.default.loadSkills(true); });
+      }
+      if (target === 'connections') {
+        import('./learned_connections.js').then(m => {
+          const load = m.loadLearnedConnections || m.default?.loadLearnedConnections;
+          if (load) load(true);
+        });
       }
     });
   });
@@ -1411,7 +1446,8 @@ const memoryModule = {
   buildCategoryChips,
   tidyMemories,
   importMemories,
-  exportMemories
+  exportMemories,
+  resetBrainChromeBrightness,
 };
 
 export default memoryModule;

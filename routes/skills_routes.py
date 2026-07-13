@@ -8,6 +8,7 @@ The on-disk format is SKILL.md (frontmatter + structured body) under
 """
 
 import logging
+import os
 import re
 from typing import List, Optional
 
@@ -1070,7 +1071,12 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
     router = APIRouter(prefix="/api/skills", tags=["skills"])
 
     def _owner(request: Request) -> Optional[str]:
-        return get_current_user(request)
+        from src.auth_helpers import effective_user
+
+        u = (effective_user(request) or "").strip()
+        if not u or u in ("api", "internal-tool"):
+            return None
+        return u
 
     def _verify_owner(skill: dict, user: Optional[str]):
         if user is None:
@@ -1092,6 +1098,16 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
     @router.get("")
     async def list_skills(request: Request):
         user = _owner(request)
+        if user:
+            try:
+                import json as _json
+                from src.constants import DATA_DIR
+
+                with open(os.path.join(DATA_DIR, "auth.json"), encoding="utf-8") as f:
+                    users = (_json.load(f) or {}).get("users") or {}
+                skills_manager.backfill_owner(user, set(users.keys()))
+            except Exception:
+                pass
         skills = skills_manager.load(owner=user)
         return {"skills": skills, "count": len(skills)}
 

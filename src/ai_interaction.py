@@ -542,9 +542,10 @@ async def do_send_to_session(content: str, session_id: Optional[str] = None, own
     target_sid = lines[0].strip()
     message = lines[1].strip()
 
-    sess = _session_manager.get_session(target_sid)
-    if not sess:
-        return {"error": f"Session '{target_sid}' not found"}
+    try:
+        sess = _session_manager.get_session(target_sid)
+    except KeyError:
+        return {"error": f"Session '{target_sid}' not found. Use list_sessions and pass the exact id it returned."}
 
     # Owner-scope: reject access to another user's session
     if owner and getattr(sess, "owner", None) and sess.owner != owner:

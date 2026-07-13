@@ -881,6 +881,17 @@ async def _direct_fallback(
 # Dispatcher
 # ---------------------------------------------------------------------------
 
+def _normalize_tool_result(result: Dict) -> Dict:
+    """Ensure every tool result declares exit_code for downstream checks."""
+    if not isinstance(result, dict):
+        return result
+    if "exit_code" in result:
+        return result
+    out = dict(result)
+    out["exit_code"] = 1 if out.get("error") else 0
+    return out
+
+
 async def execute_tool_block(
     block: Any,
     session_id: Optional[str] = None,
@@ -905,7 +916,7 @@ async def execute_tool_block(
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
         do_list_serve_presets, do_serve_preset, do_adopt_served_model,
         do_list_cookbook_servers,
-        do_edit_image, do_trigger_research, do_manage_research,         do_search_vault, do_search_knowledge, do_search_zotero,
+        do_edit_image, do_trigger_research, do_manage_research,         do_search_vault, do_search_knowledge, do_search_zotero, do_compare_papers,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
     )
@@ -1107,6 +1118,9 @@ async def execute_tool_block(
     elif tool == "search_vault":
         desc = "search_vault"
         result = await do_search_vault(content, owner=owner)
+    elif tool == "compare_papers":
+        desc = "compare_papers"
+        result = await do_compare_papers(content, owner=owner)
     elif tool == "search_knowledge":
         desc = "search_knowledge"
         result = await do_search_knowledge(content, owner=owner)
@@ -1157,6 +1171,7 @@ async def execute_tool_block(
         desc = f"unknown: {tool}"
         result = {"error": f"Unknown tool type: {tool}", "exit_code": 1}
 
+    result = _normalize_tool_result(result)
     logger.info(f"Tool executed: {desc} -> exit_code={result.get('exit_code', 'n/a')}")
     return desc, result
 

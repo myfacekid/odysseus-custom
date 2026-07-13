@@ -7,6 +7,7 @@ import themeModule from '../theme.js';
 import createResearchSynapse from '../researchSynapse.js';
 import spinnerModule from '../spinner.js';
 import { sortModelIds } from '../modelSort.js';
+import { mountEmptyState, showLoadingRow, showError, ZOTERO_SETUP_MSG } from '../ui/feedback.js';
 
 // jobId -> { synapse, status } — survives across _renderJobs() rebuilds so
 // the SVG keeps its accumulated nodes/edges between progress events.
@@ -19,7 +20,10 @@ const _collapsedSections = new Set();
 // Stored globally so it survives the frequent _renderJobs() card rebuilds and
 // applies to every running job.
 const _SYNAPSE_MIN_KEY = 'research.synapseMinimized';
-let _synapseMinimized = (() => { try { return localStorage.getItem(_SYNAPSE_MIN_KEY) === '1'; } catch { return false; } })();
+// Default to minimized for new users (U6) so a fresh run reads as a background
+// job — question + one-line status, not a busy synapse. An explicit user choice
+// (stored '0' = expanded) is always respected.
+let _synapseMinimized = (() => { try { const v = localStorage.getItem(_SYNAPSE_MIN_KEY); return v === null ? true : v === '1'; } catch { return true; } })();
 const _vizCollapseIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>';
 const _vizExpandIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
 function _toggleSynapseMinimized() {
@@ -35,18 +39,259 @@ function _toggleSynapseMinimized() {
   });
 }
 
+/** @type {1|2} */
+let _researchStep = 1;
+/** @type {{ query: string, settings: object } | null} */
+let _pendingPlanLaunch = null;
+let _planFetchToken = 0;
 let _open = false;
+
+function _planLinesToText(lines) {
+  return (lines || []).filter(Boolean).join('\n');
+}
+
+function _textToPlanLines(text) {
+  return (text || '')
+    .split(/[\n,]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function _setResearchStep(step) {
+  _researchStep = step === 2 ? 2 : 1;
+  document.querySelectorAll('.research-stepper-item').forEach((el) => {
+    const n = parseInt(el.getAttribute('data-step'), 10);
+    el.classList.toggle('active', n === _researchStep);
+    el.classList.toggle('done', n < _researchStep);
+  });
+  const compose = document.getElementById('research-step-compose');
+  const plan = document.getElementById('research-step-plan');
+  const continueBtn = document.getElementById('research-continue-btn');
+  const startBtn = document.getElementById('research-start-btn');
+  const backBtn = document.getElementById('research-back-btn');
+  const addBtn = document.getElementById('research-add-btn');
+  const onStep1 = _researchStep === 1;
+  if (compose) compose.hidden = !onStep1;
+  if (plan) plan.hidden = onStep1;
+  // Step 1 → single primary (Continue). Step 2 → Back + Queue + Start.
+  if (continueBtn) continueBtn.hidden = !onStep1;
+  if (backBtn) backBtn.hidden = onStep1;
+  if (startBtn) startBtn.hidden = onStep1;
+  if (addBtn) addBtn.hidden = onStep1;
+  _updateComposeValidity();
+  _updatePlanValidity();
+}
+
+/** True when step 1 has the minimum required input to proceed:
+ *  topic mode needs a question; papers mode needs at least one seed. */
+function _isComposeReady() {
+  const tab = _getActiveComposeTab();
+  const query = (document.getElementById('research-query')?.value || '').trim();
+  if (tab === 'papers') return _seedRefsForApi().length > 0;
+  return query.length > 0;
+}
+
+/** Gate the Continue button so the user can't advance to the search plan
+ *  with an empty question / no seed papers (forced progression). */
+function _updateComposeValidity() {
+  const btn = document.getElementById('research-continue-btn');
+  if (!btn) return;
+  const ready = _isComposeReady();
+  btn.disabled = !ready;
+  btn.title = ready
+    ? 'Continue to the search plan'
+    : (_getActiveComposeTab() === 'papers'
+        ? 'Add at least one seed paper first'
+        : 'Enter a research question first');
+}
+
+/** Gate Start (and Queue) until the plan has at least one search keyword —
+ *  keywords are what actually drive the run, so they're required. */
+function _updatePlanValidity() {
+  const hasKeywords = (document.getElementById('research-plan-keywords')?.value || '').trim().length > 0;
+  const startBtn = document.getElementById('research-start-btn');
+  const addBtn = document.getElementById('research-add-btn');
+  if (startBtn) {
+    startBtn.disabled = !hasKeywords;
+    startBtn.title = hasKeywords ? 'Start research' : 'Add at least one search keyword first';
+  }
+  if (addBtn) addBtn.disabled = !hasKeywords;
+}
+
+function _setPlanStatus(kind, message) {
+  const el = document.getElementById('research-plan-status');
+  if (!el) return;
+  el.dataset.status = kind || '';
+  el.textContent = message || '';
+  el.hidden = !message;
+}
+
+function _fillPlanReviewForm(plan) {
+  const p = plan || {};
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val ?? '';
+  };
+  set('research-plan-keywords', _planLinesToText(p.search_keywords));
+  set('research-plan-anchors', _planLinesToText(p.anchor_terms));
+  set('research-plan-avoid', _planLinesToText(p.avoid_topics));
+  set('research-plan-subq', _planLinesToText(p.sub_questions));
+  set('research-plan-topics', _planLinesToText(p.key_topics));
+  set('research-plan-success', p.success_criteria || '');
+  const scopeEl = document.getElementById('research-plan-scope');
+  if (scopeEl) scopeEl.value = p.scope || 'balanced';
+  // Auto-expand the optional fields if the draft populated any of them, so
+  // agent-generated content is never silently hidden inside the disclosure.
+  const advanced = document.querySelector('.research-plan-advanced');
+  if (advanced) {
+    const hasAdvanced = [
+      p.anchor_terms, p.avoid_topics, p.sub_questions, p.key_topics,
+    ].some((v) => Array.isArray(v) ? v.length : (v && String(v).trim()))
+      || (p.success_criteria && String(p.success_criteria).trim());
+    advanced.open = !!hasAdvanced;
+  }
+  _updatePlanValidity();
+}
+
+function _readApprovedPlanFromForm() {
+  const scopeEl = document.getElementById('research-plan-scope');
+  return {
+    search_keywords: _textToPlanLines(document.getElementById('research-plan-keywords')?.value),
+    anchor_terms: _textToPlanLines(document.getElementById('research-plan-anchors')?.value),
+    avoid_topics: _textToPlanLines(document.getElementById('research-plan-avoid')?.value),
+    sub_questions: _textToPlanLines(document.getElementById('research-plan-subq')?.value),
+    key_topics: _textToPlanLines(document.getElementById('research-plan-topics')?.value),
+    success_criteria: (document.getElementById('research-plan-success')?.value || '').trim(),
+    scope: scopeEl?.value || 'balanced',
+  };
+}
+
+function _validateComposeStep() {
+  const queryEl = document.getElementById('research-query');
+  const query = (queryEl?.value || '').trim();
+  const tab = _getActiveComposeTab();
+  const seeds = _seedRefsForApi();
+  const mode = document.getElementById('research-mode')?.value || 'literature_review';
+  if (tab === 'papers' && mode === 'compare' && seeds.length < 2) {
+    if (typeof uiModule !== 'undefined' && uiModule?.showError) {
+      uiModule.showError('Compare mode requires at least 2 seed papers.');
+    }
+    return null;
+  }
+  if (tab === 'topic' && !query) {
+    queryEl?.focus();
+    return null;
+  }
+  if (tab === 'papers' && !seeds.length && !query) {
+    document.getElementById('research-seed-input')?.focus();
+    return null;
+  }
+  _saveSettingsToStorage();
+  const settings = _readSettings();
+  const label = query || 'Literature synthesis from seed papers';
+  return { query: label, settings, queryEl };
+}
+
+async function _fetchPlanDraftBackground() {
+  if (!_pendingPlanLaunch) return;
+  const token = ++_planFetchToken;
+  const { query, settings } = _pendingPlanLaunch;
+  _setPlanStatus('loading', 'Drafting keyword plan — edit these fields anytime while we generate a starting point.');
+  try {
+    const planData = await _fetchResearchPlan(query, settings);
+    if (token !== _planFetchToken || _researchStep !== 2) return;
+    _fillPlanReviewForm(planData.retrieval_plan || {});
+    const note = document.getElementById('research-plan-seed-note');
+    if (note) {
+      const text = planData.seed_note || '';
+      note.textContent = text;
+      note.hidden = !text;
+    }
+    _setPlanStatus('ready', 'Draft ready — tune keywords, anchors, and exclusions, then start research.');
+  } catch (err) {
+    if (token !== _planFetchToken || _researchStep !== 2) return;
+    _setPlanStatus('error', `${err.message || 'Could not draft plan'} — fill keywords manually or go back.`);
+  }
+}
+
+function _handleContinue() {
+  const v = _validateComposeStep();
+  if (!v) return;
+  _pendingPlanLaunch = { query: v.query, settings: v.settings };
+  _fillPlanReviewForm({});
+  const note = document.getElementById('research-plan-seed-note');
+  if (note) {
+    note.textContent = '';
+    note.hidden = true;
+  }
+  _setResearchStep(2);
+  document.getElementById('research-step-plan')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  void _fetchPlanDraftBackground();
+}
+
+function _handleBack() {
+  _planFetchToken += 1;
+  _pendingPlanLaunch = null;
+  _setPlanStatus('', '');
+  _setResearchStep(1);
+}
+
+async function _fetchResearchPlan(query, settings) {
+  const body = {
+    query,
+    mode: settings.mode || 'literature_review',
+    include_zotero: settings.include_zotero !== false,
+    endpoint_id: settings.endpoint_id,
+    model: settings.model,
+    seed_papers: settings.seed_papers || [],
+  };
+  const res = await fetch(`${_apiBase}/api/research/plan`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    let detail = txt;
+    try { detail = JSON.parse(txt).detail || txt; } catch {}
+    throw new Error(detail || `Plan request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+function _confirmPlanAndRun() {
+  if (!_pendingPlanLaunch || _researchStep !== 2) return;
+  const kwEl = document.getElementById('research-plan-keywords');
+  if (!(kwEl?.value || '').trim()) {
+    _setPlanStatus('error', 'Add at least one search keyword before starting.');
+    kwEl?.focus();
+    return;
+  }
+  const { query } = _pendingPlanLaunch;
+  const settings = { ..._pendingPlanLaunch.settings, ..._readSettings() };
+  const approved = _readApprovedPlanFromForm();
+  const queryEl = document.getElementById('research-query');
+  _planFetchToken += 1;
+  _pendingPlanLaunch = null;
+  _setResearchStep(1);
+  _setPlanStatus('', '');
+  if (queryEl) queryEl.value = '';
+  jobs.startJob(query, { ...settings, approved_plan: approved }).catch(() => {
+    if (typeof uiModule !== 'undefined' && uiModule?.showError) {
+      uiModule.showError('Failed to start research');
+    }
+    if (queryEl) queryEl.value = query;
+  });
+}
+
 let _onDocKeydown = null;
 let _apiBase = '';
 let _endpoints = [];
 let _expandedJobId = null;
 let _markdownModule = null;
 let _sessionModule = null;
-let _settingsCollapsed = false;
 const _SETTINGS_KEY = 'odysseus-research-settings';
-const _COLLAPSE_KEY = 'odysseus-research-settings-collapsed';
-
-try { _settingsCollapsed = localStorage.getItem(_COLLAPSE_KEY) === '1'; } catch {}
 
 const _SEEDS_KEY = 'odysseus-research-seeds';
 const _TAB_KEY = 'odysseus-research-compose-tab';
@@ -56,6 +301,12 @@ let _activeComposeTab = 'topic';
 let _seedPapers = [];
 let _seedPreviewTimer = null;
 let _seedPreviewRequest = 0;
+let _seedSearchTimer = null;
+let _seedSearchRequest = 0;
+let _seedPickerOpen = false;
+/** Papers currently rendered in the picker (for keyboard nav / toggle). */
+let _seedResultPapers = [];
+let _seedActiveIdx = -1;
 
 const _SEED_TIER_CLASS = {
   adequate: 'tier-adequate',
@@ -78,28 +329,97 @@ function _saveSeedsToStorage() {
   try { localStorage.setItem(_SEEDS_KEY, JSON.stringify(_seedPapers)); } catch {}
 }
 
+/** First author's short form for a compact chip label (e.g. "Smith et al."). */
+function _shortAuthors(authors) {
+  const raw = (authors || '').trim();
+  if (!raw) return '';
+  const first = raw.split(/;|,| and | & /i)[0].trim();
+  if (!first) return '';
+  const surname = first.split(/\s+/).pop() || first;
+  return /;| and | & |,/.test(raw) ? `${surname} et al.` : surname;
+}
+
 function _renderSeedChips() {
+  _updateComposeValidity();
+  _updateSeedMetaUI();
   const host = document.getElementById('research-seed-chips');
   if (!host) return;
   if (!_seedPapers.length) {
-    host.innerHTML = '<div class="research-seed-empty">Add seed papers from your library or paste Zotero keys / DOIs.</div>';
+    host.innerHTML = `<div class="research-seed-empty">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+      <span>No seed papers yet. Search below to anchor the review on specific work.</span>
+    </div>`;
     return;
   }
   host.innerHTML = _seedPapers.map((p, idx) => {
-    const meta = [p.authors, p.year].filter(Boolean).join(' · ');
-    const pdf = p.has_pdf ? 'PDF' : 'no PDF';
-    return `<div class="research-seed-chip" data-idx="${idx}">
-      <div class="research-seed-chip-title">${_esc(p.title || p.zotero_key || 'Paper')}</div>
-      <div class="research-seed-chip-meta">${_esc(meta)} · ${pdf}</div>
-      <button type="button" class="research-seed-chip-remove" data-idx="${idx}" title="Remove">×</button>
+    const meta = [_shortAuthors(p.authors), p.year].filter(Boolean).join(' · ');
+    const pdfTitle = p.has_pdf ? 'Full text (PDF) available' : 'No PDF — abstract/metadata only';
+    const pdfCls = p.has_pdf ? 'research-seed-chip-dot--pdf' : 'research-seed-chip-dot--nopdf';
+    return `<div class="research-seed-chip" data-idx="${idx}" title="${_esc(p.title || p.zotero_key || 'Paper')}">
+      <span class="research-seed-chip-dot ${pdfCls}" title="${_esc(pdfTitle)}"></span>
+      <div class="research-seed-chip-text">
+        <div class="research-seed-chip-title">${_esc(p.title || p.zotero_key || 'Paper')}</div>
+        ${meta ? `<div class="research-seed-chip-meta">${_esc(meta)}</div>` : ''}
+      </div>
+      <button type="button" class="research-seed-chip-remove" data-idx="${idx}" title="Remove" aria-label="Remove seed paper">×</button>
     </div>`;
   }).join('');
   host.querySelectorAll('.research-seed-chip-remove').forEach(btn => {
     btn.addEventListener('click', () => {
       const i = parseInt(btn.getAttribute('data-idx') || '-1', 10);
-      if (i >= 0) { _seedPapers.splice(i, 1); _saveSeedsToStorage(); _renderSeedChips(); _scheduleSeedPreview(); }
+      if (i >= 0) {
+        _seedPapers.splice(i, 1);
+        _saveSeedsToStorage();
+        _renderSeedChips();
+        _scheduleSeedPreview();
+        _refreshSeedResultStates();
+      }
     });
   });
+}
+
+/** Sync the count pill, Clear-all button, compose-tab badge, and compare hint. */
+function _updateSeedMetaUI() {
+  const n = _seedPapers.length;
+  const countEl = document.getElementById('research-seed-count');
+  if (countEl) {
+    countEl.textContent = n ? `${n} selected` : '';
+    countEl.hidden = !n;
+  }
+  const clearEl = document.getElementById('research-seed-clear');
+  if (clearEl) clearEl.hidden = n < 1;
+
+  const mode = document.getElementById('research-mode')?.value || 'literature_review';
+  const hintEl = document.getElementById('research-seed-input-hint');
+  if (hintEl && mode === 'compare' && n < 2 && !hintEl.classList.contains('research-seed-input-hint--error')) {
+    hintEl.textContent = `Compare mode needs at least 2 papers — add ${2 - n} more.`;
+    hintEl.classList.add('research-seed-input-hint--compare');
+  } else if (hintEl && hintEl.classList.contains('research-seed-input-hint--compare')) {
+    hintEl.textContent = '';
+    hintEl.classList.remove('research-seed-input-hint--compare');
+  }
+
+  const tabBadge = document.querySelector('.research-compose-tab[data-tab="papers"] .research-compose-tab-badge');
+  if (tabBadge) {
+    tabBadge.textContent = n ? String(n) : '';
+    tabBadge.hidden = !n;
+  }
+}
+
+function _clearAllSeeds() {
+  if (!_seedPapers.length) return;
+  _seedPapers = [];
+  _saveSeedsToStorage();
+  _renderSeedChips();
+  _scheduleSeedPreview();
+  _refreshSeedResultStates();
+}
+
+/** True if the given paper (by Zotero key or DOI) is already a seed. */
+function _isSeedSelected(paper) {
+  const key = (paper.zotero_key || paper.key || '').trim().toUpperCase();
+  const doi = (paper.doi || '').trim();
+  return _seedPapers.some(s => (key && (s.zotero_key || '').toUpperCase() === key) || (doi && s.doi === doi));
 }
 
 function _addSeedPaper(paper) {
@@ -107,7 +427,7 @@ function _addSeedPaper(paper) {
   const doi = (paper.doi || '').trim();
   const id = key || doi;
   if (!id) return false;
-  if (_seedPapers.some(s => (s.zotero_key || '').toUpperCase() === key || (doi && s.doi === doi))) return false;
+  if (_isSeedSelected(paper)) return false;
   _seedPapers.push({
     zotero_key: key || id,
     title: paper.title || key || doi,
@@ -116,6 +436,20 @@ function _addSeedPaper(paper) {
     has_pdf: !!paper.has_pdf,
     doi: doi || '',
   });
+  _saveSeedsToStorage();
+  _renderSeedChips();
+  _scheduleSeedPreview();
+  return true;
+}
+
+/** Remove a seed matching the given paper; returns true if one was removed. */
+function _removeSeedPaper(paper) {
+  const key = (paper.zotero_key || paper.key || '').trim().toUpperCase();
+  const doi = (paper.doi || '').trim();
+  const before = _seedPapers.length;
+  _seedPapers = _seedPapers.filter(s =>
+    !((key && (s.zotero_key || '').toUpperCase() === key) || (doi && s.doi === doi)));
+  if (_seedPapers.length === before) return false;
   _saveSeedsToStorage();
   _renderSeedChips();
   _scheduleSeedPreview();
@@ -253,61 +587,193 @@ export function addSeedPaper(paper) {
   return added;
 }
 
-async function _toggleSeedPicker() {
+function _openSeedPicker() {
   const picker = document.getElementById('research-seed-picker');
+  const input = document.getElementById('research-seed-input');
   if (!picker) return;
-  const open = picker.style.display !== 'none';
-  if (open) { picker.style.display = 'none'; return; }
-  picker.style.display = 'block';
-  picker.innerHTML = '<div class="research-seed-picker-loading">Loading papers…</div>';
+  _seedPickerOpen = true;
+  picker.hidden = false;
+  picker.classList.add('research-seed-picker--open');
+  input?.setAttribute('aria-expanded', 'true');
+  void _runSeedSearch((input?.value || '').trim());
+}
+
+function _closeSeedPicker() {
+  const picker = document.getElementById('research-seed-picker');
+  const input = document.getElementById('research-seed-input');
+  if (!picker) return;
+  _seedPickerOpen = false;
+  picker.classList.remove('research-seed-picker--open');
+  picker.hidden = true;
+  _seedActiveIdx = -1;
+  input?.setAttribute('aria-expanded', 'false');
+}
+
+function _scheduleSeedSearch(q) {
+  clearTimeout(_seedSearchTimer);
+  _seedSearchTimer = setTimeout(() => { void _runSeedSearch(q); }, 220);
+}
+
+async function _runSeedSearch(query) {
+  const picker = document.getElementById('research-seed-picker');
+  if (!picker || !_seedPickerOpen) return;
+  const q = (query || '').trim();
+  const reqId = ++_seedSearchRequest;
+  const parsed = _parseSeedInput(q);
+  const canAddExternal = parsed.ok && !!q;
+
+  if (!picker.querySelector('.research-seed-picker-list')) {
+    picker.innerHTML = '<div class="research-seed-picker-loading">Searching your library…</div>';
+  }
   try {
-    const res = await fetch(`${_apiBase}/api/research/papers?limit=40`, { credentials: 'same-origin' });
+    const url = `${_apiBase}/api/research/papers?limit=30${q ? `&search=${encodeURIComponent(q)}` : ''}`;
+    const res = await fetch(url, { credentials: 'same-origin' });
     if (!res.ok) throw new Error('Failed to load papers');
     const data = await res.json();
+    if (reqId !== _seedSearchRequest || !_seedPickerOpen) return;
     const papers = data.papers || [];
-    if (!papers.length) {
-      picker.innerHTML = '<div class="research-seed-picker-empty">No synced papers — sync Zotero catalog in Settings.</div>';
+    if (!papers.length && !q) {
+      mountEmptyState(picker, {
+        kind: 'setup',
+        title: 'Setup needed',
+        message: ZOTERO_SETUP_MSG,
+        actionLabel: 'Fix',
+        actionTab: 'search',
+      });
       return;
     }
-    picker.innerHTML = `<input type="search" class="research-seed-picker-search" placeholder="Filter papers…">
-      <div class="research-seed-picker-list">${papers.map(p => {
-        const meta = [p.authors, p.year].filter(Boolean).join(' · ');
-        const col = (p.collection_paths || []).slice(0, 1)[0] || '';
-        return `<button type="button" class="research-seed-picker-item research-seed-picker-card" data-key="${_esc(p.zotero_key)}"
-          data-title="${_esc(p.title)}" data-authors="${_esc(p.authors)}" data-year="${_esc(p.year)}"
-          data-doi="${_esc(p.doi)}" data-pdf="${p.has_pdf ? '1' : '0'}">
-          <div class="research-seed-picker-card-body">
-            <span class="research-seed-picker-title">${_esc(p.title)}</span>
-            ${meta ? `<span class="research-seed-picker-meta">${_esc(meta)}</span>` : ''}
-            ${col ? `<span class="research-seed-picker-col">${_esc(col)}</span>` : ''}
-          </div>
-          ${p.has_pdf ? '<span class="research-seed-picker-badge">PDF</span>' : ''}
-        </button>`;
-      }).join('')}</div>`;
-    const searchEl = picker.querySelector('.research-seed-picker-search');
-    const listEl = picker.querySelector('.research-seed-picker-list');
-    searchEl?.addEventListener('input', () => {
-      const q = (searchEl.value || '').toLowerCase();
-      listEl?.querySelectorAll('.research-seed-picker-item').forEach(el => {
-        const txt = el.textContent?.toLowerCase() || '';
-        el.style.display = !q || txt.includes(q) ? '' : 'none';
-      });
-    });
-    picker.querySelectorAll('.research-seed-picker-item').forEach(btn => {
-      btn.addEventListener('click', () => {
-        _addSeedPaper({
-          zotero_key: btn.getAttribute('data-key'),
-          title: btn.getAttribute('data-title'),
-          authors: btn.getAttribute('data-authors'),
-          year: btn.getAttribute('data-year'),
-          doi: btn.getAttribute('data-doi'),
-          has_pdf: btn.getAttribute('data-pdf') === '1',
-        });
-      });
-    });
+    _renderSeedResults(papers, { query: q, canAddExternal, parsed });
   } catch (e) {
-    picker.innerHTML = `<div class="research-seed-picker-empty">${_esc(e.message || 'Could not load papers')}</div>`;
+    if (reqId !== _seedSearchRequest) return;
+    showError(picker, {
+      message: e.message || 'Could not search papers',
+      retry: () => { void _runSeedSearch(q); },
+    });
   }
+}
+
+function _seedResultCardHtml(p, idx, selected) {
+  const meta = [p.authors, p.year].filter(Boolean).join(' · ');
+  const col = (p.collection_paths || []).slice(0, 1)[0] || '';
+  return `<button type="button" class="research-seed-picker-item research-seed-picker-card${selected ? ' is-selected' : ''}"
+    role="option" aria-selected="${selected ? 'true' : 'false'}" data-idx="${idx}"
+    data-key="${_esc(p.zotero_key)}" data-title="${_esc(p.title)}" data-authors="${_esc(p.authors)}"
+    data-year="${_esc(p.year)}" data-doi="${_esc(p.doi)}" data-pdf="${p.has_pdf ? '1' : '0'}">
+    <span class="research-seed-picker-check" aria-hidden="true">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    </span>
+    <div class="research-seed-picker-card-body">
+      <span class="research-seed-picker-title">${_esc(p.title || p.zotero_key || 'Untitled')}</span>
+      ${meta ? `<span class="research-seed-picker-meta">${_esc(meta)}</span>` : ''}
+      ${col ? `<span class="research-seed-picker-col">${_esc(col)}</span>` : ''}
+    </div>
+    ${p.has_pdf ? '<span class="research-seed-picker-badge">PDF</span>' : ''}
+  </button>`;
+}
+
+function _renderSeedResults(papers, opts) {
+  const picker = document.getElementById('research-seed-picker');
+  if (!picker) return;
+  const { query, canAddExternal, parsed } = opts || {};
+  _seedResultPapers = papers;
+  _seedActiveIdx = -1;
+
+  const externalHtml = canAddExternal
+    ? `<button type="button" class="research-seed-picker-external" data-external="1"
+        data-key="${_esc(parsed.paper.zotero_key || '')}" data-doi="${_esc(parsed.paper.doi || '')}"
+        data-title="${_esc(parsed.paper.title || '')}">
+        <span class="research-seed-picker-external-icon">+</span>
+        <span>Add <strong>${_esc(parsed.paper.doi ? `DOI ${parsed.paper.doi}` : parsed.paper.zotero_key)}</strong> directly</span>
+      </button>`
+    : '';
+
+  let listHtml;
+  if (papers.length) {
+    listHtml = `<div class="research-seed-picker-list" role="listbox">${
+      papers.map((p, i) => _seedResultCardHtml(p, i, _isSeedSelected(p))).join('')
+    }</div>`;
+  } else {
+    listHtml = `<div class="research-seed-picker-empty">${
+      query ? `No library matches for “${_esc(query)}”.` : 'Your library looks empty.'
+    }${canAddExternal ? ' Use the option above to add it by reference.' : ''}</div>`;
+  }
+
+  picker.innerHTML = `${externalHtml}${listHtml}
+    <div class="research-seed-picker-footer">
+      <span class="research-seed-picker-hint">Click to add or remove · Esc to close</span>
+      <button type="button" class="research-seed-picker-done" data-done="1">Done</button>
+    </div>`;
+  _wireSeedResultEvents(picker);
+}
+
+function _wireSeedResultEvents(picker) {
+  picker.querySelector('[data-done]')?.addEventListener('click', () => {
+    _closeSeedPicker();
+    document.getElementById('research-seed-input')?.focus();
+  });
+  picker.querySelector('[data-external]')?.addEventListener('click', (e) => {
+    const el = e.currentTarget;
+    const paper = {
+      zotero_key: el.getAttribute('data-key'),
+      doi: el.getAttribute('data-doi'),
+      title: el.getAttribute('data-title'),
+    };
+    if (_addSeedPaper(paper)) {
+      const input = document.getElementById('research-seed-input');
+      if (input) input.value = '';
+      _setSeedInputHint('');
+      void _runSeedSearch('');
+    } else {
+      window.uiModule?.showToast?.('Already in seed list', 2500);
+    }
+  });
+  picker.querySelectorAll('.research-seed-picker-card').forEach(btn => {
+    btn.addEventListener('click', () => _toggleSeedFromCard(btn));
+  });
+}
+
+function _paperFromCard(btn) {
+  return {
+    zotero_key: btn.getAttribute('data-key'),
+    title: btn.getAttribute('data-title'),
+    authors: btn.getAttribute('data-authors'),
+    year: btn.getAttribute('data-year'),
+    doi: btn.getAttribute('data-doi'),
+    has_pdf: btn.getAttribute('data-pdf') === '1',
+  };
+}
+
+function _toggleSeedFromCard(btn) {
+  const paper = _paperFromCard(btn);
+  if (_isSeedSelected(paper)) {
+    _removeSeedPaper(paper);
+  } else {
+    _addSeedPaper(paper);
+    btn.classList.add('research-seed-picker-card--justadded');
+    setTimeout(() => btn.classList.remove('research-seed-picker-card--justadded'), 420);
+  }
+  _refreshSeedResultStates();
+}
+
+/** Update selected styling in the open picker without a full re-render. */
+function _refreshSeedResultStates() {
+  const picker = document.getElementById('research-seed-picker');
+  if (!picker || picker.hidden) return;
+  picker.querySelectorAll('.research-seed-picker-card').forEach(btn => {
+    const selected = _isSeedSelected(_paperFromCard(btn));
+    btn.classList.toggle('is-selected', selected);
+    btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+  });
+}
+
+function _setSeedActive(idx) {
+  const picker = document.getElementById('research-seed-picker');
+  if (!picker) return;
+  const cards = Array.from(picker.querySelectorAll('.research-seed-picker-card'));
+  if (!cards.length) return;
+  _seedActiveIdx = ((idx % cards.length) + cards.length) % cards.length;
+  cards.forEach((c, i) => c.classList.toggle('is-active', i === _seedActiveIdx));
+  cards[_seedActiveIdx]?.scrollIntoView({ block: 'nearest' });
 }
 
 function _seedRefsForApi() {
@@ -332,20 +798,16 @@ function _switchComposeTab(tab) {
   const papersPane = document.getElementById('research-pane-papers');
   if (topicPane) topicPane.hidden = next !== 'topic';
   if (papersPane) papersPane.hidden = next !== 'papers';
+  if (next !== 'papers' && _seedPickerOpen) _closeSeedPicker();
 
   projectLink.updateProjectPickerVisibility();
-  const hint = document.getElementById('research-tab-hint');
   const queryEl = document.getElementById('research-query');
-  if (hint) {
-    hint.textContent = next === 'papers'
-      ? 'Pick seed papers, then optionally add a question. Source toggles above apply to both tabs.'
-      : 'Ask a research question — use the source toggles below to control library, Links, and preprints.';
-  }
   if (queryEl) {
     queryEl.placeholder = next === 'papers'
       ? 'Optional — e.g. focus on mechanisms, clinical outcomes, or methods…'
       : 'e.g. What is the evidence for intermittent fasting on cardiovascular outcomes in adults? Include RCTs and systematic reviews.';
   }
+  _updateComposeValidity();
 }
 
 function _saveSettingsToStorage() {
@@ -441,38 +903,7 @@ function _syncResearchRail() {
       wrap.remove();
     }
   }
-  // Orbiting edge animation: faster when a job is running, slower while idle
-  // (ambient). The rAF loop in _ensureOrbit drives --research-orbit-angle on
-  // the pane element — CSS-only @property animation silently no-op'd in some
-  // browsers, so JS drives it for universal compatibility.
-  _orbitSpeedDegPerSec = running > 0 ? 60 : 22;  // 6s/rev vs ~16s/rev
-  _ensureOrbit();
   if (window._syncRailDynamic) window._syncRailDynamic();
-}
-
-// ── Orbit-angle rAF driver ─────────────────────────────────────
-// Universally-supported alternative to a CSS @property angle animation.
-// Walks --research-orbit-angle on the #research-pane element every frame
-// while the panel is open. Stops itself when the pane is gone.
-let _orbitRAF = null;
-let _orbitAngle = 0;
-let _orbitLastTs = 0;
-let _orbitSpeedDegPerSec = 22;  // idle ambient default
-function _ensureOrbit() {
-  if (_orbitRAF) return;
-  _orbitLastTs = 0;
-  const tick = (ts) => {
-    const pane = document.getElementById('research-pane');
-    if (!pane) { _orbitRAF = null; return; }  // panel closed → stop loop
-    if (_orbitLastTs) {
-      const dt = (ts - _orbitLastTs) / 1000;
-      _orbitAngle = (_orbitAngle + _orbitSpeedDegPerSec * dt) % 360;
-      pane.style.setProperty('--research-orbit-angle', _orbitAngle.toFixed(2) + 'deg');
-    }
-    _orbitLastTs = ts;
-    _orbitRAF = requestAnimationFrame(tick);
-  };
-  _orbitRAF = requestAnimationFrame(tick);
 }
 
 /** Fetch the count of saved research items and populate the header chip. */
@@ -491,6 +922,11 @@ async function _updateResearchCount() {
 const _searchIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
 const _closeIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
 const _playIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
+const _arrowLeftIcon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>';
+const _plusIcon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+const _bookmarkIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+const _folderPlusIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>';
+const _linkIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
 const _cancelIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 const _trashIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
 const _externalIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
@@ -548,6 +984,8 @@ export function openPanel(focusJobId) {
 
   const container = document.getElementById('chat-container');
   if (!container) return;
+
+  import('../tourHints.js').then((m) => m.maybeNavHint?.('libraryVsResearch')).catch(() => {});
 
   document.body.classList.add('research-panel-view');
   const btn = document.getElementById('tool-research-btn');
@@ -651,12 +1089,9 @@ function _buildPanelHTML() {
     roundOpts += `<option value="${i}">${i}</option>`;
   }
 
-  const settingsHidden = _settingsCollapsed ? ' style="display:none"' : '';
-  const chevronCls = _settingsCollapsed ? ' collapsed' : '';
-
   return `
     <div class="modal-header research-pane-header">
-      <h4><span style="position:relative;top:-1px;left:6px;display:inline-flex;vertical-align:middle;">${_searchIcon}</span><span style="margin-left:6px;">Academic Research</span></h4>
+      <h4><span style="position:relative;top:-1px;left:6px;display:inline-flex;vertical-align:middle;">${_searchIcon}</span><span style="margin-left:6px;">Research</span></h4>
       <div class="research-pane-header-actions">
         <button id="research-panel-minimize" class="modal-minimize-btn" type="button" title="Minimize"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="5" y1="18" x2="19" y2="18"/></svg></button>
         <button id="research-panel-close" class="close-btn" title="Close">&#x2716;</button>
@@ -664,36 +1099,40 @@ function _buildPanelHTML() {
     </div>
     <div class="modal-body research-pane-body" data-no-swipe-dismiss>
       <div class="research-new-job">
-        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;">
+        <div class="research-new-job-head">
           <h2 style="margin:0;padding:0;line-height:1;">Research <span id="research-stats" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal"></span></h2>
         </div>
-        <p class="memory-desc doclib-desc" style="margin-top:6px;display:flex;align-items:center;gap:6px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.8;"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h4v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>
-          <span>Scholarly literature synthesis — searches papers, reviews, and primary sources</span>
-        </p>
-        <div id="research-no-past-hint" class="memory-desc doclib-desc" style="display:none;margin-top:-2px;font-size:11px;opacity:0.7;">All past research found in <button type="button" class="research-library-link">Library, Research</button></div>
+        <div id="research-no-past-hint" class="memory-desc doclib-desc" style="display:none;margin-top:-2px;font-size:11px;opacity:0.7;">Past reports in <button type="button" class="research-library-link">Library → Research</button></div>
+        <nav class="research-stepper" aria-label="Research steps">
+          <div class="research-stepper-item active" data-step="1">
+            <span class="research-stepper-dot"></span>
+            <span class="research-stepper-label">Question &amp; sources</span>
+          </div>
+          <div class="research-stepper-item" data-step="2">
+            <span class="research-stepper-dot"></span>
+            <span class="research-stepper-label">Search plan</span>
+          </div>
+        </nav>
+        <div id="research-step-compose" class="research-wizard-pane">
         <div class="research-compose-tabs" role="tablist" aria-label="Research type">
           <button type="button" class="research-compose-tab active" data-tab="topic" role="tab" aria-selected="true">Topic</button>
-          <button type="button" class="research-compose-tab" data-tab="papers" role="tab" aria-selected="false">From papers</button>
+          <button type="button" class="research-compose-tab" data-tab="papers" role="tab" aria-selected="false">From papers<span class="research-compose-tab-badge" hidden></span></button>
         </div>
-        <p id="research-tab-hint" class="research-tab-hint">Ask a research question — searches the web, reviews, and your library when seeding is on.</p>
         <textarea id="research-query" class="research-query" placeholder="e.g. What is the evidence for intermittent fasting on cardiovascular outcomes in adults? Include RCTs and systematic reviews." rows="4"></textarea>
         <div class="research-source-toggles" id="research-source-toggles">
-          <div class="research-source-toggles-label">Evidence sources</div>
-          <label class="research-preprint-toggle" title="When off, preprint servers (arXiv, bioRxiv, medRxiv) are excluded from search results">
+          <span class="research-source-toggles-label">Sources</span>
+          <label class="research-source-pill" title="When off, preprint hosts (arXiv, bioRxiv, medRxiv) are filtered from academic engine results">
             <input type="checkbox" id="research-include-preprints" checked>
-            <span>Include preprints (arXiv, bioRxiv, medRxiv)</span>
+            <span>Preprints</span>
           </label>
-          <label class="research-preprint-toggle" title="Search your synced Zotero catalog and load library seeds (Topic tab)">
+          <label class="research-source-pill" title="Keyword search on your synced Zotero catalog">
             <input type="checkbox" id="research-include-zotero" checked>
-            <span>Include Zotero library</span>
+            <span>Zotero</span>
           </label>
-          <label class="research-preprint-toggle" title="Pull matching papers and documents from your Links knowledge graph">
+          <label class="research-source-pill" title="Papers and documents from Links">
             <input type="checkbox" id="research-include-knowledge" checked>
-            <span>Include Links (documents &amp; graph)</span>
+            <span>Links</span>
           </label>
-        </div>
-        <div id="research-pane-topic" class="research-compose-pane">
           <label class="research-setting research-length-inline">
             <span class="research-setting-label">Report length</span>
             <select id="research-report-length">
@@ -720,42 +1159,98 @@ function _buildPanelHTML() {
             <span class="research-project-hint">Optional for compare / gap analysis — we'll ask before linking when research completes.</span>
           </label>
           <div class="research-seeds-block research-seeds-block--compact">
-            <div class="research-seeds-label">Seed papers</div>
+            <div class="research-seeds-head">
+              <span class="research-seeds-label">Seed papers</span>
+              <span id="research-seed-count" class="research-seed-count" hidden></span>
+              <button type="button" id="research-seed-clear" class="research-seed-clear" hidden>Clear all</button>
+            </div>
             <div id="research-seed-chips" class="research-seed-chips"></div>
             <div id="research-seed-preview" class="research-seed-preview" hidden></div>
-            <div class="research-seed-actions">
-              <button type="button" id="research-seed-browse" class="research-seed-browse-btn">Browse library</button>
-              <input type="text" id="research-seed-input" class="research-seed-input" placeholder="Zotero key or DOI…">
-              <button type="button" id="research-seed-add" class="research-seed-add-btn">Add</button>
+            <div class="research-seed-search-wrap">
+              <svg class="research-seed-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="search" id="research-seed-input" class="research-seed-input" placeholder="Search your library, or paste a DOI / Zotero key…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="research-seed-picker">
             </div>
             <div id="research-seed-input-hint" class="research-seed-input-hint"></div>
-            <div id="research-seed-picker" class="research-seed-picker" style="display:none"></div>
+            <div id="research-seed-picker" class="research-seed-picker" hidden></div>
           </div>
         </div>
-        <button id="research-settings-toggle" class="research-settings-toggle${chevronCls}">
-          Settings<span class="research-settings-chevron">${_chevronIcon}</span>
-        </button>
-        <div id="research-settings-body" class="research-settings-row"${settingsHidden}>
-          <label class="research-setting">
-            <span class="research-setting-label">Rounds</span>
-            <select id="research-rounds">${roundOpts}</select>
-          </label>
-          <label class="research-setting">
-            <span class="research-setting-label">Search engine</span>
-            <select id="research-search-provider">${providerOpts}</select>
-          </label>
-          <label class="research-setting">
-            <span class="research-setting-label">Endpoint</span>
-            <select id="research-endpoint"><option value="">Default</option></select>
-          </label>
-          <label class="research-setting">
-            <span class="research-setting-label">Model</span>
-            <select id="research-model"><option value="">Default</option></select>
-          </label>
+        </div>
+        <div id="research-step-plan" class="research-wizard-pane" hidden>
+        <div id="research-plan-review" class="research-plan-review">
+          <div class="research-plan-review-head">
+            <span class="research-plan-review-title">Search plan</span>
+          </div>
+          <p id="research-plan-status" class="research-plan-status" hidden></p>
+          <p id="research-plan-seed-note" class="research-plan-seed-note" hidden></p>
+          <div class="research-plan-grid">
+            <label class="research-plan-field research-plan-field--wide">
+              <span>Search keywords</span>
+              <textarea id="research-plan-keywords" rows="2" placeholder="Foldseek, 3Di alphabet, structure search…"></textarea>
+            </label>
+            <label class="research-plan-field">
+              <span>Scope</span>
+              <select id="research-plan-scope">
+                <option value="balanced">Balanced</option>
+                <option value="narrow_compare">Narrow / compare</option>
+                <option value="gap_analysis">Gap analysis</option>
+                <option value="field_overview">Field overview</option>
+              </select>
+            </label>
+          </div>
+          <details class="research-disclosure research-plan-advanced">
+            <summary>Refine plan (optional)</summary>
+            <div class="research-plan-grid">
+              <label class="research-plan-field">
+                <span>Anchor terms</span>
+                <textarea id="research-plan-anchors" rows="2" placeholder="Terms that must stay in scope…"></textarea>
+              </label>
+              <label class="research-plan-field">
+                <span>Avoid topics</span>
+                <textarea id="research-plan-avoid" rows="2" placeholder="Unrelated subfields to reject…"></textarea>
+              </label>
+              <label class="research-plan-field research-plan-field--wide">
+                <span>Sub-questions</span>
+                <textarea id="research-plan-subq" rows="2"></textarea>
+              </label>
+              <label class="research-plan-field research-plan-field--wide">
+                <span>Key topics</span>
+                <textarea id="research-plan-topics" rows="2"></textarea>
+              </label>
+              <label class="research-plan-field research-plan-field--wide">
+                <span>Success criteria</span>
+                <textarea id="research-plan-success" rows="2"></textarea>
+              </label>
+            </div>
+          </details>
+        </div>
+        <details class="research-disclosure research-run-advanced">
+          <summary>Advanced run settings</summary>
+          <div class="research-settings-row research-run-settings">
+            <label class="research-setting">
+              <span class="research-setting-label">Agent rounds</span>
+              <select id="research-rounds">${roundOpts}</select>
+            </label>
+            <label class="research-setting">
+              <span class="research-setting-label">Web search</span>
+              <select id="research-search-provider">${providerOpts}</select>
+            </label>
+            <label class="research-setting">
+              <span class="research-setting-label">Endpoint</span>
+              <select id="research-endpoint"><option value="">Default</option></select>
+            </label>
+            <label class="research-setting">
+              <span class="research-setting-label">Model</span>
+              <select id="research-model"><option value="">Default</option></select>
+            </label>
+          </div>
+        </details>
         </div>
         <div class="research-controls-row">
-          <button id="research-add-btn" class="research-add-btn"><span class="research-add-plus">+</span> Queue</button>
-          <button id="research-start-btn" class="research-start-btn">${_playIcon} Start</button>
+          <button type="button" id="research-back-btn" class="research-back-btn" hidden aria-label="Back to question">${_arrowLeftIcon} Back</button>
+          <span class="research-controls-spacer"></span>
+          <button id="research-add-btn" class="research-add-btn" hidden title="Add to queue with the current search plan">${_plusIcon} Queue</button>
+          <button type="button" id="research-continue-btn" class="research-continue-btn">Continue</button>
+          <button id="research-start-btn" class="research-start-btn" hidden>${_playIcon} Start research</button>
         </div>
       </div>
       <div id="research-jobs-list" class="research-jobs-list" data-no-swipe-dismiss></div>
@@ -794,7 +1289,9 @@ function _wireEvents(pane) {
     const btn = document.getElementById('tool-research-btn');
     if (btn) btn.classList.add('minimized');
   });
-  pane.querySelector('#research-start-btn').addEventListener('click', _handleStart);
+  pane.querySelector('#research-continue-btn')?.addEventListener('click', _handleContinue);
+  pane.querySelector('#research-back-btn')?.addEventListener('click', _handleBack);
+  pane.querySelector('#research-start-btn')?.addEventListener('click', _confirmPlanAndRun);
   pane.querySelector('#research-add-btn').addEventListener('click', _handleAdd);
   pane.querySelectorAll('.research-compose-tab').forEach(btn => {
     btn.addEventListener('click', () => _switchComposeTab(btn.getAttribute('data-tab')));
@@ -804,50 +1301,66 @@ function _wireEvents(pane) {
     if (savedTab === 'papers' || savedTab === 'topic') _activeComposeTab = savedTab;
   } catch {}
   _switchComposeTab(_activeComposeTab);
-  pane.querySelector('#research-seed-browse')?.addEventListener('click', () => { void _toggleSeedPicker(); });
-  pane.querySelector('#research-seed-add')?.addEventListener('click', () => {
-    const inp = document.getElementById('research-seed-input');
-    const parsed = _parseSeedInput(inp?.value || '');
-    if (!parsed.ok) {
-      _setSeedInputHint(parsed.error, true);
-      inp?.focus();
-      return;
-    }
-    if (_addSeedPaper(parsed.paper)) {
-      if (inp) inp.value = '';
-      _setSeedInputHint('');
-    } else {
-      _setSeedInputHint('Already in seed list', false);
+  pane.querySelector('#research-seed-clear')?.addEventListener('click', _clearAllSeeds);
+  const seedInput = pane.querySelector('#research-seed-input');
+  seedInput?.addEventListener('focus', () => { if (!_seedPickerOpen) _openSeedPicker(); });
+  seedInput?.addEventListener('input', () => {
+    _setSeedInputHint('');
+    if (!_seedPickerOpen) _openSeedPicker();
+    else _scheduleSeedSearch((seedInput.value || '').trim());
+  });
+  seedInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!_seedPickerOpen) _openSeedPicker();
+      _setSeedActive(_seedActiveIdx + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _setSeedActive(_seedActiveIdx - 1);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const picker = document.getElementById('research-seed-picker');
+      const active = picker?.querySelector('.research-seed-picker-card.is-active');
+      if (active) { _toggleSeedFromCard(active); return; }
+      const parsed = _parseSeedInput(seedInput.value || '');
+      if (parsed.ok) {
+        if (_addSeedPaper(parsed.paper)) {
+          seedInput.value = '';
+          _setSeedInputHint('');
+          void _runSeedSearch('');
+        } else {
+          window.uiModule?.showToast?.('Already in seed list', 2500);
+        }
+      } else if ((seedInput.value || '').trim()) {
+        // Not a ref — add the top library match if there is one.
+        const first = picker?.querySelector('.research-seed-picker-card');
+        if (first) _toggleSeedFromCard(first);
+        else _setSeedInputHint(parsed.error, true);
+      }
+    } else if (e.key === 'Escape') {
+      if (_seedPickerOpen) { e.preventDefault(); _closeSeedPicker(); }
     }
   });
-  pane.querySelector('#research-seed-input')?.addEventListener('input', () => _setSeedInputHint(''));
-  pane.querySelector('#research-seed-input')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      document.getElementById('research-seed-add')?.click();
-    }
+  // Close the picker when focus/clicks move outside the seeds block.
+  document.addEventListener('click', (e) => {
+    if (!_seedPickerOpen) return;
+    const block = document.querySelector('#research-pane-papers .research-seeds-block');
+    if (block && !block.contains(e.target)) _closeSeedPicker();
   });
   _loadSeedsFromStorage();
   _renderSeedChips();
   _scheduleSeedPreview();
 
-  pane.querySelector('#research-settings-toggle').addEventListener('click', () => {
-    const body = document.getElementById('research-settings-body');
-    const btn = document.getElementById('research-settings-toggle');
-    if (!body || !btn) return;
-    _settingsCollapsed = !_settingsCollapsed;
-    body.style.display = _settingsCollapsed ? 'none' : '';
-    btn.classList.toggle('collapsed', _settingsCollapsed);
-    try { localStorage.setItem('odysseus-research-settings-collapsed', _settingsCollapsed ? '1' : '0'); } catch {}
-  });
-
   const queryInput = pane.querySelector('#research-query');
   queryInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      _handleStart();
+      if (_researchStep === 2) _confirmPlanAndRun();
+      else _handleContinue();
     }
   });
+  queryInput.addEventListener('input', _updateComposeValidity);
+  pane.querySelector('#research-plan-keywords')?.addEventListener('input', _updatePlanValidity);
 
   const endpointSelect = pane.querySelector('#research-endpoint');
   endpointSelect.addEventListener('change', () => _populateModels(endpointSelect.value));
@@ -856,12 +1369,18 @@ function _wireEvents(pane) {
     pane.querySelector(`#${id}`)?.addEventListener('change', _saveSettingsToStorage);
   });
 
+  ['research-rounds', 'research-search-provider', 'research-endpoint', 'research-model'].forEach((id) => {
+    pane.querySelector(`#${id}`)?.addEventListener('change', _saveSettingsToStorage);
+  });
+
   pane.querySelector('#research-mode')?.addEventListener('change', () => {
     projectLink.updateProjectPickerVisibility();
     _saveSettingsToStorage();
+    _updateSeedMetaUI();
   });
   pane.querySelector('#research-project-id')?.addEventListener('change', _saveSettingsToStorage);
 
+  _setResearchStep(1);
   _renderJobs();
   void projectLink.populateProjectSelect(_apiBase, document.getElementById('research-project-id'));
   projectLink.updateProjectPickerVisibility();
@@ -904,20 +1423,20 @@ function _readSettings() {
 }
 
 function _handleAdd() {
+  if (_researchStep !== 2 || !_pendingPlanLaunch) return;
+  const approved = _readApprovedPlanFromForm();
+  const { query } = _pendingPlanLaunch;
+  const settings = { ..._pendingPlanLaunch.settings, ..._readSettings(), approved_plan: approved };
+  jobs.addToQueue(query, settings);
+  _planFetchToken += 1;
+  _pendingPlanLaunch = null;
+  _setPlanStatus('', '');
+  _setResearchStep(1);
   const queryEl = document.getElementById('research-query');
-  const query = (queryEl?.value || '').trim();
-  const tab = _getActiveComposeTab();
-  const seeds = _seedRefsForApi();
-  if (tab === 'topic' && !query) { queryEl?.focus(); return; }
-  if (tab === 'papers' && !seeds.length && !query) {
-    document.getElementById('research-seed-input')?.focus();
-    return;
+  if (queryEl) {
+    queryEl.value = '';
+    queryEl.focus();
   }
-  _saveSettingsToStorage();
-  const label = query || (tab === 'papers' ? 'Literature synthesis from seed papers' : '');
-  jobs.addToQueue(label, _readSettings());
-  queryEl.value = '';
-  queryEl.focus();
 }
 
 // Move a job's data back into the compose form so user can edit and re-queue
@@ -953,91 +1472,21 @@ function _editJob(job) {
   if (epEl && s.endpoint_id) epEl.value = s.endpoint_id;
   const mEl = document.getElementById('research-model');
   if (mEl && s.model) mEl.value = s.model;
-  // Remove the old job so clicking Start/Queue makes a fresh one
+  if (s.approved_plan) {
+    _pendingPlanLaunch = {
+      query: job.query || '',
+      settings: { ...s },
+    };
+    delete _pendingPlanLaunch.settings.approved_plan;
+    _fillPlanReviewForm(s.approved_plan);
+    _setResearchStep(2);
+    _setPlanStatus('ready', 'Edit the search plan, then start or queue.');
+  } else {
+    _setResearchStep(1);
+  }
   jobs.removeJob(job.id);
   // Scroll the form into view
   queryEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-async function _handleStart() {
-  const queryEl = document.getElementById('research-query');
-  const startBtn = document.getElementById('research-start-btn');
-  const query = (queryEl?.value || '').trim();
-  const tab = _getActiveComposeTab();
-  const seeds = _seedRefsForApi();
-  const mode = document.getElementById('research-mode')?.value || 'literature_review';
-  if (tab === 'papers' && mode === 'compare' && seeds.length < 2) {
-    if (typeof uiModule !== 'undefined' && uiModule?.showError) {
-      uiModule.showError('Compare mode requires at least 2 seed papers.');
-    }
-    return;
-  }
-  if (tab === 'topic' && !query) {
-    const queued = jobs.getJobs().filter(j => j.status === 'queued').length;
-    if (!queued) { queryEl?.focus(); return; }
-  }
-  if (tab === 'papers' && !seeds.length && !query) {
-    const queued = jobs.getJobs().filter(j => j.status === 'queued').length;
-    if (!queued) { document.getElementById('research-seed-input')?.focus(); return; }
-  }
-
-  const queuedCount = jobs.getJobs().filter(j => j.status === 'queued').length;
-  if (queuedCount > 1) {
-    const canQueue = (tab === 'topic' && query) || (tab === 'papers' && (seeds.length || query));
-    if (canQueue) { _saveSettingsToStorage(); jobs.addToQueue(query || 'Literature synthesis from seed papers', _readSettings()); queryEl.value = ''; }
-    if (window.innerWidth <= 768) _dismissKeyboard(queryEl);
-    _promptParallelOrSequential(jobs.getJobs().filter(j => j.status === 'queued').length, startBtn);
-    return;
-  }
-
-  // Visual + spinner feedback while the launch request is in flight
-  const _setBusy = (busy) => {
-    if (!startBtn) return;
-    if (busy) {
-      startBtn.disabled = true;
-      startBtn.dataset._origHTML = startBtn.dataset._origHTML || startBtn.innerHTML;
-      startBtn.innerHTML = '';
-      try {
-        const _wp = spinnerModule.createWhirlpool(14);
-        _wp.element.style.cssText += ';vertical-align:middle;margin-right:5px;position:relative;top:-1px;';
-        startBtn.appendChild(_wp.element);
-      } catch {}
-      startBtn.appendChild(document.createTextNode('Starting'));
-      startBtn.classList.add('research-start-busy');
-    } else {
-      startBtn.disabled = false;
-      startBtn.classList.remove('research-start-busy');
-      if (startBtn.dataset._origHTML) {
-        startBtn.innerHTML = startBtn.dataset._origHTML;
-      }
-    }
-  };
-
-  // Show busy briefly for click feedback. Don't await the full launch —
-  // the per-job card immediately shows "Starting..." progress, and the
-  // backend POST can take a while.
-  _setBusy(true);
-  setTimeout(() => _setBusy(false), 1500);
-
-  const _mobile = window.innerWidth <= 768;
-  const canLaunchForm = (tab === 'topic' && query) || (tab === 'papers' && (seeds.length || query));
-  if (canLaunchForm) {
-    _saveSettingsToStorage();
-    const settings = _readSettings();
-    const label = query || 'Literature synthesis from seed papers';
-    queryEl.value = '';
-    if (_mobile) _dismissKeyboard(queryEl); else queryEl.focus();
-    jobs.startJob(label, settings).catch(() => {
-      if (typeof uiModule !== 'undefined' && uiModule?.showError) uiModule.showError('Failed to start research');
-      queryEl.value = query;
-    });
-    return;
-  }
-  if (queuedCount >= 1) {
-    jobs.startAllQueued();
-    if (_mobile) _dismissKeyboard(queryEl);
-    return;
-  }
 }
 
 function _restoreSavedSettings() {
@@ -1120,6 +1569,11 @@ function _renderJobs() {
   _syncResearchRail();
   const container = document.getElementById('research-jobs-list');
   if (!container) return;
+
+  if (!jobs.isHydrated()) {
+    showLoadingRow(container, 'Loading research…');
+    return;
+  }
 
   const allJobs = jobs.getJobs();
   if (!allJobs.length) {
@@ -1256,7 +1710,7 @@ function _renderJobs() {
     if (key === 'past') {
       const hint = document.createElement('div');
       hint.className = 'memory-desc doclib-desc research-library-hint';
-      hint.innerHTML = 'All past research found in <button type="button" class="research-library-link">Library, Research</button>';
+      hint.innerHTML = 'Past reports in <button type="button" class="research-library-link">Library → Research</button>';
       hint.querySelector('.research-library-link').addEventListener('click', (e) => {
         e.stopPropagation();
         // Close the research panel first so the Library opens ABOVE it on mobile
@@ -1451,6 +1905,26 @@ function _buildJobCard(job) {
     const failNote = failed
       ? `<div class="research-job-failnote">Couldn't extract anything — try rephrasing the question, or switch the search engine in Settings.</div>`
       : '';
+    const connCount = jobs.isConnectionsReviewed(job.id)
+      ? 0
+      : (job.graph_connection_proposals?.proposal_count || 0);
+    const connBtn = connCount
+      ? `<button class="research-job-action research-job-action-connections" data-action="connections" title="Review proposed graph links from this research">${_linkIcon} Review ${connCount} graph connection${connCount === 1 ? '' : 's'}</button>`
+      : '';
+    // Actions stay hidden until the card is opened — past research reads as a
+    // clean list of titles, and the (simplified) action row only appears on
+    // demand. Graph-connection review is the one CTA kept visible when present.
+    const actionsHtml = `
+      <div class="research-job-actions">
+        <button class="research-job-action research-job-action-report" data-action="report" title="Visual report">${_externalIcon} Visual Report</button>
+        <button class="research-job-action" data-action="chat" title="Open follow-up chat with this research as context">${_chatIcon} Discuss</button>
+        <button class="research-job-action" data-action="export" title="Download report">${_exportIcon} Export</button>
+        <button class="research-job-action" data-action="copy" title="Copy report to clipboard">${_copyIcon} Copy</button>
+        <button class="research-job-action" data-action="zotero" title="Save cited web sources to your Zotero library">${_bookmarkIcon} Save to Zotero</button>
+        <button class="research-job-action" data-action="project" title="Link this research to a project workspace">${_folderPlusIcon} Add to project</button>
+        <button class="research-job-action research-job-action-dim" data-action="dismiss" title="Clear from list">${_cancelIcon} Clear</button>
+        <button class="research-job-action research-job-action-dim" data-action="delete" title="Delete from disk">${_trashIcon} Delete</button>
+      </div>`;
     card.innerHTML = `
       <div class="research-job-header">
         <span class="research-job-query">${_esc(job.query)}</span>${doneBadge}
@@ -1458,17 +1932,9 @@ function _buildJobCard(job) {
         <span class="research-job-meta">${elapsed} -- ${srcCount} sources</span>
       </div>
       ${failNote}
-      <div class="research-job-actions">
-        <button class="research-job-action" data-action="copy" title="Copy report to clipboard">${_copyIcon}</button>
-        <button class="research-job-action" data-action="export" title="Download report">${_exportIcon} Export</button>
-        <button class="research-job-action" data-action="chat" title="Open follow-up chat with this research as context">${_chatIcon} Discuss</button>
-        <button class="research-job-action research-job-action-report" data-action="report" title="Visual report">${_externalIcon} Visual Report</button>
-        <button class="research-job-action" data-action="zotero" title="Save cited web sources to your Zotero library">Save to Zotero</button>
-        <button class="research-job-action" data-action="project" title="Link this research to a project workspace">Add to project</button>
-        <button class="research-job-action research-job-action-dim" data-action="dismiss" title="Clear from list">${_cancelIcon}</button>
-        <button class="research-job-action research-job-action-dim" data-action="delete" title="Delete from disk">${_trashIcon} Delete</button>
-      </div>
-      ${isExpanded ? `<div class="research-job-result">${_renderResult(job)}</div>` : '<div class="research-job-preview-hint">Click to preview report</div>'}
+      ${connBtn ? `<div class="research-job-actions research-job-actions-conn">${connBtn}</div>` : ''}
+      ${isExpanded ? actionsHtml : ''}
+      ${isExpanded ? `<div class="research-job-result">${_renderResult(job)}</div>` : '<div class="research-job-preview-hint">Click to preview report &amp; actions</div>'}
     `;
     card.classList.toggle('is-expanded', isExpanded);
     card.addEventListener('click', async (e) => {
@@ -1480,21 +1946,37 @@ function _buildJobCard(job) {
       }
       _renderJobs();
     });
-    card.querySelector('[data-action="copy"]').addEventListener('click', async (e) => {
+    card.querySelector('[data-action="connections"]')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      if (btn.dataset.busy === '1') return;
+      btn.dataset.busy = '1';
+      try {
+        const open = await jobs.toggleResearchConnections(job);
+        btn.classList.toggle('is-active', open);
+        const n = job.graph_connection_proposals?.proposal_count || 0;
+        btn.innerHTML = open
+          ? `${_linkIcon} Hide graph connection${n === 1 ? '' : 's'}`
+          : `${_linkIcon} Review ${n} graph connection${n === 1 ? '' : 's'}`;
+      } finally {
+        btn.dataset.busy = '';
+      }
+    });
+    card.querySelector('[data-action="copy"]')?.addEventListener('click', async (e) => {
       e.stopPropagation();
       const btn = e.currentTarget; // capture before await — currentTarget becomes null after
       if (!job.result) await _ensureResult(job);
       _copyResult(job, btn);
     });
-    card.querySelector('[data-action="export"]').addEventListener('click', (e) => {
+    card.querySelector('[data-action="export"]')?.addEventListener('click', (e) => {
       e.stopPropagation();
       _toggleResearchExportMenu(e.currentTarget, job.id);
     });
-    card.querySelector('[data-action="report"]').addEventListener('click', (e) => {
+    card.querySelector('[data-action="report"]')?.addEventListener('click', (e) => {
       e.stopPropagation();
       window.open(`${_apiBase}/api/research/report/${job.id}`, '_blank');
     });
-    card.querySelector('[data-action="chat"]').addEventListener('click', (e) => {
+    card.querySelector('[data-action="chat"]')?.addEventListener('click', (e) => {
       e.stopPropagation();
       _chatAboutResearch(job.id, e.currentTarget);
     });
@@ -1525,7 +2007,7 @@ function _buildJobCard(job) {
       e.stopPropagation();
       void projectLink.promptLinkResearchJob(job, _apiBase);
     });
-    card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+    card.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (window.styledConfirm) {
         const ok = await window.styledConfirm('Delete this research? This permanently removes it from disk.', { confirmText: 'Delete', danger: true });
@@ -1534,7 +2016,7 @@ function _buildJobCard(job) {
       try { await fetch(`${_apiBase}/api/research/${job.id}`, { method: 'DELETE', credentials: 'same-origin' }); } catch {}
       _animateOutThenRemove(card, () => jobs.removeJob(job.id));
     });
-    card.querySelector('[data-action="dismiss"]').addEventListener('click', (e) => {
+    card.querySelector('[data-action="dismiss"]')?.addEventListener('click', (e) => {
       e.stopPropagation();
       _animateOutThenRemove(card, () => jobs.removeJob(job.id));
     });
@@ -1821,6 +2303,42 @@ function _toggleResearchExportMenu(anchorBtn, jobId) {
   });
 }
 
+function _renderVerificationBadge(job) {
+  const v = job.verification;
+  if (!v || !(v.checked > 0)) return '';
+  const supported = v.supported || 0;
+  const partial = v.partial || 0;
+  const unsupported = v.unsupported || 0;
+  let tone = 'ok', label = 'Citations verified';
+  if (unsupported) { tone = 'bad'; label = 'Citations need review'; }
+  else if (partial) { tone = 'warn'; label = 'Citations mostly verified'; }
+  const conf = (typeof v.confidence === 'number') ? ` · ${v.confidence}% supported` : '';
+  const flagged = Array.isArray(v.flagged) ? v.flagged : [];
+  let details = '';
+  if (flagged.length) {
+    const rows = flagged.slice(0, 20).map((it) => {
+      const verdict = String(it.verdict || '').toUpperCase();
+      const vc = verdict === 'UNSUPPORTED' ? 'bad' : 'warn';
+      const cites = (it.citations || []).map((n) => `[${n}]`).join(' ');
+      const reason = it.reason ? ` — <em>${_esc(it.reason)}</em>` : '';
+      return `<li><span class="rv-tag rv-${vc}">${_esc(verdict)}</span> `
+        + `<span class="rv-cite">${_esc(cites)}</span> `
+        + `${_esc(it.claim || '')}${reason}</li>`;
+    }).join('');
+    details = `<details class="rv-details"><summary>Review ${flagged.length} flagged `
+      + `claim${flagged.length === 1 ? '' : 's'}</summary><ul class="rv-list">${rows}</ul></details>`;
+  }
+  return `<div class="rv-badge rv-${tone}">`
+    + `<div class="rv-head"><span class="rv-dot"></span>`
+    + `<span class="rv-label">${_esc(label)}</span>`
+    + `<span class="rv-meta">${v.checked} claims checked${conf}</span></div>`
+    + `<div class="rv-counts">`
+    + `<span class="rv-count rv-ok">${supported} supported</span>`
+    + `<span class="rv-count rv-warn">${partial} partial</span>`
+    + `<span class="rv-count rv-bad">${unsupported} unsupported</span></div>`
+    + `${details}</div>`;
+}
+
 function _renderResult(job) {
   if (!job.result) return '<div class="research-job-loading">Loading result...</div>';
   const reportText = job.rawReport || job.result;
@@ -1830,6 +2348,7 @@ function _renderResult(job) {
   let html = '<div class="research-report-shell">';
   html += _renderRegistrySources(registrySources);
   html += '<div class="research-report-main">';
+  html += _renderVerificationBadge(job);
   html += `
     <section class="research-preview-section">
       <div class="research-preview-label">Executive Summary</div>
@@ -1854,6 +2373,7 @@ async function _ensureResult(job) {
     job.sources = d.sources;
     job.findings = d.raw_findings;
     job.evidence_registry = d.evidence_registry || null;
+    job.verification = d.verification || null;
   } catch {}
 }
 

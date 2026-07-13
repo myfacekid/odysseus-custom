@@ -1,0 +1,9 @@
+# Local Deep Research (LDR) stack — optional until research_engine=ldr is enabled.
+# Install: pip install -r requirements-optional-ldr.txt
+#
+# Requires Python >=3.12 and <=3.13 (LDR transitive deps e.g. crawl4ai pin lxml~=5.3
+# without wheels for Python 3.14+). Brings LangChain + LangGraph.
+# Odysseus uses LDR for LangGraph agent retrieval only; Flask/SQLCipher from
+# LDR are not used at runtime when programmatic_mode=True.
+
+local-deep-research>=1.7.0,<2.0.0

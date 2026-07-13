@@ -66,6 +66,318 @@ def _http_text(url: str, *, timeout: int = 20) -> str:
         return ""
 
 
+def doi_urls(doi: str) -> Dict[str, str]:
+    """Canonical doi.org landing URL (HTML and PDF via content negotiation)."""
+    doi = normalize_doi(doi)
+    if not doi.startswith("10."):
+        return {}
+    encoded = urllib.parse.quote(doi, safe="/")
+    landing = f"https://doi.org/{encoded}"
+    return {"html": landing, "pdf": landing, "doi": doi}
+
+
+def _http_get(
+    url: str,
+    *,
+    accept: str = "*/*",
+    timeout: int = 25,
+) -> tuple[bytes, str, str]:
+    """GET with Accept header; returns (body, content_type, final_url)."""
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": _USER_AGENT, "Accept": accept},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read(), (resp.headers.get("Content-Type") or ""), (resp.geturl() or url)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+        logger.info("Paper GET failed (%s): %s", url[:80], exc)
+        return b"", "", url
+
+
+def fetch_doi_pdf_text(
+    doi: str,
+    *,
+    title: str = "",
+    max_chars: int = 50000,
+) -> Dict[str, str]:
+    """Request PDF from doi.org (content negotiation) and extract text."""
+    urls = doi_urls(doi)
+    landing = urls.get("pdf") or ""
+    if not landing:
+        return {}
+    body, ctype, final_url = _http_get(
+        landing,
+        accept="application/pdf,application/x-pdf,text/pdf;q=0.9,*/*;q=0.1",
+        timeout=30,
+    )
+    is_pdf = body.startswith(b"%PDF") or "pdf" in ctype.lower()
+    if not is_pdf or not body:
+        return {}
+    text = _extract_pdf_from_bytes(body, max_chars=max_chars)
+    if not is_usable_paper_content(text, title=title):
+        return {}
+    return {
+        "fulltext": text[:max_chars],
+        "source": "doi_pdf",
+        "source_url": final_url or landing,
+    }
+
+
+def fetch_doi_article_html(
+    doi: str,
+    *,
+    title: str = "",
+    max_chars: int = 50000,
+) -> Dict[str, str]:
+    """Follow doi.org to the publisher HTML page and extract article text."""
+    urls = doi_urls(doi)
+    landing = urls.get("html") or ""
+    if not landing:
+        return {}
+    try:
+        body, ctype, final_url = _http_get(
+            landing,
+            accept="text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+            timeout=25,
+        )
+        text = ""
+        if body and "html" in ctype.lower():
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(body.decode("utf-8", errors="replace"), "html.parser")
+            for tag in soup.find_all(["script", "style", "nav", "header", "footer", "aside"]):
+                tag.decompose()
+            main = (
+                soup.find("article")
+                or soup.find("main")
+                or soup.find("div", class_=re.compile(r"\barticle\b|fulltext|body-content", re.I))
+            )
+            if main:
+                text = re.sub(r"\s+", " ", main.get_text(separator=" ", strip=True)).strip()
+        if not text:
+            from src.search.content import fetch_webpage_content
+
+            page = fetch_webpage_content(landing, timeout=20, include_og_image=False)
+            text = (page.get("content") or "").strip()
+            final_url = page.get("url") or final_url or landing
+    except Exception as exc:
+        logger.info("DOI article HTML fetch failed (%s): %s", landing[:80], exc)
+        return {}
+    if not is_usable_paper_content(text, title=title):
+        return {}
+    return {
+        "fulltext": text[:max_chars],
+        "source": "doi_article_html",
+        "source_url": final_url or landing,
+    }
+
+
+def _apply_doi_fulltext(
+    best: Dict[str, str],
+    doi: str,
+    *,
+    title: str = "",
+) -> None:
+    """Try doi.org PDF negotiation then publisher HTML — keep the richest result."""
+    doi = normalize_doi(doi)
+    if not doi.startswith("10."):
+        return
+
+    candidates: list[tuple[str, Dict[str, str]]] = []
+
+    pdf_hit = fetch_doi_pdf_text(doi, title=title)
+    if pdf_hit.get("fulltext"):
+        candidates.append((pdf_hit["fulltext"], pdf_hit))
+
+    html_hit = fetch_doi_article_html(doi, title=title)
+    if html_hit.get("fulltext"):
+        candidates.append((html_hit["fulltext"], html_hit))
+
+    if not candidates:
+        return
+
+    text, meta = max(candidates, key=lambda row: len(row[0]))
+    if len(text) > len(best.get("fulltext", "")):
+        best["fulltext"] = text[:50000]
+        best["source"] = meta.get("source") or "doi_fulltext"
+        best["source_url"] = meta.get("source_url") or best.get("source_url", "")
+        urls = doi_urls(doi)
+        if urls.get("doi"):
+            best["doi"] = urls["doi"]
+
+
+def fetch_pdf_text_from_url(url: str, *, max_chars: int = 50000) -> str:
+    """Download a PDF URL and extract text."""
+    if not url or not url.startswith("http"):
+        return ""
+    raw = _http_bytes(url, timeout=30)
+    if not raw:
+        return ""
+    return _extract_pdf_from_bytes(raw, max_chars=max_chars)
+
+
+def normalize_pmcid(raw: str) -> str:
+    """Normalize PMCID to ``PMC12345`` form."""
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    match = re.search(r"(PMC\d+)", text, re.I)
+    if match:
+        return match.group(1).upper()
+    if text.isdigit():
+        return f"PMC{text}"
+    return ""
+
+
+def pmc_article_urls(pmcid: str) -> Dict[str, str]:
+    """Canonical PMC article HTML and auto-resolve PDF URLs."""
+    cid = normalize_pmcid(pmcid)
+    if not cid:
+        return {}
+    base = f"https://pmc.ncbi.nlm.nih.gov/articles/{cid}/"
+    return {"html": base, "pdf": f"{base}pdf/"}
+
+
+def _http_bytes(url: str, *, timeout: int = 25) -> bytes:
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": _USER_AGENT, "Accept": "application/pdf,*/*"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+        logger.info("Paper fetch bytes failed (%s): %s", url[:80], exc)
+        return b""
+
+
+def _extract_pdf_from_bytes(raw: bytes, *, max_chars: int = 50000) -> str:
+    """Extract PDF text (wrapper for tests and lazy import)."""
+    if not raw:
+        return ""
+    try:
+        from src.search.content import _extract_pdf_bytes
+
+        return (_extract_pdf_bytes(raw, max_chars=max_chars) or "").strip()
+    except Exception as exc:
+        logger.info("PDF extract failed: %s", exc)
+        return ""
+
+
+def fetch_pmc_pdf_text(
+    pmcid: str,
+    *,
+    title: str = "",
+    max_chars: int = 50000,
+) -> Dict[str, str]:
+    """Download full text via PMC ``/pdf/`` redirect and extract with pypdf."""
+    urls = pmc_article_urls(pmcid)
+    pdf_url = urls.get("pdf") or ""
+    if not pdf_url:
+        return {}
+    raw = _http_bytes(pdf_url, timeout=30)
+    if not raw:
+        return {}
+    text = _extract_pdf_from_bytes(raw, max_chars=max_chars)
+    if not is_usable_paper_content(text, title=title):
+        return {}
+    return {
+        "fulltext": text[:max_chars],
+        "source": "pmc_pdf",
+        "source_url": pdf_url,
+    }
+
+
+def fetch_pmc_article_html(
+    pmcid: str,
+    *,
+    title: str = "",
+    max_chars: int = 50000,
+) -> Dict[str, str]:
+    """Fetch readable article text from the PMC article HTML page."""
+    urls = pmc_article_urls(pmcid)
+    html_url = urls.get("html") or ""
+    if not html_url:
+        return {}
+    try:
+        from bs4 import BeautifulSoup
+
+        page_html = _http_text(html_url, timeout=25)
+        if not page_html:
+            return {}
+        soup = BeautifulSoup(page_html, "html.parser")
+        for tag in soup.find_all(["script", "style", "nav", "header", "footer", "aside"]):
+            tag.decompose()
+        main = (
+            soup.find("div", id="mc")
+            or soup.find("article")
+            or soup.find("main")
+            or soup.find("div", class_=re.compile(r"\barticle\b", re.I))
+        )
+        if main:
+            text = re.sub(r"\s+", " ", main.get_text(separator=" ", strip=True)).strip()
+        else:
+            from src.search.content import fetch_webpage_content
+
+            page = fetch_webpage_content(html_url, timeout=15, include_og_image=False)
+            text = (page.get("content") or "").strip()
+    except Exception as exc:
+        logger.info("PMC article HTML fetch failed (%s): %s", html_url[:80], exc)
+        return {}
+    if not is_usable_paper_content(text, title=title):
+        return {}
+    return {
+        "fulltext": text[:max_chars],
+        "source": "pmc_article_html",
+        "source_url": html_url,
+    }
+
+
+def _apply_pmc_fulltext(
+    best: Dict[str, str],
+    pmcid: str,
+    *,
+    title: str = "",
+) -> None:
+    """Try PMC BioC, PDF, and article HTML — keep the richest result."""
+    cid = normalize_pmcid(pmcid)
+    if not cid:
+        return
+
+    candidates: list[tuple[str, Dict[str, str]]] = []
+
+    bioc = _pmc_xml_text(cid)
+    if is_usable_paper_content(bioc, title=title):
+        urls = pmc_article_urls(cid)
+        candidates.append(
+            (
+                bioc,
+                {
+                    "source": "pmc_bioc",
+                    "source_url": urls.get("html") or f"https://pmc.ncbi.nlm.nih.gov/articles/{cid}/",
+                },
+            )
+        )
+
+    pdf_hit = fetch_pmc_pdf_text(cid, title=title)
+    if pdf_hit.get("fulltext"):
+        candidates.append((pdf_hit["fulltext"], pdf_hit))
+
+    html_hit = fetch_pmc_article_html(cid, title=title)
+    if html_hit.get("fulltext"):
+        candidates.append((html_hit["fulltext"], html_hit))
+
+    if not candidates:
+        return
+
+    text, meta = max(candidates, key=lambda row: len(row[0]))
+    if len(text) > len(best.get("fulltext", "")):
+        best["fulltext"] = text[:50000]
+        best["source"] = meta.get("source") or "pmc_fulltext"
+        best["source_url"] = meta.get("source_url") or best.get("source_url", "")
+
+
 def _pubmed_id_for_doi(doi: str) -> str:
     q = urllib.parse.quote(f"{doi}[doi]")
     url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={q}&retmode=json"
@@ -121,14 +433,19 @@ def fetch_europe_pmc_record(doi: str) -> Dict[str, str]:
         return {}
     hit = hits[0]
     abstract = (hit.get("abstractText") or "").strip()
+    pmcid = normalize_pmcid(hit.get("pmcid") or "")
+    pmid = (hit.get("pmid") or "").strip()
     out: Dict[str, str] = {}
+    if pmcid:
+        out["pmcid"] = pmcid
+        urls = pmc_article_urls(pmcid)
+        out["pmc_html_url"] = urls.get("html") or ""
+        out["pmc_pdf_url"] = urls.get("pdf") or ""
     if abstract and is_usable_paper_content(abstract):
         out["abstract"] = abstract[:15000]
         out["source"] = "europe_pmc"
-        pmid = (hit.get("pmid") or "").strip()
-        pmcid = (hit.get("pmcid") or "").strip()
         if pmcid:
-            out["source_url"] = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/"
+            out["source_url"] = out.get("pmc_html_url") or f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/"
         elif pmid:
             out["source_url"] = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
     full_urls = hit.get("fullTextUrlList") or {}
@@ -205,11 +522,23 @@ def resolve_paper_content_by_doi(
                 best["fulltext"] = page[:50000]
                 best["source_url"] = full_url
                 best["source"] = "europe_pmc_fulltext"
-        pmcid_match = re.search(r"/pmc/articles/(PMC\d+)", best.get("source_url", ""), re.I)
-        if not best.get("fulltext") and pmcid_match:
-            pmc_text = _pmc_xml_text(pmcid_match.group(1))
-            if is_usable_paper_content(pmc_text, title=title):
-                best["fulltext"] = pmc_text
-                best["source"] = "pmc_fulltext"
+
+        pmcid = epmc.get("pmcid") or ""
+        if not pmcid:
+            for src_url in (epmc.get("source_url"), best.get("source_url")):
+                match = re.search(r"/articles/(PMC\d+)", src_url or "", re.I)
+                if match:
+                    pmcid = match.group(1)
+                    break
+        if not best.get("fulltext") and pmcid:
+            _apply_pmc_fulltext(best, pmcid, title=title)
+
+        if not best.get("fulltext"):
+            _apply_doi_fulltext(best, doi, title=title)
+
+    if not best.get("source_url"):
+        urls = doi_urls(doi)
+        if urls.get("html"):
+            best["source_url"] = urls["html"]
 
     return best

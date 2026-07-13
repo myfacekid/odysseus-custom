@@ -60,8 +60,9 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "bash": "Run shell commands on the server. Install packages, check files, git operations, curl, system info, process management, networking.",
     "python": "Execute Python code for computation, data processing, math, scripting, parsing, API calls. Not for writing code for the user.",
     "web_search": "Quick single web lookup for a fact, current event, or doc mid-task. NOT for the user's Zotero library — use search_zotero. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
-    "search_zotero": "Search the user's Zotero library. zotero_key or query paper:KEY fetches one paper; include_pdf=true extracts PDF text. Prefer search_knowledge read on paper:KEY for the same extraction. Do NOT web_search paper titles when the PDF is in the library.",
-    "search_knowledge": "Search the unified knowledge graph (tasks, documents, memories, skills, Zotero papers). read on paper:… auto-extracts Zotero PDF. Do NOT web_search to substitute for reading a saved paper.",
+    "search_zotero": "Search the user's Zotero library. Broad search = metadata/abstracts only. zotero_key + section=methods|results|… for Tier 2 section extract; include_pdf for full PDF. Prefer search_knowledge read on paper:KEY. Do NOT web_search paper titles when the PDF is in the library.",
+    "search_knowledge": "Search the unified knowledge graph (tasks, documents, memories, skills, Zotero papers). read on paper:… defaults to abstract + cached DR summary; section= for one PDF section; include_pdf for full text. neighbors excludes pending proposals unless include_proposed=true. suggest_link/merge_subgraph preview queue links for user review — do not apply unless user explicitly asks.",
+    "compare_papers": "Side-by-side comparison of 2–3 saved Zotero papers (methods, results, etc.). Reuses section extracts and DR summaries. 4+ papers auto-start Deep Research compare mode. Prefer over looping search_knowledge reads.",
     "web_fetch": "Fetch and read the text content of a specific URL/website the user names (e.g. 'check example.com', 'open this link'). Use when you have a concrete URL; for open-ended lookups use web_search instead.",
     "read_file": "Read a file from disk and return its contents. View source code, config files, logs.",
     "write_file": "Write content to a file on disk. Create new files, save output, update configs.",
@@ -328,6 +329,10 @@ class ToolIndex:
                    "one thing", "intermediate goal", "long horizon", "my todos today",
                    "what do i know about"}):
             {"search_knowledge", "manage_notes"},
+        frozenset({"compare papers", "compare these papers", "side by side", "side-by-side",
+                   "contrast methods", "compare methods", "compare results", "how do these papers",
+                   "differences between", "similarities between", "versus", " vs ", "compare the papers"}):
+            {"compare_papers", "search_knowledge", "trigger_research"},
         # Settings-change intent — "change my…/set my…/use X for…/turn on…".
         frozenset({"change my", "set my", "use the voice", "change the voice",
                    "my voice", "tts voice", "search engine", "default model",

@@ -93,10 +93,11 @@ export function getLayoutSizes(projectId) {
     leftWidth: typeof s.leftWidth === 'number' ? s.leftWidth : null,
     footerHeight: typeof s.footerHeight === 'number' ? s.footerHeight : null,
     footerExpanded: s.footerExpanded === true,
+    rightWidth: typeof s.rightWidth === 'number' ? s.rightWidth : null,
   };
 }
 
-export function saveLayoutSizes(projectId, { leftWidth, footerHeight, footerExpanded } = {}) {
+export function saveLayoutSizes(projectId, { leftWidth, footerHeight, footerExpanded, leftCollapsed, footerMinimized, rightWidth } = {}) {
   const prev = loadState(projectId).layout || {};
   saveState(projectId, {
     layout: {
@@ -104,8 +105,33 @@ export function saveLayoutSizes(projectId, { leftWidth, footerHeight, footerExpa
       ...(typeof leftWidth === 'number' ? { leftWidth } : {}),
       ...(typeof footerHeight === 'number' ? { footerHeight } : {}),
       ...(typeof footerExpanded === 'boolean' ? { footerExpanded } : {}),
+      ...(typeof leftCollapsed === 'boolean' ? { leftCollapsed } : {}),
+      ...(typeof footerMinimized === 'boolean' ? { footerMinimized } : {}),
+      ...(typeof rightWidth === 'number' ? { rightWidth } : {}),
     },
   });
+}
+
+export function getLayoutPreset(projectId) {
+  const s = loadState(projectId).layoutPreset || {};
+  const layout = loadState(projectId).layout || {};
+  return {
+    preset: typeof s.preset === 'string' ? s.preset : layout.preset || null,
+    leftCollapsed: s.leftCollapsed === true || layout.leftCollapsed === true,
+    footerMinimized: s.footerMinimized === true || layout.footerMinimized === true,
+  };
+}
+
+export function saveLayoutPreset(projectId, patch = {}) {
+  if (!projectId) return;
+  const prev = loadState(projectId).layoutPreset || {};
+  saveState(projectId, { layoutPreset: { ...prev, ...patch } });
+  if ('leftCollapsed' in patch || 'footerMinimized' in patch) {
+    saveLayoutSizes(projectId, {
+      leftCollapsed: patch.leftCollapsed,
+      footerMinimized: patch.footerMinimized,
+    });
+  }
 }
 
 export function getCenterSplit(projectId) {
@@ -174,6 +200,8 @@ export default {
   saveActiveCenterTab,
   getLayoutSizes,
   saveLayoutSizes,
+  getLayoutPreset,
+  saveLayoutPreset,
   getCenterSplit,
   saveCenterSplit,
   getSplitDepthTab,

@@ -419,6 +419,120 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         report_length: str = Field(default="standard")
         category: Optional[str] = None  # ignored — always academic
         project_id: Optional[str] = Field(default=None, max_length=128)
+        approved_plan: Optional[dict] = None
+
+    class ResearchPlanRequest(BaseModel):
+        query: str
+        endpoint_id: Optional[str] = None
+        model: Optional[str] = None
+        seed_papers: List[str] = Field(default_factory=list)
+        mode: str = Field(default="literature_review")
+        include_zotero: bool = True
+
+    def _resolve_panel_llm(endpoint_id: Optional[str], model_override: Optional[str]):
+        if endpoint_id:
+            from src.database import SessionLocal
+            from src.database import ModelEndpoint
+            from src.endpoint_resolver import normalize_base, build_chat_url, build_headers
+
+            db = SessionLocal()
+            try:
+                ep = db.query(ModelEndpoint).filter(
+                    ModelEndpoint.id == endpoint_id,
+                    ModelEndpoint.is_enabled == True,
+                ).first()
+                if not ep:
+                    raise HTTPException(404, "Endpoint not found or disabled")
+                base = normalize_base(ep.base_url)
+                ep_url = build_chat_url(base)
+                ep_headers = build_headers(ep.api_key, base)
+                ep_model = model_override or ""
+                if not ep_model:
+                    try:
+                        models = json.loads(ep.cached_models) if ep.cached_models else []
+                        if models:
+                            ep_model = _first_chat_model(models)
+                    except Exception:
+                        pass
+                return ep_url, ep_model, ep_headers
+            finally:
+                db.close()
+        ep_url, ep_model, ep_headers = resolve_endpoint("research")
+        if not ep_url:
+            ep_url, ep_model, ep_headers = resolve_endpoint("utility")
+        if not ep_url:
+            ep_url, ep_model, ep_headers = resolve_endpoint("default")
+        if not ep_url:
+            ep_url, ep_model, ep_headers = resolve_endpoint("chat")
+        if not ep_url:
+            from src.database import SessionLocal
+            from src.database import ModelEndpoint
+            from src.endpoint_resolver import normalize_base, build_chat_url, build_headers
+
+            db = SessionLocal()
+            try:
+                ep = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True).first()
+                if ep:
+                    base = normalize_base(ep.base_url)
+                    ep_url = build_chat_url(base)
+                    ep_headers = build_headers(ep.api_key, base)
+                    ep_model = ""
+                    if ep.cached_models:
+                        try:
+                            models = json.loads(ep.cached_models)
+                            if models:
+                                ep_model = _first_chat_model(models)
+                        except Exception:
+                            pass
+                else:
+                    ep_url, ep_model, ep_headers = "", "", {}
+            finally:
+                db.close()
+        if model_override:
+            ep_model = model_override
+        if not ep_url:
+            raise HTTPException(400, "No endpoints configured. Add one in Settings first.")
+        return ep_url, ep_model, ep_headers
+
+    @router.post("/api/research/plan")
+    async def research_plan(body: ResearchPlanRequest, request: Request):
+        """Generate a structured retrieval plan for user review before starting."""
+        from src.auth_helpers import require_privilege
+
+        user = require_privilege(request, "can_use_research")
+        if user == "internal-tool":
+            tool_owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            if tool_owner and tool_owner not in {"internal-tool", "api", "demo", "system"}:
+                user = tool_owner
+        query = (body.query or "").strip()
+        seed_papers = [s.strip() for s in (body.seed_papers or []) if (s or "").strip()]
+        mode = (body.mode or "literature_review").strip().lower()
+        allowed_modes = {"literature_review", "similar_papers", "gap_analysis", "compare"}
+        if mode not in allowed_modes:
+            raise HTTPException(400, f"mode must be one of: {', '.join(sorted(allowed_modes))}")
+        if not query and not seed_papers:
+            raise HTTPException(400, "query or seed_papers required")
+        if not query:
+            query = "Literature synthesis from selected seed papers."
+
+        ep_url, ep_model, ep_headers = _resolve_panel_llm(body.endpoint_id, body.model)
+        plan_payload = await research_handler.generate_research_plan(
+            query,
+            ep_url,
+            ep_model,
+            ep_headers,
+            owner=user,
+            seed_papers=seed_papers,
+            research_mode=mode,
+            include_zotero=body.include_zotero,
+        )
+        if not plan_payload:
+            raise HTTPException(502, "Plan generation failed")
+        return {
+            "query": query,
+            "mode": mode,
+            **plan_payload,
+        }
 
     @router.post("/api/research/start")
     async def research_start(body: ResearchStartRequest, request: Request):
@@ -441,72 +555,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
                 user = tool_owner
         session_id = f"rp-{uuid.uuid4().hex[:12]}"
 
-        if body.endpoint_id:
-            from src.database import SessionLocal
-            from src.database import ModelEndpoint
-            from src.endpoint_resolver import normalize_base, build_chat_url, build_headers
-            db = SessionLocal()
-            try:
-                ep = db.query(ModelEndpoint).filter(
-                    ModelEndpoint.id == body.endpoint_id,
-                    ModelEndpoint.is_enabled == True,
-                ).first()
-                if not ep:
-                    raise HTTPException(404, "Endpoint not found or disabled")
-                base = normalize_base(ep.base_url)
-                ep_url = build_chat_url(base)
-                ep_headers = build_headers(ep.api_key, base)
-                ep_model = body.model or ""
-                if not ep_model:
-                    try:
-                        import json as _json
-                        models = _json.loads(ep.cached_models) if ep.cached_models else []
-                        if models:
-                            ep_model = _first_chat_model(models)
-                    except Exception:
-                        pass
-            finally:
-                db.close()
-        else:
-            ep_url, ep_model, ep_headers = resolve_endpoint("research")
-            if not ep_url:
-                ep_url, ep_model, ep_headers = resolve_endpoint("utility")
-            # When neither research nor utility is configured, use the user's
-            # configured DEFAULT model (default_endpoint_id/default_model) rather
-            # than arbitrarily grabbing the first enabled endpoint's first model
-            # (which surfaced gpt-3.5). "Default" should mean the default model.
-            if not ep_url:
-                ep_url, ep_model, ep_headers = resolve_endpoint("default")
-            if not ep_url:
-                ep_url, ep_model, ep_headers = resolve_endpoint("chat")
-            if not ep_url:
-                from src.database import SessionLocal
-                from src.database import ModelEndpoint
-                from src.endpoint_resolver import normalize_base, build_chat_url, build_headers
-                db = SessionLocal()
-                try:
-                    ep = db.query(ModelEndpoint).filter(
-                        ModelEndpoint.is_enabled == True,
-                    ).first()
-                    if ep:
-                        base = normalize_base(ep.base_url)
-                        ep_url = build_chat_url(base)
-                        ep_headers = build_headers(ep.api_key, base)
-                        ep_model = ""
-                        if ep.cached_models:
-                            try:
-                                import json as _json
-                                models = _json.loads(ep.cached_models)
-                                if models:
-                                    ep_model = _first_chat_model(models)
-                            except Exception:
-                                pass
-                finally:
-                    db.close()
-            if not ep_url:
-                raise HTTPException(400, "No endpoints configured. Add one in Settings first.")
-            if body.model:
-                ep_model = body.model
+        ep_url, ep_model, ep_headers = _resolve_panel_llm(body.endpoint_id, body.model)
 
         # max_rounds=0 → "Auto", let AI decide; pass 20 as the safety cap.
         effective_max_rounds = body.max_rounds if body.max_rounds > 0 else 20
@@ -558,6 +607,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             research_mode=mode,
             report_length=report_length,
             project_id=project_id,
+            approved_plan=body.approved_plan,
         )
         return {
             "session_id": session_id,
@@ -661,6 +711,9 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
                     task = research_handler._active_tasks.get(session_id, {})
                     if st == "error" and task.get("result"):
                         final['error'] = str(task["result"])[:500]
+                    hook = task.get("graph_connection_proposals")
+                    if hook and hook.get("proposal_count"):
+                        final["graph_connection_proposals"] = hook
                     yield f"data: {json.dumps(final)}\n\n"
                     return
                 await asyncio.sleep(1.5)
@@ -683,18 +736,38 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             p = Path("data/deep_research") / f"{session_id}.json"
             if p.exists():
                 d = json.loads(p.read_text(encoding="utf-8"))
-                return {
+                payload = {
                     "result": d.get("raw_report") or d.get("result", ""),
                     "sources": d.get("sources", []),
                     "raw_findings": d.get("raw_findings", []),
                     "category": d.get("category") or "",
                     "evidence_registry": d.get("evidence_registry") or {},
                     "raw_report": d.get("raw_report") or "",
+                    "verification": d.get("verification"),
                 }
+                hook = d.get("graph_connection_proposals")
+                if hook:
+                    payload["graph_connection_proposals"] = hook
+                return payload
             raise HTTPException(404, "No research result available")
         sources = research_handler.get_sources(session_id) or []
         raw_findings = research_handler.get_raw_findings(session_id) or []
-        return {"result": result, "sources": sources, "raw_findings": raw_findings, "category": ""}
+        task = research_handler._active_tasks.get(session_id, {})
+        _researcher = task.get("researcher")
+        payload = {
+            "result": result,
+            "sources": sources,
+            "raw_findings": raw_findings,
+            "category": "",
+            "verification": (
+                getattr(_researcher, "verification_summary", None)
+                if _researcher else task.get("verification")
+            ),
+        }
+        hook = task.get("graph_connection_proposals")
+        if hook:
+            payload["graph_connection_proposals"] = hook
+        return payload
 
     @router.post("/api/research/spinoff/{session_id}")
     async def research_spinoff(session_id: str, request: Request):

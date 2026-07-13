@@ -2,7 +2,9 @@
 
 **From wikilinks to cognitive edges: a universal linking vocabulary for the personal knowledge graph.**
 
-**Status:** Active direction — **next major graph initiative after `feature/projects`**. Vocabulary design is stable; **T0–T3 audited against shipped Nobody code (2026-06-08)** — T0/T1 are the immediate build; T2/T3 are net-new or blocked on other roadmaps.
+**Status:** **T0–T2 + T3 shipped** on `feature/projects` (2026-06-01).
+
+**Last updated:** 2026-06-01
 
 **Branch context:** Land on `main` after Projects Phases A–E + tabbed workspace (G1–G8) merge. Projects already surface link direction and edge kind in the UI — this roadmap extends that model with richer semantics.
 
@@ -17,6 +19,7 @@
 | [`projects-roadmap.md`](projects-roadmap.md) | Projects use explicit graph links as the **breadth boundary**; today almost all project edges are `related`. |
 | [`projects-ui-roadmap.md`](projects-ui-roadmap.md) | Links tab shows **direction** (←/→), **edge kind**, and **node type** — UI ready for more kinds. |
 | [`paper-token-retrieval-roadmap_v1.md`](paper-token-retrieval-roadmap_v1.md) | Ad-hoc comparison labels ("Builds on", "Challenges") map to this taxonomy in T3; `summarizes` edge planned there — see edge families below. |
+| [`learned-graph-connections-roadmap_v1.md`](learned-graph-connections-roadmap_v1.md) | **Next:** skills-style learned connections — pop-up Accept/Reject/Review later, Brain inbox, DR propose-not-write (L1–L6). |
 | [`deep-research-roadmap.md`](deep-research-roadmap.md) | Research sessions create `research:` nodes with `related` edges today — candidate for typed output in T3. |
 
 ---
@@ -98,15 +101,15 @@ Use this table when scoping T1–T3 — **do not assume features that are only d
 
 | Area | Shipped today | Not built yet |
 |------|---------------|---------------|
-| **`search_knowledge` actions** | `search`, `read`, `neighbors`, `suggest_link`, `link`, `unlink`, `rebuild` (`src/knowledge_graph.py` → `execute_knowledge_tool`) | `merge_subgraph`, kind-filtered `neighbors`, activation-weighted traversal |
-| **Manual edge kinds** | `link`, `related`, `supports` (`_MANUAL_EDGE_KINDS`) | Five-type vocabulary (`derives_from`, `refutes`, `relates`, `depends_on`) |
-| **Reason on edges** | Accepted in `suggest_graph_link()` + shown on suggest card (`static/js/knowledge.js`) | Persisted on save — stripped by `save_manual_edges()` / `add_graph_link()`; not on `GraphLinkCreate` |
-| **Suggest → accept flow** | SSE `link_suggestion` (`src/agent_loop.py`); one card at a time; accept → `POST /api/knowledge/links` | Batch review table; accept passing `reason`; edit type+reason before save |
-| **Link UI** | Links hub picker (3 kinds); Projects Links tab (direction, kind badge, node type); `createGraphLink(from, to, kind)` only | Reason field on create; kind filter; second-line reason in rows |
-| **Project preamble** | `_format_link_row` shows title, type, id, kind, snippet (`src/project_context.py`); cap 24 links / 4k chars | Reason in row; kind-aware sort; cap on weak `relates` |
-| **Search expansion** | `expand_hops` on search returns 1-hop neighbor **nodes** (no edge metadata, no kind filter) | Kind-filtered hop expansion; inhibitory formatting for `refutes` |
+| **`search_knowledge` actions** | `search`, `read`, `neighbors`, `suggest_link`, `link`, `unlink`, `rebuild`, **`merge_subgraph`** (`src/knowledge_graph.py` → `execute_knowledge_tool`) | kind-filtered `neighbors`, activation-weighted traversal |
+| **Manual edge kinds** | Five semantic slugs + legacy `link`/`related` read aliases (`src/edge_taxonomy.py`, `src/knowledge_graph.py`) | T1: picker reason field, preamble sort |
+| **Reason on edges** | Persisted on `add_graph_link` / research auto edges / API POST | T1: suggest accept passes reason from card |
+| **Suggest → accept flow** | SSE card + accept POST includes `reason` | Batch review table (T2) ✅ |
+| **Link UI** | Five kinds + reason field on picker; hub rows show reason | — |
+| **Project preamble** | Kind-aware sort, reason in row, cap 8 weak `relates` | — |
+| **Search expansion** | `expand_hops` returns neighbors + `expanded_links` (kind, reason) | Kind-filtered hop expansion in search API |
 | **Deep Research → graph** | `upsert_research_node` + auto `research:{id}` → seed papers as `related` (`RESEARCH_EDGE_SOURCE`) | Typed completion edges; LLM-derived stance per seed |
-| **Paper retrieval** | `search_knowledge` read with `max_chars`; `search_zotero` read/search | Tiered retrieval (R0–R3), section extraction, `summarizes` notes, `compare_papers` tool |
+| **Paper retrieval** | R0–R3 shipped: tiered read, sections, `summarizes`, `compare_papers` | — |
 | **Concept / merge pipeline** | — | Paper-local subgraph extraction, boundary matching, batch merge API/UI |
 | **In-repo skills** | Graph agent uses `search_knowledge` + prompts in `src/agent_loop.py` | No `link-new-paper-*` skill files in this repository |
 
@@ -392,78 +395,64 @@ Task **goal hierarchy** remains `parent` (inferred), not `depends_on`. Collectio
 
 ---
 
-### Phase T1 — Agent, API, UI, and context policy
+### Phase T1 — Agent, API, UI, and context policy (**shipped**)
 
 **Goal:** All **new** manual links use five types + reason end-to-end; agent and project preamble consume them.
 
-**Builds on shipped infrastructure:** suggest card UI, Links tab direction/kind badges, `search_knowledge` link/suggest_link actions, project preamble link block — extend these; do not greenfield.
+| Item | Status |
+|------|--------|
+| **`search_knowledge` tool enum** | Five semantic slugs + `kinds` filter on neighbors |
+| **`suggest_link`** | **Requires** `reason`; typed kinds validated |
+| **`link` action** | Passes `reason` to `add_graph_link` |
+| **Agent prompt** | Vocabulary table + decision guide + inhibitory `refutes` note |
+| **`expand_hops`** | Returns `expanded_links` with kind + reason |
+| **Link picker** | Five kinds + reason field; human labels |
+| **Suggest accept** | POST includes `reason` from card |
+| **Projects Links tab** | Reason second line; kind filter dropdown |
+| **Links hub rows** | Kind label + reason line |
+| **Project preamble** | Reason in row; kind-aware sort; cap 8 weak `relates` |
 
-| Item | Status today | T1 work |
-|------|--------------|---------|
-| **`search_knowledge` tool enum** | `link`, `related`, `supports` only (`src/tool_schemas.py`) | Five semantic slugs; `reason` required on `suggest_link` |
-| **`execute_knowledge_tool` → `link`** | Immediate write via `add_graph_link` (no reason param) | Pass `reason` when user explicitly asked for immediate link |
-| **Agent prompt** | Generic "use suggest_link" guidance (`src/agent_loop.py`) | Vocabulary block + decision guide + activation rules |
-| **`get_neighbors` / search** | Returns kind on each edge; **no** `reason`, **no** `kinds` filter | Include `reason` in payloads; optional `kinds` filter on `neighbors` |
-| **`expand_hops`** | Adds neighbor nodes only — edge kinds not returned in search bundle | Optional: attach edge kind on expanded neighbors (needed for kind-aware preamble elsewhere) |
-| **Link picker** | 3 kinds, no reason (`LINK_KIND_OPTIONS` in `static/js/knowledge.js`) | Five options + reason field on create |
-| **Suggest accept** | POST `{ from_id, to_id, kind }` — reason dropped | POST includes `reason` (depends on T0 + `GraphLinkCreate`) |
-| **Projects Links tab** | Kind badge via `EDGE_KIND_LABELS` (includes `parent`, `wikilink`) | New labels; second-line `reason`; optional filter by kind |
-| **Links hub rows** | Kind only | Show reason when present |
-| **Project preamble** | `_format_link_row`: kind inline, no reason, insertion order | Reason in row; kind-aware sort; cap weak `relates` (e.g. max 8) before truncate |
-| **External Cursor skills** | Out of repo; still use legacy three kinds | Update skill prompts after T1 API/tool enum ship |
-
-**Deliverable:** User creates typed link with reason in picker; agent suggest → accept persists reason; project chat preamble shows kind + reason; tests for API + preamble ordering.
-
-**Key files:** `src/knowledge_graph.py`, `src/tool_schemas.py`, `src/agent_loop.py`, `routes/knowledge_routes.py`, `src/project_context.py`, `static/js/knowledge.js`, `static/js/projects/index.js`.
+**Key files:** `src/project_context.py`, `static/js/knowledge.js`, `static/js/projects/index.js`, `src/knowledge_graph.py`, `src/agent_loop.py`, `routes/knowledge_routes.py`.
 
 ---
 
-### Phase T2 — Batch merge API + review UI (**net-new**)
+### Phase T2 — Batch merge API + review UI (**shipped**)
 
 **Goal:** Many proposed boundary edges reviewed in one step — not one suggest card at a time.
 
-**Reality check:** `merge_subgraph` is **not** a `search_knowledge` action today. There is no in-repo concept-extraction job that outputs a subgraph. T2 is new backend + UI, not a rename of existing behavior.
+| Item | Status |
+|------|--------|
+| **`merge_subgraph` action** | Shipped — `search_knowledge` preview/apply + `POST /api/knowledge/merge/preview` + `/apply` |
+| **Merge table UI** | Shipped — Links hub **Batch merge** button + modal; Projects Links rail entry; opens from `compare_papers` / agent SSE |
+| **Conflict detection** | Shipped — `supports` vs `refutes` on same `(from, to)` flagged in preview |
+| **Partial accept** | Shipped — checkbox per row; skipped rows do not write |
+| **Duplicate handling** | Shipped — skip identical edge; **update reason** when kind matches |
 
-| Item | Details |
-|------|---------|
-| **Edge producer (prerequisite)** | Something must emit `{ from, to, kind, reason }[]` — e.g. future Zotero concept pass, import script, or agent loop with structured output. **Not in Nobody today.** |
-| **`merge_subgraph` action** | New `search_knowledge` action **or** `POST /api/knowledge/merge` — accepts batch proposals; returns review payload (does not write until confirmed) |
-| **Merge table UI** | New surface (Links hub or Projects): accept / edit type+reason / reject per row; reuse suggest-card styling patterns |
-| **Conflict detection** | Flag existing `supports` + proposed `refutes` (same `from`, `to` or same target claim) |
-| **Partial accept** | User can accept subset; rejected proposals do not write |
-| **Duplicate handling** | Skip if `(from, to, kind)` already exists; offer "update reason" if kind matches |
+**Edge producers (no LLM pipeline required):** `compare_papers` `suggested_edges`, JSON paste, agent `merge_subgraph` preview (≤20 proposals).
 
-**Prerequisites:** T0 persistence + T1 single-link paths (merge writes use same `add_graph_link`).
+**Key files:** `src/graph_merge.py`, `src/knowledge_graph.py`, `routes/knowledge_routes.py`, `static/js/graph_merge.js`, `static/js/knowledge.js`, `tests/test_graph_merge.py`.
 
-**Out of scope for T2:** Building the concept-extraction LLM pipeline itself — track that separately (likely Paper Token Retrieval or a dedicated import tool). T2 only consumes proposal lists.
-
-**Deliverable:** Given a JSON proposal file or API payload of ≤20 edges, user confirms in one table; conflicts surfaced; partial accept works.
-
-**Interim workaround:** Repeated `suggest_link` calls (shipped) — acceptable for 1–3 edges only.
+**Out of scope (unchanged):** Concept-extraction LLM pipeline — T2 only consumes proposal lists.
 
 ---
 
-### Phase T3 — Retrieval + Deep Research typed edges (**blocked on other roadmaps**)
+### Phase T3 — Retrieval + Deep Research typed edges (**shipped core**)
 
-**Goal:** Automated pipelines write typed edges (or artifact kinds) instead of flat `related` stars.
+**Prerequisite:** T0 kinds on disk ✅; Paper Token Retrieval R2/R3 ✅.
 
-**Reality check:** Almost everything in T3 is **future work** in other docs or small targeted changes to existing hooks — not extensions of today's graph tool surface.
+| Item | Status today | Notes |
+|------|--------------|-------|
+| **Paper comparison labels** | `compare_papers` output groups **Builds on / Challenges / Aligns with** → five types | `src/paper_compare.py` + `suggested_edges` payload |
+| **`compare_papers` tool** | Shipped (R3) | Side-by-side + taxonomy section |
+| **`summarizes` edges** | Shipped (R2) | Pipeline kind separate from five cognitive types |
+| **Deep Research session edges** | `build_research_graph_edges()` + `sync_research_graph_links()` | Typed `research→paper` + compare-mode `paper→paper` with reason |
+| **`neighbors` kind filter** | `kinds` param on tool + inhibitory `refutes` formatting | Shipped in `execute_knowledge_tool` |
+| **Activation / inhibitory hints** | `format_edge_for_agent()` in neighbor output | Agent prompt updated |
+| **Zotero bibliographic cites** | Not implemented | Deferred |
 
-| Item | Status today | T3 work | Depends on |
-|------|--------------|---------|------------|
-| **Paper comparison labels** | Ad-hoc in Paper Token Retrieval doc only | Map "Builds on / Challenges / Aligns with" → five types in agent output | Paper Token Retrieval **R0** (retrieval discipline) |
-| **`compare_papers` tool** | **Not in codebase** | New agent tool; side-by-side section extract; output grouped by edge kind | Paper Token Retrieval **R1** (sections) + **R3** (tool spec) |
-| **`summarizes` edges** | **Not in `_EDGE_KINDS`** | Pipeline-created `paper → note` links; separate from five cognitive types | Paper Token Retrieval **R2** (auto-summary notes) |
-| **Deep Research session edges** | `sync_research_graph_links()` writes only `related` + `RESEARCH_EDGE_SOURCE` | Completion hook chooses typed kind + reason per seed (LLM or rules over report) | T0/T1 kinds persisted; DR report structure stable |
-| **`neighbors` kind filter** | Not implemented | `kinds` param on tool + API | T1 |
-| **Activation / inhibitory hints** | Agent sees flat neighbor lists | Format `refutes` differently in `format_search_for_agent` / neighbor output | T1 vocabulary in prompts |
-| **Zotero bibliographic cites** | No automatic cite → graph edges | Optional: reading-order `depends_on` from bibliography — **defer** overload with `derives_from` | Explicit product decision |
+**Key files:** `src/edge_taxonomy.py`, `src/research_typed_edges.py`, `src/research_graph.py`, `src/paper_compare.py`, `src/knowledge_graph.py`.
 
-**Do not start T3 before:** T0 + T1 complete; Paper Token Retrieval at least **R2** if `summarizes` / comparison tooling matters; Deep Research graph hook (`src/research_graph.py`) ready for non-`related` kinds.
-
-**Deliverable:** DR completion creates ≥1 typed edge where report stance is clear; `summarizes` coexists with five semantic kinds once R2 ships; compare output uses taxonomy labels when `compare_papers` exists.
-
-**Not T3 scope:** Tiered PDF retrieval, section parsing, token budgets — stay in [`paper-token-retrieval-roadmap_v1.md`](paper-token-retrieval-roadmap_v1.md).
+**Remaining (T1):** Link picker reason field, preamble reason/sort, full agent vocabulary block in all paths.
 
 ---
 
@@ -472,9 +461,9 @@ Task **goal hierarchy** remains `parent` (inferred), not `depends_on`. Collectio
 | Phase | Tests |
 |-------|-------|
 | T0 | Kind validation; `reason` round-trip through save → sync → load; migration idempotent; inferred `parent`/`wikilink`/`in_collection` unchanged after rebuild |
-| T1 | API POST with reason; suggest accept persists reason; preamble sort/filter; picker options; agent schema enum; legacy three kinds still readable after migration |
-| T2 | Batch merge partial accept; conflict flag; duplicate skip; **no test assumes concept-extraction producer** — feed fixtures directly |
-| T3 | DR hook writes typed edge when fixture report includes stance; `summarizes` kind validation once R2 adds it; **`compare_papers` tests live in Paper Token Retrieval R3**, not here |
+| T1 | API POST with reason; suggest requires reason; preamble sort/filter/cap; picker options; expanded_links on search |
+| T2 | **`tests/test_graph_merge.py`** — batch merge partial accept; conflict flag; duplicate reason update; apply skip |
+| T3 | DR hook writes typed edge when fixture report includes stance; `compare_papers` taxonomy section; **`tests/test_edge_taxonomy.py`**, **`tests/test_research_typed_edges.py`** |
 
 ---
 
@@ -504,4 +493,4 @@ Task **goal hierarchy** remains `parent` (inferred), not `depends_on`. Collectio
 | 2026-06-07 | Initial draft: cognitive foundations, five-type vocabulary, merge protocol, T0–T3. |
 | 2026-06-07 | **v3.1:** Ground in Nobody's current graph schema, Projects UI, and agent tools; distinguish structural vs semantic edges; map migration from `link`/`related`/`supports`; position as next initiative after `feature/projects`. |
 | 2026-06-07 | **v3.2:** Document JSONL dual-file storage (`manual_edges.jsonl` + merged `edges.jsonl`); edge record contract; allowed-pairs matrix; agent decision guide; `reason` not persisted today; expand T0/T1 with concrete files, API, preamble policy; T2/T3 prerequisites and `summarizes` placement. |
-| 2026-06-08 | **v3.3:** Capability baseline audit vs `src/`; T1 reframed as extend-shipped vs net-new; T2 marked net-new (`merge_subgraph` absent; no concept-extraction pipeline); T3 split by dependency (Paper Token Retrieval R2/R3, DR hook only); external skills clarified; open questions 11–12. |
+| 2026-06-01 | **T1 shipped:** link picker reason field, suggest accept persists reason, preamble kind sort + relates cap, neighbors/search edge metadata, agent vocabulary block. |

@@ -2,12 +2,13 @@
 
 import pytest
 
-from src.knowledge_graph import add_graph_link, load_nodes, node_id, save_graph
+from src.knowledge_graph import add_graph_link, execute_knowledge_tool, load_nodes, node_id, save_graph
 from src.project_context import (
     build_active_project_file_block,
     build_linked_knowledge_block,
     build_project_session_preamble,
     build_project_tool_routing_block,
+    build_proposed_connections_block,
     sanitize_active_project_file_path,
 )
 from src.project_files import write_text_file
@@ -127,6 +128,176 @@ def test_active_project_file_block(ctx_env):
     assert "hello.py" in block
     assert "write_project_file" in block
     assert "print('hi')" in block
+
+
+def test_suggest_link_requires_reason(ctx_env):
+    owner = ctx_env["owner"]
+    nodes = {
+        "document:a": {
+            "id": "document:a", "type": "document", "title": "A", "snippet": "s", "meta": {},
+        },
+        "document:b": {
+            "id": "document:b", "type": "document", "title": "B", "snippet": "s", "meta": {},
+        },
+    }
+    save_graph(owner, nodes, [])
+
+    bad = execute_knowledge_tool(
+        {"action": "suggest_link", "from": "document:a", "to": "document:b", "kind": "relates"},
+        owner=owner,
+    )
+    assert bad["exit_code"] == 1
+    assert "reason is required" in bad["error"]
+
+    good = execute_knowledge_tool(
+        {
+            "action": "suggest_link",
+            "from": "document:a",
+            "to": "document:b",
+            "kind": "supports",
+            "reason": "Same experiment cohort",
+        },
+        owner=owner,
+    )
+    assert good["exit_code"] == 0
+    assert good.get("action") == "suggest_link"
+    assert good.get("reason") == "Same experiment cohort"
+
+
+def test_linked_knowledge_shows_reason_and_sorts_by_kind(ctx_env):
+    owner = ctx_env["owner"]
+    pid = ctx_env["project_id"]
+    paper_a = node_id("paper", "PAPER_A")
+    paper_b = node_id("paper", "PAPER_B")
+    nodes = load_nodes(owner)
+    nodes[paper_a] = {
+        "id": paper_a, "type": "paper", "title": "Weak topic match", "snippet": "s", "meta": {},
+    }
+    nodes[paper_b] = {
+        "id": paper_b, "type": "paper", "title": "Strong refutation", "snippet": "s", "meta": {},
+    }
+    save_graph(owner, nodes, [])
+    add_graph_link(
+        owner,
+        project_node_id(pid),
+        paper_a,
+        kind="relates",
+        reason="Same broad topic",
+    )
+    add_graph_link(
+        owner,
+        project_node_id(pid),
+        paper_b,
+        kind="refutes",
+        reason="Benchmark contradicts our assumption",
+    )
+
+    block = build_linked_knowledge_block(owner, pid)
+    assert "Reason:" in block or "_Reason:_" in block
+    assert "Benchmark contradicts" in block
+    assert block.index("Strong refutation") < block.index("Weak topic match")
+
+
+def test_linked_knowledge_caps_weak_relates(ctx_env):
+    owner = ctx_env["owner"]
+    pid = ctx_env["project_id"]
+    nodes = load_nodes(owner)
+    for i in range(12):
+        pid_paper = node_id("paper", f"REL{i:04d}")
+        nodes[pid_paper] = {
+            "id": pid_paper,
+            "type": "paper",
+            "title": f"Relates paper {i}",
+            "snippet": "s",
+            "meta": {},
+        }
+    save_graph(owner, nodes, [])
+    for i in range(12):
+        add_graph_link(owner, project_node_id(pid), node_id("paper", f"REL{i:04d}"), kind="relates")
+
+    block = build_linked_knowledge_block(owner, pid, max_links=24)
+    assert "Relates paper" in block
+    assert "weak `relates`" in block.lower() or "cap" in block.lower()
+
+
+def test_preamble_includes_proposed_connections(ctx_env):
+    from src.pending_graph_edges import enqueue_proposals
+    from src.project_workspace import get_project
+
+    owner = ctx_env["owner"]
+    pid = ctx_env["project_id"]
+    paper_a = node_id("paper", "PROP_A")
+    paper_b = node_id("paper", "PROP_B")
+    nodes = load_nodes(owner)
+    nodes[paper_a] = {"id": paper_a, "type": "paper", "title": "Alpha", "snippet": "s", "meta": {}}
+    nodes[paper_b] = {"id": paper_b, "type": "paper", "title": "Beta", "snippet": "s", "meta": {}}
+    save_graph(owner, nodes, [])
+    add_graph_link(owner, project_node_id(pid), paper_a, kind="relates")
+
+    enqueue_proposals(owner, [{
+        "from": paper_a,
+        "to": paper_b,
+        "kind": "supports",
+        "reason": "Shared benchmark",
+        "project_id": pid,
+    }], source="compare_papers")
+
+    project = get_project(owner, pid)
+    preamble = build_project_session_preamble(owner, pid, project)
+    assert "[PROPOSED]" in preamble
+    assert "PROP_B" in preamble or "Beta" in preamble
+    assert "Shared benchmark" in preamble
+
+
+def test_neighbors_include_proposed_flag(ctx_env):
+    owner = ctx_env["owner"]
+    paper_a = node_id("paper", "N_A")
+    paper_b = node_id("paper", "N_B")
+    save_graph(owner, {
+        paper_a: {"id": paper_a, "type": "paper", "title": "A", "snippet": "s", "meta": {}},
+        paper_b: {"id": paper_b, "type": "paper", "title": "B", "snippet": "s", "meta": {}},
+    }, [])
+    from src.pending_graph_edges import enqueue_proposals
+
+    enqueue_proposals(owner, [{
+        "from": paper_a,
+        "to": paper_b,
+        "kind": "refutes",
+        "reason": "Pending contrast",
+    }], source="agent")
+
+    without = execute_knowledge_tool(
+        {"action": "neighbors", "id": paper_a},
+        owner=owner,
+    )
+    assert without["exit_code"] == 0
+    assert "Pending contrast" not in without["output"]
+    assert "Proposed (awaiting" not in without["output"]
+
+    with_prop = execute_knowledge_tool(
+        {"action": "neighbors", "id": paper_a, "include_proposed": True},
+        owner=owner,
+    )
+    assert with_prop["exit_code"] == 0
+    assert "[PROPOSED]" in with_prop["output"]
+    assert "Pending contrast" in with_prop["output"]
+
+
+def test_list_pending_action(ctx_env):
+    owner = ctx_env["owner"]
+    from src.pending_graph_edges import enqueue_proposals
+
+    enqueue_proposals(owner, [{
+        "from": "paper:X",
+        "to": "paper:Y",
+        "kind": "relates",
+        "reason": "Queued link",
+    }], source="agent")
+
+    out = execute_knowledge_tool({"action": "list_pending"}, owner=owner)
+    assert out["exit_code"] == 0
+    assert "[PROPOSED]" in out["output"]
+    assert out.get("count", 0) >= 1
 
 
 def test_preamble_with_active_file(ctx_env):

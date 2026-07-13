@@ -16,16 +16,30 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from src.constants import DATA_DIR, OBSIDIAN_INTEGRATION_ENABLED
 
+from src.edge_taxonomy import (
+    ALL_EDGE_KINDS,
+    EDGE_OPTIONAL_FIELDS,
+    INFERRED_EDGE_KINDS,
+    LEGACY_MANUAL_KINDS,
+    MANUAL_EDGE_KINDS,
+    PIPELINE_EDGE_KINDS,
+    SEMANTIC_EDGE_KINDS,
+    format_edge_for_agent,
+    normalize_semantic_kind,
+)
+
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 KNOWLEDGE_ROOT = Path(DATA_DIR) / "knowledge"
 DEBOUNCE_SEC = 0.45
 
 _NODE_TYPES = frozenset({"task", "document", "memory", "skill", "note", "paper", "collection", "research", "project"})
-_EDGE_KINDS = frozenset({"parent", "link", "wikilink", "related", "supports", "in_collection"})
-_MANUAL_EDGE_KINDS = frozenset({"link", "related", "supports"})
-_INFERRED_EDGE_KINDS = frozenset({"parent", "wikilink", "in_collection"})
+_EDGE_KINDS = ALL_EDGE_KINDS
+_MANUAL_EDGE_KINDS = MANUAL_EDGE_KINDS
+_PIPELINE_EDGE_KINDS = PIPELINE_EDGE_KINDS
+_INFERRED_EDGE_KINDS = INFERRED_EDGE_KINDS
+_EDGE_OPTIONAL_FIELDS = EDGE_OPTIONAL_FIELDS
 
 _debounce_lock = threading.Lock()
 _debounce_timers: Dict[str, threading.Timer] = {}
@@ -143,17 +157,35 @@ def _manual_edges_path(owner: str) -> Path:
     return _owner_dir(owner) / "manual_edges.jsonl"
 
 
+def _coerce_manual_edge_row(row: dict) -> Optional[dict]:
+    fr, to = (row.get("from") or "").strip(), (row.get("to") or "").strip()
+    if not fr or not to or fr == to:
+        return None
+    kind = (row.get("kind") or "relates").strip().lower()
+    source = (row.get("source") or "manual").strip() or "manual"
+    if kind in _PIPELINE_EDGE_KINDS:
+        if kind not in _EDGE_KINDS:
+            return None
+    elif kind in _MANUAL_EDGE_KINDS or kind in SEMANTIC_EDGE_KINDS:
+        kind = normalize_semantic_kind(kind)
+    else:
+        kind = "relates"
+        source = "manual"
+    out = {"from": fr, "to": to, "kind": kind, "source": source}
+    for key in _EDGE_OPTIONAL_FIELDS:
+        val = row.get(key)
+        if val is not None and val != "":
+            out[key] = val
+    return out
+
+
 def load_manual_edges(owner: str) -> List[dict]:
     rows = _read_jsonl(_manual_edges_path(owner))
     out: List[dict] = []
     for row in rows:
-        fr, to = (row.get("from") or "").strip(), (row.get("to") or "").strip()
-        if not fr or not to or fr == to:
-            continue
-        kind = row.get("kind") or "link"
-        if kind not in _MANUAL_EDGE_KINDS:
-            kind = "link"
-        out.append({"from": fr, "to": to, "kind": kind, "source": "manual"})
+        coerced = _coerce_manual_edge_row(row)
+        if coerced:
+            out.append(coerced)
     return out
 
 
@@ -161,17 +193,14 @@ def save_manual_edges(owner: str, edges: List[dict]) -> None:
     rows = []
     seen: Set[Tuple[str, str, str]] = set()
     for row in edges:
-        fr, to = (row.get("from") or "").strip(), (row.get("to") or "").strip()
-        if not fr or not to or fr == to:
+        coerced = _coerce_manual_edge_row(row)
+        if not coerced:
             continue
-        kind = row.get("kind") or "link"
-        if kind not in _MANUAL_EDGE_KINDS:
-            kind = "link"
-        key = (fr, to, kind)
+        key = (coerced["from"], coerced["to"], coerced["kind"])
         if key in seen:
             continue
         seen.add(key)
-        rows.append({"from": fr, "to": to, "kind": kind, "source": "manual"})
+        rows.append(coerced)
     _write_jsonl(_manual_edges_path(owner), rows)
 
 
@@ -183,14 +212,20 @@ def _merge_edge_lists(*lists: Iterable[dict]) -> List[dict]:
             fr, to = (row.get("from") or "").strip(), (row.get("to") or "").strip()
             if not fr or not to or fr == to:
                 continue
-            kind = row.get("kind") or "link"
+            kind = row.get("kind") or "relates"
             if kind not in _EDGE_KINDS:
-                kind = "link"
+                kind = normalize_semantic_kind(kind)
             key = (fr, to, kind)
             if key in seen:
                 continue
             seen.add(key)
-            merged.append({"from": fr, "to": to, "kind": kind})
+            merged_row = {"from": fr, "to": to, "kind": kind}
+            for opt in _EDGE_OPTIONAL_FIELDS:
+                if row.get(opt) not in (None, ""):
+                    merged_row[opt] = row[opt]
+            if row.get("source"):
+                merged_row["source"] = row["source"]
+            merged.append(merged_row)
     return merged
 
 
@@ -251,11 +286,14 @@ def add_graph_link(
     from_ref: str,
     to_ref: str,
     *,
-    kind: str = "link",
+    kind: str = "relates",
+    reason: str = "",
+    confidence: Optional[float] = None,
+    source: str = "manual",
 ) -> Dict[str, Any]:
-    kind = (kind or "link").strip().lower()
-    if kind not in _MANUAL_EDGE_KINDS:
-        kind = "link"
+    kind = normalize_semantic_kind(kind)
+    if kind not in SEMANTIC_EDGE_KINDS:
+        kind = "relates"
     fr = normalize_node_id(owner, from_ref)
     to = normalize_node_id(owner, to_ref)
     if not fr or not to:
@@ -270,11 +308,142 @@ def add_graph_link(
     key = (fr, to, kind)
     if any((e.get("from"), e.get("to"), e.get("kind")) == key for e in manual):
         return {"ok": True, "from": fr, "to": to, "kind": kind, "duplicate": True}
-    manual.append({"from": fr, "to": to, "kind": kind, "source": "manual"})
+    row: Dict[str, Any] = {
+        "from": fr,
+        "to": to,
+        "kind": kind,
+        "source": (source or "manual").strip() or "manual",
+        "created_at": _utc_now(),
+        "updated_at": _utc_now(),
+    }
+    reason_t = (reason or "").strip()
+    if reason_t:
+        row["reason"] = reason_t[:280]
+    if confidence is not None:
+        try:
+            row["confidence"] = max(0.0, min(1.0, float(confidence)))
+        except (TypeError, ValueError):
+            pass
+    manual.append(row)
+    save_manual_edges(owner, manual)
+    _sync_edges_from_manual(owner)
+    _refresh_project_nodes_for_link(owner, fr, to)
+    return {"ok": True, "from": fr, "to": to, "kind": kind, "reason": reason_t}
+
+
+def update_graph_link(
+    owner: str,
+    from_ref: str,
+    to_ref: str,
+    *,
+    kind: str = "relates",
+    reason: Optional[str] = None,
+    confidence: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Update reason/confidence on an existing manual edge (same from/to/kind)."""
+    kind = normalize_semantic_kind(kind)
+    fr = normalize_node_id(owner, from_ref)
+    to = normalize_node_id(owner, to_ref)
+    if not fr or not to:
+        return {"ok": False, "error": "Both nodes must exist in the graph."}
+    manual = load_manual_edges(owner)
+    found = False
+    for row in manual:
+        if row.get("from") != fr or row.get("to") != to:
+            continue
+        if normalize_semantic_kind(row.get("kind")) != kind:
+            continue
+        if reason is not None:
+            reason_t = (reason or "").strip()
+            if reason_t:
+                row["reason"] = reason_t[:280]
+            elif "reason" in row:
+                del row["reason"]
+        if confidence is not None:
+            try:
+                row["confidence"] = max(0.0, min(1.0, float(confidence)))
+            except (TypeError, ValueError):
+                pass
+        row["updated_at"] = _utc_now()
+        found = True
+        break
+    if not found:
+        return {"ok": False, "error": "Manual link not found for update"}
+    save_manual_edges(owner, manual)
+    _sync_edges_from_manual(owner)
+    _refresh_project_nodes_for_link(owner, fr, to)
+    return {"ok": True, "from": fr, "to": to, "kind": kind, "updated": True}
+
+
+def add_pipeline_edge(
+    owner: str,
+    from_ref: str,
+    to_ref: str,
+    *,
+    kind: str,
+    source: str,
+    **metadata: Any,
+) -> Dict[str, Any]:
+    """Append a pipeline-maintained edge (e.g. paper → summary document)."""
+    kind = (kind or "").strip().lower()
+    if kind not in _PIPELINE_EDGE_KINDS:
+        return {"ok": False, "error": f"Unsupported pipeline edge kind: {kind}"}
+    fr = normalize_node_id(owner, from_ref)
+    to = normalize_node_id(owner, to_ref)
+    if not fr or not to:
+        _reindex_if_missing(owner, from_ref, to_ref)
+        fr = normalize_node_id(owner, from_ref)
+        to = normalize_node_id(owner, to_ref)
+    if not fr or not to:
+        return {"ok": False, "error": "Both nodes must exist in the graph — try Rebuild links first."}
+    if fr == to:
+        return {"ok": False, "error": "Cannot link a node to itself."}
+    row = {
+        "from": fr,
+        "to": to,
+        "kind": kind,
+        "source": (source or "").strip() or "pipeline",
+    }
+    for key in _EDGE_OPTIONAL_FIELDS:
+        val = metadata.get(key)
+        if val is not None and val != "":
+            row[key] = val
+    manual = load_manual_edges(owner)
+    manual = [
+        e for e in manual
+        if not (
+            e.get("from") == fr
+            and e.get("to") == to
+            and e.get("kind") == kind
+            and (e.get("source") or "") == row["source"]
+        )
+    ]
+    manual.append(row)
     save_manual_edges(owner, manual)
     _sync_edges_from_manual(owner)
     _refresh_project_nodes_for_link(owner, fr, to)
     return {"ok": True, "from": fr, "to": to, "kind": kind}
+
+
+def find_pipeline_edge(
+    owner: str,
+    from_ref: str,
+    *,
+    kind: str,
+    source: str,
+) -> Optional[dict]:
+    fr = normalize_node_id(owner, from_ref) or (from_ref or "").strip()
+    kind_l = (kind or "").strip().lower()
+    src = (source or "").strip()
+    for edge in load_manual_edges(owner):
+        if edge.get("from") != fr:
+            continue
+        if edge.get("kind") != kind_l:
+            continue
+        if src and (edge.get("source") or "") != src:
+            continue
+        return edge
+    return None
 
 
 def _refresh_project_nodes_for_link(owner: str, fr: str, to: str) -> None:
@@ -306,6 +475,8 @@ def remove_graph_link(
     if not fr or not to:
         return {"ok": False, "error": "Node not found"}
     kind_l = (kind or "").strip().lower() or None
+    if kind_l:
+        kind_l = normalize_semantic_kind(kind_l)
     manual = load_manual_edges(owner)
     before = len(manual)
     manual = [
@@ -314,7 +485,7 @@ def remove_graph_link(
         if not (
             e.get("from") == fr
             and e.get("to") == to
-            and (kind_l is None or e.get("kind") == kind_l)
+            and (kind_l is None or normalize_semantic_kind(e.get("kind")) == kind_l)
         )
     ]
     if len(manual) == before:
@@ -330,13 +501,19 @@ def suggest_graph_link(
     from_ref: str,
     to_ref: str,
     *,
-    kind: str = "related",
+    kind: str = "relates",
     reason: str = "",
 ) -> Dict[str, Any]:
     """Propose a manual graph link for user approval — does not write edges."""
-    kind = (kind or "related").strip().lower()
-    if kind not in _MANUAL_EDGE_KINDS:
-        kind = "related"
+    kind = normalize_semantic_kind(kind)
+    if kind not in SEMANTIC_EDGE_KINDS:
+        kind = "relates"
+    reason_t = (reason or "").strip()
+    if not reason_t:
+        return {
+            "ok": False,
+            "error": "reason is required for suggest_link — one short sentence explaining the relationship.",
+        }
     _reindex_if_missing(owner, from_ref, to_ref)
     fr = normalize_node_id(owner, from_ref)
     to = normalize_node_id(owner, to_ref)
@@ -351,7 +528,6 @@ def suggest_graph_link(
         e.get("from") == fr and e.get("to") == to and e.get("kind") == kind
         for e in edges
     )
-    reason_t = (reason or "").strip()
     from_title = (from_node.get("title") or fr).strip()
     to_title = (to_node.get("title") or to).strip()
     return {
@@ -759,6 +935,7 @@ def search_knowledge(
     hits = [n for _, n in scored[:limit]]
 
     neighbor_rows: List[dict] = []
+    expanded_links: List[dict] = []
     if expand_hops > 0 and hits:
         edges = load_edges(owner)
         hit_ids = {h["id"] for h in hits}
@@ -767,9 +944,28 @@ def search_knowledge(
             fr, to = e.get("from"), e.get("to")
             if fr in hit_ids:
                 related_ids.add(to)
+                expanded_links.append({
+                    "node_id": to,
+                    "via": fr,
+                    "direction": "out",
+                    "kind": e.get("kind") or "relates",
+                    "reason": e.get("reason") or "",
+                })
             if to in hit_ids:
                 related_ids.add(fr)
-        for rid in sorted(related_ids - hit_ids)[: limit * 2]:
+                expanded_links.append({
+                    "node_id": fr,
+                    "via": to,
+                    "direction": "in",
+                    "kind": e.get("kind") or "relates",
+                    "reason": e.get("reason") or "",
+                })
+        seen_link_nodes: Set[str] = set()
+        for link in expanded_links:
+            rid = link.get("node_id") or ""
+            if not rid or rid in hit_ids or rid in seen_link_nodes:
+                continue
+            seen_link_nodes.add(rid)
             n = nodes.get(rid)
             if n:
                 neighbor_rows.append(n)
@@ -778,6 +974,7 @@ def search_knowledge(
         "query": query,
         "hits": hits,
         "neighbors": neighbor_rows,
+        "expanded_links": expanded_links[: limit * 3],
         "total_nodes": len(nodes),
     }
 
@@ -807,6 +1004,7 @@ def get_neighbors(
     full_id: str,
     *,
     direction: str = "both",
+    kinds: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     nodes = load_nodes(owner)
     if not nodes:
@@ -817,13 +1015,21 @@ def get_neighbors(
     if not node:
         return {"node": None, "outgoing": [], "incoming": []}
 
+    kind_filter: Optional[Set[str]] = None
+    if kinds:
+        kind_filter = {normalize_semantic_kind(k) for k in kinds if (k or "").strip()}
+        kind_filter = {k for k in kind_filter if k in SEMANTIC_EDGE_KINDS or k in _PIPELINE_EDGE_KINDS or k in LEGACY_MANUAL_KINDS or k in _INFERRED_EDGE_KINDS}
+
     fid = node.get("id") or node_id(*parse_node_id(full_id))
     edges = load_edges(owner)
     outgoing: List[dict] = []
     incoming: List[dict] = []
 
     for e in edges:
-        fr, to, kind = e.get("from"), e.get("to"), e.get("kind", "link")
+        fr, to, kind = e.get("from"), e.get("to"), e.get("kind", "relates")
+        kind_norm = normalize_semantic_kind(kind, default=kind or "relates")
+        if kind_filter and kind_norm not in kind_filter and (kind or "") not in kind_filter:
+            continue
         if direction in ("both", "out") and fr == fid:
             target = nodes.get(to)
             outgoing.append({"edge": e, "node": target})
@@ -839,9 +1045,12 @@ def read_knowledge_content(
     full_id: str,
     *,
     max_chars: int = 8000,
-    include_pdf: bool = True,
+    include_pdf: bool = False,
+    section: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Load full body for a node (from canonical store)."""
+    from src.paper_retrieval import PAPER_PDF_MAX_CHARS, PAPER_SECTION_DEFAULT_MAX_CHARS
+
     ntype, rid = parse_node_id(full_id)
     fid = node_id(ntype, rid)
     node = get_node(owner, fid)
@@ -922,7 +1131,7 @@ def read_knowledge_content(
             meta = {"source": "vault", "path": rid, "language": "markdown"}
     elif ntype == "paper":
         from src.zotero_catalog import load_catalog
-        from src.zotero_client import fetch_paper_pdf_text
+        from src.zotero_client import fetch_paper_pdf_text, fetch_paper_section_text
 
         row = next(
             (r for r in load_catalog(owner) if (r.get("zotero_key") or "") == rid),
@@ -950,8 +1159,45 @@ def read_knowledge_content(
                 "has_pdf": bool(row.get("has_pdf")),
             }
 
-            if include_pdf:
-                pdf_budget = min(max(max_chars, 12000), 50000)
+            section_query = (section or "").strip()
+            if not section_query and not include_pdf:
+                try:
+                    from src.paper_summaries import load_cached_paper_summary_body
+
+                    cached = load_cached_paper_summary_body(owner, rid)
+                    if cached and cached.get("body"):
+                        parts.extend([
+                            "",
+                            "--- Research summary (cached from Deep Research) ---",
+                            f"_Generated: {cached.get('generated_at') or 'unknown'}_",
+                            "",
+                            cached["body"],
+                        ])
+                        meta["summary_document_id"] = cached.get("document_id")
+                        meta["summary_generated_at"] = cached.get("generated_at")
+                        meta["summary_research_session"] = cached.get("research_session_id")
+                except Exception as exc:
+                    logger.debug("Cached paper summary load skipped: %s", exc)
+
+            if section_query:
+                sec_budget = max_chars if max_chars != 8000 else PAPER_SECTION_DEFAULT_MAX_CHARS
+                sec_text, sec_note, sec_meta = fetch_paper_section_text(
+                    owner, rid, section_query, max_chars=sec_budget,
+                )
+                if sec_text:
+                    label = sec_meta.get("matched_label") or section_query
+                    parts.extend(["", f"--- Section: {label} ---", "", sec_text])
+                    meta["section"] = sec_meta.get("matched_slug") or section_query
+                    meta["pdf_extracted"] = True
+                    if sec_meta.get("available_sections"):
+                        meta["available_sections"] = sec_meta["available_sections"]
+                elif sec_note:
+                    parts.extend(["", f"Section extraction: {sec_note}"])
+                    meta["section_failed"] = True
+                    if sec_meta.get("available_sections"):
+                        meta["available_sections"] = sec_meta["available_sections"]
+            elif include_pdf:
+                pdf_budget = min(max(max_chars, 500), PAPER_PDF_MAX_CHARS)
                 pdf_text, pdf_note = fetch_paper_pdf_text(owner, rid, max_chars=pdf_budget)
                 if pdf_text:
                     parts.extend(["", "--- PDF text (from your Zotero library) ---", "", pdf_text])
@@ -962,11 +1208,16 @@ def read_knowledge_content(
             else:
                 parts.extend([
                     "",
-                    "PDF extraction skipped. Call search_knowledge read with include_pdf=true, "
+                    "PDF extraction skipped (Tier 1 — abstract + metadata only). "
+                    "A cached Deep Research summary appears above when available. "
+                    "For a section, pass section=methods|introduction|results|discussion. "
+                    "For full text, call search_knowledge read with include_pdf=true "
                     f"or search_zotero with zotero_key={rid!r} and include_pdf=true.",
                 ])
 
             body = "\n".join(parts)
+            if len(body) > max_chars:
+                body = body[:max_chars] + "\n… [truncated]"
     elif ntype == "collection":
         from src.zotero_catalog import load_catalog, load_collections
 
@@ -1039,6 +1290,11 @@ def list_graph_summary(owner: str, *, type_filter: Optional[str] = None, limit: 
         nodes = load_nodes(owner)
         edges = load_edges(owner)
 
+    type_counts: dict[str, int] = {}
+    for n in nodes.values():
+        t = n.get("type") or "document"
+        type_counts[t] = type_counts.get(t, 0) + 1
+
     rows = list(nodes.values())
     if type_filter:
         rows = [n for n in rows if _matches_type_filter(n, type_filter)]
@@ -1049,6 +1305,7 @@ def list_graph_summary(owner: str, *, type_filter: Optional[str] = None, limit: 
         "nodes": rows,
         "edge_count": len(edges),
         "node_count": len(nodes),
+        "type_counts": type_counts,
         "edges_sample": edges[: min(len(edges), 500)],
     }
 
@@ -1076,7 +1333,11 @@ def format_search_for_agent(result: dict, *, include_neighbors: bool = True) -> 
         lines.append(f"{i}. {kind}: {link}{extra}")
         if kind == "paper":
             zkey = meta.get("zotero_key") or (n.get("id") or "").split(":", 1)[-1]
-            pdf_bit = "PDF attached — read action extracts full text" if meta.get("has_pdf") else "metadata only"
+            pdf_bit = (
+                "abstract/summary on read; section= or include_pdf for more"
+                if meta.get("has_pdf")
+                else "metadata only"
+            )
             lines.append(f"   id: paper:{zkey} ({pdf_bit})")
         if snip:
             lines.append(f"   {snip}")
@@ -1084,16 +1345,27 @@ def format_search_for_agent(result: dict, *, include_neighbors: bool = True) -> 
     if neighbors:
         lines.append("")
         lines.append("Linked neighbors:")
+        expanded = result.get("expanded_links") or []
+        link_by_node = {ln.get("node_id"): ln for ln in expanded if ln.get("node_id")}
         for n in neighbors[:8]:
             anchor = _anchor_for(n)
             title = n.get("title") or n.get("id")
             link = f"[{title}]({anchor})" if anchor else title
-            lines.append(f"- {n.get('type')}: {link}")
+            meta = link_by_node.get(n.get("id") or "")
+            if meta:
+                label = format_edge_for_agent(
+                    meta.get("kind"),
+                    reason=meta.get("reason") or "",
+                    direction=meta.get("direction") or "out",
+                )
+                lines.append(f"- {n.get('type')}: {link} ({label})")
+            else:
+                lines.append(f"- {n.get('type')}: {link}")
 
     lines.append("")
     lines.append(
-        "For paper:… nodes, use read with that id — PDF text is extracted from Zotero automatically when attached. "
-        "Do not web_search the paper title to substitute."
+        "For paper:… nodes, use read (abstract + cached Deep Research summary when available), "
+        "section=methods|results|… for one PDF section, or include_pdf=true for full text."
     )
     return "\n".join(lines)
 
@@ -1128,15 +1400,37 @@ def execute_knowledge_tool(args: dict, owner: str = "") -> Dict[str, Any]:
         nid = (args.get("id") or args.get("node") or "").strip()
         if not nid:
             return {"error": "Provide id (e.g. task:uuid or document:abc)", "exit_code": 1}
+        ntype, _ = parse_node_id(nid)
+        is_paper = ntype == "paper"
+        from src.paper_retrieval import (
+            NON_PAPER_READ_DEFAULT_MAX_CHARS,
+            PAPER_READ_DEFAULT_INCLUDE_PDF,
+            PAPER_READ_DEFAULT_MAX_CHARS,
+            PAPER_SECTION_DEFAULT_MAX_CHARS,
+        )
+        section_query = (args.get("section") or "").strip()
+        default_max = (
+            PAPER_SECTION_DEFAULT_MAX_CHARS
+            if is_paper and section_query
+            else (PAPER_READ_DEFAULT_MAX_CHARS if is_paper else NON_PAPER_READ_DEFAULT_MAX_CHARS)
+        )
         try:
-            max_chars = int(args.get("max_chars", 8000))
+            max_chars = int(args.get("max_chars", default_max))
         except (TypeError, ValueError):
-            max_chars = 8000
-        include_pdf = args.get("include_pdf", True)
-        if isinstance(include_pdf, str):
-            include_pdf = include_pdf.lower() not in ("false", "0", "no")
+            max_chars = default_max
+        raw_pdf = args.get("include_pdf")
+        if raw_pdf is None:
+            include_pdf = is_paper and PAPER_READ_DEFAULT_INCLUDE_PDF
+        elif isinstance(raw_pdf, str):
+            include_pdf = raw_pdf.lower() not in ("false", "0", "no")
+        else:
+            include_pdf = bool(raw_pdf)
         out = read_knowledge_content(
-            owner, nid, max_chars=max_chars, include_pdf=bool(include_pdf),
+            owner,
+            nid,
+            max_chars=max_chars,
+            include_pdf=include_pdf and is_paper and not section_query,
+            section=section_query or None,
         )
         if out.get("exit_code") != 0:
             return out
@@ -1148,27 +1442,108 @@ def execute_knowledge_tool(args: dict, owner: str = "") -> Dict[str, Any]:
         nid = (args.get("id") or args.get("node") or "").strip()
         if not nid:
             return {"error": "Provide id for neighbors/links", "exit_code": 1}
-        nb = get_neighbors(owner, nid)
+        kinds_arg = args.get("kinds") or args.get("kind_filter")
+        kinds_list: Optional[List[str]] = None
+        if isinstance(kinds_arg, str):
+            kinds_list = [k.strip() for k in kinds_arg.split(",") if k.strip()]
+        elif isinstance(kinds_arg, list):
+            kinds_list = [str(k).strip() for k in kinds_arg if str(k).strip()]
+        nb = get_neighbors(owner, nid, kinds=kinds_list)
         node = nb.get("node")
         if not node:
             return {"error": f"Node not found: {nid}", "exit_code": 1}
+        include_proposed = args.get("include_proposed")
+        if isinstance(include_proposed, str):
+            include_proposed = include_proposed.lower() not in ("false", "0", "no")
+        else:
+            include_proposed = bool(include_proposed)
         lines = [f"# Links for {node.get('title')} ({node.get('id')})", ""]
+        if kinds_list:
+            lines.append(f"Filter: {', '.join(kinds_list)}")
+            lines.append("")
         lines.append("Outgoing:")
         for row in nb.get("outgoing") or []:
             tgt = row.get("node") or {}
-            kind = (row.get("edge") or {}).get("kind", "link")
+            edge = row.get("edge") or {}
+            kind = edge.get("kind", "relates")
+            reason = edge.get("reason") or ""
             anchor = _anchor_for(tgt) if tgt else ""
             title = tgt.get("title") or tgt.get("id", "?")
-            lines.append(f"- [{kind}] [{title}]({anchor})" if anchor else f"- [{kind}] {title}")
+            label = format_edge_for_agent(kind, reason=reason, direction="out")
+            if anchor:
+                lines.append(f"- {label} [{title}]({anchor})")
+            else:
+                lines.append(f"- {label} {title}")
         lines.append("")
         lines.append("Incoming:")
         for row in nb.get("incoming") or []:
             src = row.get("node") or {}
-            kind = (row.get("edge") or {}).get("kind", "link")
+            edge = row.get("edge") or {}
+            kind = edge.get("kind", "relates")
+            reason = edge.get("reason") or ""
             anchor = _anchor_for(src) if src else ""
             title = src.get("title") or src.get("id", "?")
-            lines.append(f"- [{kind}] [{title}]({anchor})" if anchor else f"- [{kind}] {title}")
+            label = format_edge_for_agent(kind, reason=reason, direction="in")
+            if anchor:
+                lines.append(f"- {label} [{title}]({anchor})")
+            else:
+                lines.append(f"- {label} {title}")
+        if include_proposed:
+            from src.pending_graph_edges import format_pending_rows_for_agent, get_pending_neighbors
+
+            pending_nb = get_pending_neighbors(owner, nid)
+            prop_out = pending_nb.get("outgoing") or []
+            prop_in = pending_nb.get("incoming") or []
+            if prop_out or prop_in:
+                lines.append("")
+                lines.append("Proposed (awaiting user approval — NOT in graph yet):")
+                for row in prop_out:
+                    lines.extend(format_pending_rows_for_agent([row.get("proposal") or row.get("edge") or {}]))
+                for row in prop_in:
+                    lines.extend(format_pending_rows_for_agent([row.get("proposal") or row.get("edge") or {}]))
+        lines.append("")
+        lines.append(
+            "Typed edges: derives_from (lineage), refutes (INHIBITORY/contradiction), "
+            "supports (evidence), relates (weak), depends_on (prerequisite). "
+            "Confirmed links use suggest_link with kind + reason. "
+            "Set include_proposed=true to see [PROPOSED] rows still in the review queue."
+        )
         return {"output": "\n".join(lines), "exit_code": 0}
+
+    if action in ("list_pending", "manage_graph_proposals", "manage_proposals"):
+        from src.pending_graph_edges import filter_pending_for_project, format_pending_rows_for_agent, load_pending_edges
+
+        sub = (args.get("phase") or args.get("sub_action") or "list").strip().lower()
+        if sub in ("clear", "dismiss_all", "reject_all"):
+            rows = load_pending_edges(owner)
+            project_id = (args.get("project_id") or "").strip()
+            if project_id:
+                rows = filter_pending_for_project(owner, project_id, rows)
+            from src.pending_graph_edges import reject_proposals
+
+            result = reject_proposals(owner, rows)
+            return {
+                "output": f"Dismissed {result.get('rejected', 0)} proposed connection(s) from review queue.",
+                "exit_code": 0,
+                **result,
+            }
+        rows = load_pending_edges(owner)
+        project_id = (args.get("project_id") or "").strip()
+        if project_id:
+            rows = filter_pending_for_project(owner, project_id, rows)
+        node_filter = (args.get("id") or args.get("node") or "").strip()
+        if node_filter:
+            rows = [r for r in rows if r.get("from") == node_filter or r.get("to") == node_filter]
+        if not rows:
+            return {"output": "No pending graph connection proposals.", "exit_code": 0}
+        lines = [f"# Pending graph proposals ({len(rows)})", ""]
+        lines.extend(format_pending_rows_for_agent(rows))
+        lines.append("")
+        lines.append(
+            "User must accept in Connections before these become Links. "
+            "Do not call link or merge_subgraph apply unless the user explicitly asks to save."
+        )
+        return {"output": "\n".join(lines), "exit_code": 0, "rows": rows, "count": len(rows)}
 
     if action == "rebuild":
         stats = rebuild_owner_graph(owner)
@@ -1184,8 +1559,9 @@ def execute_knowledge_tool(args: dict, owner: str = "") -> Dict[str, Any]:
         to = (args.get("to") or args.get("to_id") or args.get("target") or "").strip()
         if not fr or not to:
             return {"error": "Provide from and to node ids (e.g. task:uuid → document:uuid)", "exit_code": 1}
-        kind = (args.get("kind") or "link").strip().lower()
-        result = add_graph_link(owner, fr, to, kind=kind)
+        kind = (args.get("kind") or "relates").strip().lower()
+        reason = (args.get("reason") or "").strip()
+        result = add_graph_link(owner, fr, to, kind=kind, reason=reason, source="agent")
         if not result.get("ok"):
             return {"error": result.get("error", "link failed"), "exit_code": 1}
         return {
@@ -1198,8 +1574,13 @@ def execute_knowledge_tool(args: dict, owner: str = "") -> Dict[str, Any]:
         to = (args.get("to") or args.get("to_id") or args.get("target") or "").strip()
         if not fr or not to:
             return {"error": "Provide from and to node ids to suggest a link", "exit_code": 1}
-        kind = (args.get("kind") or "related").strip().lower()
+        kind = (args.get("kind") or "relates").strip().lower()
         reason = (args.get("reason") or args.get("why") or "").strip()
+        if not reason:
+            return {
+                "error": "reason is required for suggest_link — one short sentence explaining the relationship.",
+                "exit_code": 1,
+            }
         result = suggest_graph_link(owner, fr, to, kind=kind, reason=reason)
         if not result.get("ok"):
             return {"error": result.get("error", "suggest failed"), "exit_code": 1}
@@ -1225,7 +1606,36 @@ def execute_knowledge_tool(args: dict, owner: str = "") -> Dict[str, Any]:
             return {"error": result.get("error", "unlink failed"), "exit_code": 1}
         return {"output": "Link removed.", "exit_code": 0}
 
+    if action in ("merge_subgraph", "merge", "merge_proposals"):
+        from src.graph_merge import apply_merge_proposals, format_merge_preview_for_agent, preview_merge_proposals
+
+        phase = (args.get("phase") or args.get("sub_action") or "preview").strip().lower()
+        if phase in ("apply", "confirm", "write"):
+            accepted = args.get("accepted") or args.get("proposals") or args.get("rows") or []
+            result = apply_merge_proposals(owner, accepted)
+            if not result.get("ok"):
+                return {"error": result.get("error", "merge apply failed"), "exit_code": 1}
+            return {
+                "output": (
+                    f"Merge apply — added {result.get('applied', 0)}, "
+                    f"updated {result.get('updated', 0)}, skipped {result.get('skipped', 0)}."
+                ),
+                "exit_code": 0,
+                **result,
+            }
+        proposals = args.get("proposals") or args.get("edges") or args.get("links") or []
+        preview = preview_merge_proposals(owner, proposals)
+        if not preview.get("ok"):
+            return {"error": preview.get("error", "merge preview failed"), "exit_code": 1}
+        return {
+            "output": format_merge_preview_for_agent(preview),
+            "exit_code": 0,
+            "action": "merge_subgraph",
+            "phase": "preview",
+            **preview,
+        }
+
     return {
-        "error": "Unknown action. Use search, read, neighbors, suggest_link, link, unlink, rebuild.",
+        "error": "Unknown action. Use search, read, neighbors, suggest_link, link, unlink, rebuild, merge_subgraph, list_pending.",
         "exit_code": 1,
     }

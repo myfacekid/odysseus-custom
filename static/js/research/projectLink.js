@@ -3,6 +3,7 @@
  * Optional picker for compare/gap; post-complete confirm (never auto-link).
  */
 import uiModule from '../ui.js';
+import { isProjectsUiEnabled } from '../projects/featureFlag.js';
 
 const SUGGEST_DISMISS_KEY = 'odysseus-research-project-suggest-dismissed';
 const PROJECT_MODES = new Set(['compare', 'gap_analysis']);
@@ -78,6 +79,10 @@ export async function populateProjectSelect(apiBase, selectEl) {
 export function updateProjectPickerVisibility() {
   const wrap = document.getElementById('research-project-setting-wrap');
   if (!wrap) return;
+  if (!isProjectsUiEnabled()) {
+    wrap.hidden = true;
+    return;
+  }
   const tab = document.querySelector('.research-compose-tab.active')?.getAttribute('data-tab') || 'topic';
   const mode = document.getElementById('research-mode')?.value || 'literature_review';
   const show = tab === 'papers' && modeWantsProjectLink(mode);
@@ -139,6 +144,7 @@ async function _pickProject(apiBase, title = 'Add to project') {
  * Post-complete suggest for compare/gap jobs (confirm only — never silent link).
  */
 export async function suggestLinkAfterComplete(job, apiBase) {
+  if (!isProjectsUiEnabled()) return;
   if (!job || job.status !== 'done' || !job.id || job.id.startsWith('pending-')) return;
   const mode = (job.settings?.mode || '').trim().toLowerCase();
   if (!modeWantsProjectLink(mode)) return;
@@ -193,6 +199,7 @@ export async function suggestLinkAfterComplete(job, apiBase) {
 
 /** Manual action from completed job card — any research mode. */
 export async function promptLinkResearchJob(job, apiBase) {
+  if (!isProjectsUiEnabled()) return;
   if (!job?.id || job.id.startsWith('pending-')) return;
   const projectId = await _pickProject(apiBase, 'Link research to project');
   if (!projectId) return;

@@ -118,11 +118,12 @@ _API_AGENT_RULES = """\
 - "Create/add/write a note" / quick reminders / "remind me at 3pm" → use `manage_notes`. For **One Thing** horizons (this week / ~3 months / this year with priority + due date) → use `manage_notes` with `action=list_one_thing|add_one_thing|toggle_one_thing`. Horizons: `focus`=this week, `build`=~3 months, `aim`=this year. Priorities: `critical`, `elevated`, `steady`. Do NOT store notes in `manage_memory`.
 - New documents, articles, files, or long-form content for the Library → `create_document` (appears in Documents library + Links). NOT `write_file` or markdown-on-disk tools.
 - Cross-entity context ("what connects to X", tasks + docs + memories + papers together) → call `search_knowledge` (search/read/neighbors). Prefer over calling manage_documents + manage_memory + list_tasks separately. Use `types: ["paper"]` for synced Zotero items (Links → Papers tab).
-- **Reading a saved paper** (user asks to read/summarize/analyze a library paper, or you have a `paper:<zotero_key>` id) → call `search_knowledge` with `action=read` and that id. This **automatically extracts the Zotero PDF** when one is attached. Do **NOT** `web_search` the paper title, DOI, or rely on world knowledge to substitute — the user's saved copy is the source of truth. Only use `web_search` for that paper if PDF extraction explicitly failed **and** the user asks for outside sources.
-- When two graph items clearly relate (documents, tasks, memories, skills, papers) → call `search_knowledge` with `action=suggest_link` and a brief `reason`. The user gets a notification to link or dismiss — do NOT call `link` unless they explicitly asked to connect them. Use graph ids like `document:<uuid>`, `paper:<zotero_key>`, or `task:<uuid>` from search_knowledge hits.
+- **Reading a saved paper** (user asks to read/summarize/analyze a library paper, or you have a `paper:<zotero_key>` id) → **Tier 1 first:** `search_knowledge` `action=read` on that id (abstract + metadata; **includes cached Deep Research summary** when the paper was researched before). **Tier 2:** `section=methods|introduction|results|discussion` for one PDF section. **Tier 3:** `include_pdf=true` when abstract/section is insufficient. Do **NOT** `web_search` the title/DOI. Only `web_search` if PDF extraction failed **and** the user asks for outside sources.
+- **Compare 2–3 saved papers** (methods, results, limitations side-by-side) → `compare_papers` with `paper_keys` and `focus`. Uses section extracts + cached DR summaries — do **NOT** loop multiple `search_knowledge` reads unless compare fails. **4+ papers** → same tool auto-starts Deep Research `compare` mode.
+- When two graph items clearly relate (documents, tasks, memories, skills, papers) → call `search_knowledge` with `action=suggest_link`, a typed `kind` (`derives_from`, `refutes`, `supports`, `relates`, `depends_on`), and a brief `reason`. The user gets a notification to link or dismiss — do NOT call `link` unless they explicitly asked to connect them. Use graph ids like `document:<uuid>`, `paper:<zotero_key>`, or `task:<uuid>` from search_knowledge hits. **`refutes` edges are inhibitory** — follow when looking for contradictions, not as supporting evidence. For **3+ edges** from `compare_papers` / Deep Research / batch compare: use `merge_subgraph` **phase=preview** only — the UI queues proposals for user review; never call `merge_subgraph` phase=apply unless the user explicitly asks to save/accept links.
 - "Disable/turn off/enable/turn on <tool>" (shell, search, research, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, search→web, deepresearch→research, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
 - "Research X" / "do research on X" / "look into Y" / "deep dive on Z" → call `trigger_research` with `topic`. This starts a live job that appears in the Deep Research sidebar (streams progress + final report). **Do NOT use `web_search` for these** — saw the agent do a plain web_search for "do research on X" when the user wanted the deep-research job. "research X" is a deep-research request, not a quick lookup. (web_search is only for a single quick fact mid-task.) Do NOT POST /api/research/start via app_api either — blocked. After starting, tell the user it's running in the Deep Research sidebar. Only if the user explicitly wants it inline/quick should you fall back to web_search.
-- "My Zotero library" / "my papers" / "read this paper" / saved sources → `search_knowledge` `action=read` with `paper:<key>` (auto PDF). Alternate: `search_zotero` with `zotero_key` (or query `paper:KEY`) and `include_pdf=true`. Do **NOT** `web_search` to read papers in the user's library. NOT trigger_research for a single saved paper.
+- "My Zotero library" / "my papers" / "read this paper" / saved sources → `search_knowledge` `action=read` with `paper:<key>` (abstract first). For full PDF: same call with `include_pdf=true`. Alternate: `search_zotero` with `zotero_key` (PDF) or broad search without PDF. Do **NOT** `web_search` to read papers in the user's library. NOT trigger_research for a single saved paper.
 - "Open/show <panel>" (documents, library, gallery, sessions, brain/memories, skills, settings, notes, cookbook) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open cookbook" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add.
 - You are running INSIDE Odysseus — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
@@ -200,7 +201,18 @@ List Zotero folders (returns paths like `Projects / ML` plus collection keys).
 ```search_zotero
 {"query": "transformer attention", "collection": "Projects / ML", "limit": 10}
 ```
-Search the user's personal Zotero library — saved papers, citations, and PDF excerpts. Pass `zotero_key` (or query `paper:KEY` / bare 8-char key) to fetch a specific paper. `include_pdf=true` (default) extracts PDF text. For reading a known graph paper, prefer `search_knowledge` `action=read` on `paper:<key>` (same PDF extraction). Do **NOT** `web_search` paper titles when the PDF is in the user's library. NOT trigger_research.""",
+Search the user's personal Zotero library — saved papers, citations, and metadata. **Broad search** (query/collection, no `zotero_key`) returns titles + abstracts only — do not expect PDF text. **One paper:** pass `zotero_key` (or query `paper:KEY` / bare 8-char key) — PDF extracts when `include_pdf=true` (default when key is set). For reading a known graph paper, prefer `search_knowledge` `action=read` on `paper:<key>` (abstract first; add `include_pdf=true` for full text). Do **NOT** `web_search` paper titles when the PDF is in the user's library. NOT trigger_research.""",
+
+    "compare_papers": """\
+```compare_papers
+{"paper_keys": ["98XWP3CH", "ABC12345"], "focus": "methods", "question": "How do their training pipelines differ?"}
+```
+Side-by-side comparison of **2–3** saved papers at section-level cost. Pulls PDF sections (Tier 2) and cached Deep Research summaries when available. **Do NOT** manually loop `search_knowledge` reads for the same comparison.
+
+```compare_papers
+{"paper_keys": ["paper:AFOLD001", "paper:ESMF001", "paper:OTHER01", "paper:FOURTH1"], "focus": "results"}
+```
+**4+ papers** — tool auto-starts Deep Research compare mode (async report in sidebar). NOT trigger_research for ≤3 papers when compare_papers suffices.""",
 
     "search_vault": """\
 ```search_vault
@@ -254,15 +266,36 @@ Targeted find/replace in a note (read first). Multiple edits: `"edits": [{"find"
 Insert a wikilink from one note to another — builds the knowledge graph. NOT manage_notes or write_file.""",
 
     "search_knowledge": """\
+**Semantic edge vocabulary** (always use on suggest_link / explicit link):
+| Kind | When to use |
+|------|-------------|
+| `derives_from` | Method lineage, fork, implements, inspired by |
+| `refutes` | Contradicts, disproves — **INHIBITORY** (do not treat as supporting evidence) |
+| `supports` | Evidence for, confirms, corroborates |
+| `relates` | Same topic, no stronger claim (weakest signal) |
+| `depends_on` | Cannot proceed without reading/using target first |
+
+**Rules:** `suggest_link` **requires** `reason` (one sentence). Prefer `relates` + honest reason over guessing `supports`. Task goal hierarchy uses inferred `parent` edges — not `depends_on`.
+
 ```search_knowledge
 {"action": "search", "query": "epistasis lab deadline", "types": ["task", "document"], "limit": 10, "expand_hops": 1}
 ```
 Unified knowledge graph search — todos, documents, memories, skills. Returns compact snippets + linked neighbors. Prefer this for cross-entity context.
 
 ```search_knowledge
-{"action": "read", "id": "paper:98XWP3CH", "max_chars": 20000}
+{"action": "read", "id": "paper:98XWP3CH"}
 ```
-Load full content for one graph node. For `paper:…` ids, **automatically extracts the Zotero PDF** when attached (metadata-only catalog is not the final answer). Do not web_search the title afterward.
+Load a saved paper — **Tier 1:** title, authors, abstract (default). Do not web_search the title afterward.
+
+```search_knowledge
+{"action": "read", "id": "paper:98XWP3CH", "section": "methods"}
+```
+**Tier 2:** extract the Methods section only (compare procedures across papers without full PDF dumps).
+
+```search_knowledge
+{"action": "read", "id": "paper:98XWP3CH", "include_pdf": true, "max_chars": 20000}
+```
+**Tier 3:** full PDF text when abstract/section is not enough (deep analysis, specific body claims, methods comparison when section headings are missing).
 
 ```search_knowledge
 {"action": "read", "id": "document:abc123", "max_chars": 4000}
@@ -272,15 +305,45 @@ Load full content for a library document or other node types.
 ```search_knowledge
 {"action": "neighbors", "id": "task:uuid-here"}
 ```
-Browse conceptual links (parent goals, wikilinks, etc.) for a node.
+Browse **confirmed** graph links for a node. Pending proposals are excluded by default.
 
 ```search_knowledge
-{"action": "suggest_link", "from": "document:uuid-a", "to": "document:uuid-b", "kind": "related", "reason": "Both cover the same experiment methods"}
+{"action": "neighbors", "id": "paper:AFOLD001", "include_proposed": true}
 ```
-Propose a link between two graph nodes — the user gets a notification to accept or dismiss. Use during conversation when items clearly relate. Requires graph node ids (search first, or use graph_node_id from create_document). Do NOT use `link` unless the user explicitly asked to connect them.
+Include `[PROPOSED]` rows still awaiting user approval in Connections.
 
 ```search_knowledge
-{"action": "link", "from": "task:uuid", "to": "document:uuid", "kind": "related"}
+{"action": "suggest_link", "from": "document:uuid-a", "to": "document:uuid-b", "kind": "derives_from", "reason": "Doc B extends the experiment methods from doc A"}
+```
+Propose a typed link between two graph nodes — the user gets a notification to accept or dismiss. Use during conversation when items clearly relate. Requires graph node ids (search first, or use graph_node_id from create_document). Do NOT use `link` unless the user explicitly asked to connect them.
+
+```search_knowledge
+{"action": "suggest_link", "from": "paper:AFOLD001", "to": "paper:ESMF001", "kind": "relates", "reason": "Both compare protein structure predictors"}
+```
+After `compare_papers` or Deep Research: use `merge_subgraph` **preview** for batches (≤20). Use `suggest_link` only for 1–2 edges.
+
+```search_knowledge
+{"action": "merge_subgraph", "phase": "preview", "proposals": [{"from": "paper:AFOLD001", "to": "paper:ESMF001", "kind": "supports", "reason": "Same benchmark conclusions"}]}
+```
+Validate up to 20 proposed edges — opens batch review UI; **does not write** until the user accepts in the UI.
+
+```search_knowledge
+{"action": "merge_subgraph", "phase": "apply", "accepted": [...]}
+```
+**Only when the user explicitly asks to save/accept links** after preview. Otherwise let the pop-up / Connections inbox handle approval.
+
+```search_knowledge
+{"action": "list_pending", "project_id": "proj-uuid"}
+```
+List learned connection proposals awaiting user approval (`[PROPOSED]` — not in graph yet). Project chats also see these in the preamble.
+
+```search_knowledge
+{"action": "neighbors", "id": "paper:AFOLD001", "kinds": ["refutes", "supports"]}
+```
+Browse links filtered by semantic kind — `refutes` shown as INHIBITORY in output.
+
+```search_knowledge
+{"action": "link", "from": "task:uuid", "to": "document:uuid", "kind": "depends_on", "reason": "Task blocked until methods doc is read"}
 ```
 Create an explicit cross-entity link immediately (only when the user explicitly requested linking).
 
@@ -1054,7 +1117,7 @@ def _build_base_prompt(
         from src.constants import DATA_DIR
         _sm = SkillsManager(DATA_DIR)
         active_tools = list(set(TOOL_SECTIONS.keys()) - set(disabled or []))
-        skill_idx = _sm.index_for(owner=None, active_toolsets=active_tools)
+        skill_idx = _sm.index_for(owner=owner, active_toolsets=active_tools)
         if skill_idx:
             lines = ["## Available skills",
                      "Procedures the assistant should consult before doing domain work. "
@@ -1371,6 +1434,18 @@ def _empty_response_fallback(
     return _error_msg, f'data: {json.dumps({"delta": _error_msg})}\n\n'
 
 
+def _link_proposal_project_id(session_id: Optional[str]) -> Optional[str]:
+    """Project id for scoping learned link proposals in project workspace chats."""
+    if not session_id:
+        return None
+    try:
+        from src.project_tool_policy import get_session_project_id
+
+        return get_session_project_id(session_id) or None
+    except Exception:
+        return None
+
+
 async def stream_agent_loop(
     endpoint_url: str,
     model: str,
@@ -1573,6 +1648,7 @@ async def stream_agent_loop(
         active_project_file=active_project_file,
     )
     prep_timings["prompt_build"] = time.time() - _t2
+    link_project_id = _link_proposal_project_id(session_id)
 
     _t3 = time.time()
     try:
@@ -2198,7 +2274,33 @@ async def stream_agent_loop(
                     "reason": result.get("reason"),
                     "suggestion_id": result.get("suggestion_id"),
                 }
+                if link_project_id:
+                    _link_payload["project_id"] = link_project_id
                 yield f'data: {json.dumps(_link_payload)}\n\n'
+
+            if block.tool_type == "search_knowledge" and result.get("action") == "merge_subgraph":
+                rows = result.get("rows") or []
+                if rows:
+                    from src.learned_link_prefs import should_emit_batch_link_proposals
+                    if should_emit_batch_link_proposals(owner):
+                        _merge_payload = {
+                            "type": "graph_merge_proposals",
+                            "rows": rows,
+                            "merge_session_id": result.get("merge_session_id"),
+                        }
+                        if link_project_id:
+                            _merge_payload["project_id"] = link_project_id
+                        yield f'data: {json.dumps(_merge_payload)}\n\n'
+
+            if block.tool_type == "compare_papers":
+                proposals = result.get("suggested_edges") or []
+                if proposals:
+                    from src.learned_link_prefs import should_emit_batch_link_proposals
+                    if should_emit_batch_link_proposals(owner):
+                        _compare_payload = {"type": "graph_merge_proposals", "proposals": proposals}
+                        if link_project_id:
+                            _compare_payload["project_id"] = link_project_id
+                        yield f'data: {json.dumps(_compare_payload)}\n\n'
 
             # Emit ui_control event for frontend to apply UI changes
             if "ui_event" in result:
@@ -2249,7 +2351,7 @@ async def stream_agent_loop(
             # Emit tool_output (include ui_event data if present)
             tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code")}
             if block.tool_type == "search_knowledge" and result.get("action") == "suggest_link":
-                tool_output_data["link_suggestion"] = {
+                _ls = {
                     "from": result.get("from"),
                     "to": result.get("to"),
                     "from_title": result.get("from_title"),
@@ -2260,6 +2362,30 @@ async def stream_agent_loop(
                     "reason": result.get("reason"),
                     "suggestion_id": result.get("suggestion_id"),
                 }
+                if link_project_id:
+                    _ls["project_id"] = link_project_id
+                tool_output_data["link_suggestion"] = _ls
+            if block.tool_type == "search_knowledge" and result.get("action") == "merge_subgraph":
+                rows = result.get("rows") or []
+                if rows:
+                    from src.learned_link_prefs import should_emit_batch_link_proposals
+                    if should_emit_batch_link_proposals(owner):
+                        _gmp = {
+                            "rows": rows,
+                            "merge_session_id": result.get("merge_session_id"),
+                        }
+                        if link_project_id:
+                            _gmp["project_id"] = link_project_id
+                        tool_output_data["graph_merge_proposals"] = _gmp
+            if block.tool_type == "compare_papers":
+                proposals = result.get("suggested_edges") or []
+                if proposals:
+                    from src.learned_link_prefs import should_emit_batch_link_proposals
+                    if should_emit_batch_link_proposals(owner):
+                        _gmp = {"proposals": proposals}
+                        if link_project_id:
+                            _gmp["project_id"] = link_project_id
+                        tool_output_data["graph_merge_proposals"] = _gmp
             if "ui_event" in result:
                 tool_output_data["ui_event"] = result["ui_event"]
                 for k in ("toggle_name", "state", "mode", "model", "endpoint_url", "theme_name", "colors"):
@@ -2297,7 +2423,7 @@ async def stream_agent_loop(
             # PERSISTS across refresh (unlike the old ephemeral injected chip).
             _rsid = result.get("research_session_id")
             if _rsid:
-                _anchor = f"\n\n[Open in Deep Research](#research-{_rsid})\n"
+                _anchor = f"\n\n[Open in Research](#research-{_rsid})\n"
                 yield 'data: ' + json.dumps({"delta": _anchor}) + '\n\n'
 
             # Save for history persistence

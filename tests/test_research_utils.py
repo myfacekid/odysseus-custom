@@ -110,7 +110,7 @@ class TestResearchRuntimeLimits:
     def test_defaults(self, monkeypatch):
         monkeypatch.setattr("src.settings.get_setting", lambda key, default=None: default)
         assert get_research_max_content_chars() == 15000
-        assert get_research_synthesis_window() == 10
+        assert get_research_synthesis_window() == 20
 
     def test_bounded_overrides(self, monkeypatch):
         def fake_get(key, default=None):

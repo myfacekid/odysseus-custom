@@ -88,7 +88,7 @@ function _show(modal) {
         <path class="th-cursor" d="M0 0 L0 9 L2.5 7 L4.5 10 L6 9 L4 6 L7 6 Z" fill="currentColor" />
       </svg>
     </div>
-    <div class="tour-hint-text"><b>Pro tip:</b> drag any window's title bar to a screen edge to snap it. Drag to the top for fullscreen.</div>
+    <div class="tour-hint-text"><b>Pro tip:</b> drag a window's title bar to a screen edge to snap it, or to the top for fullscreen. Swipe a tool down to minimize it to the dock chip bar.</div>
     <button class="tour-hint-dismiss" type="button">Got it</button>
   `;
   document.body.appendChild(pop);
@@ -163,12 +163,93 @@ function _watchModals() {
 export function init() {
   if (_initialized) return;
   _initialized = true;
-  if (_hasSeen()) return; // nothing to do
-  // Defer one tick so the rest of the app has a chance to mount its modals.
-  setTimeout(_watchModals, 50);
+  if (_hasSeen()) { /* drag hint done */ } else {
+    setTimeout(_watchModals, 50);
+  }
+  _initNavHints();
+}
+
+// ── U3 navigation hints (one-time vocabulary + viewport model) ──
+
+const NAV_HINT_COPY = {
+  desktopRail: '<b>Icon rail:</b> this is the collapsed sidebar — same tools, icons only. Expand the sidebar (☰) any time to see labels.',
+  mobileMenu: '<b>Mobile:</b> open the menu (☰) for chats, projects, and all tools. The icon rail stays hidden unless you minimize a tool to a chip.',
+  mobileMini: '<b>Icon rail:</b> this slim strip appears when a minimized tool restores its rail. On phones, prefer the ☰ menu for navigation.',
+  connectionsVsLinks: '<b>Connections vs Links:</b> pending proposals are in <b>Connections</b> (Memory tab). Accepted edges appear in <b>Links</b>.',
+  libraryVsResearch: '<b>Research vs Library:</b> <b>Research</b> is the compose queue and active runs. Finished reports are in <b>Library</b>, Research tab.',
+};
+
+const NAV_HINT_KEYS = {
+  desktopRail: 'odysseus-hint-nav-desktop-rail',
+  mobileMenu: 'odysseus-hint-nav-mobile-menu',
+  mobileMini: 'odysseus-hint-nav-mobile-mini',
+  connectionsVsLinks: 'odysseus-hint-nav-connections-links',
+  libraryVsResearch: 'odysseus-hint-nav-library-research',
+};
+
+let _navToastEl = null;
+
+function _navSeen(id) {
+  const key = NAV_HINT_KEYS[id];
+  return key ? localStorage.getItem(key) === '1' : true;
+}
+function _markNavSeen(id) {
+  const key = NAV_HINT_KEYS[id];
+  if (key) try { localStorage.setItem(key, '1'); } catch { /* ignore */ }
+}
+
+function _dismissNavToast() {
+  if (!_navToastEl) return;
+  _navToastEl.classList.add('tour-hint-out');
+  const el = _navToastEl;
+  setTimeout(() => el.remove(), 280);
+  _navToastEl = null;
+}
+
+function _showNavToast(html, hintId) {
+  if (_navSeen(hintId)) return;
+  if (document.body.classList.contains('tour-active')) return;
+  if (document.getElementById('tour-tooltip')) return;
+  _dismissNavToast();
+  _markNavSeen(hintId);
+  const pop = document.createElement('div');
+  pop.className = 'tour-hint tour-hint-nav';
+  pop.innerHTML = `
+    <div class="tour-hint-text">${html}</div>
+    <button class="tour-hint-dismiss" type="button">Got it</button>
+  `;
+  document.body.appendChild(pop);
+  pop.style.left = '50%';
+  pop.style.top = 'auto';
+  pop.style.bottom = '72px';
+  pop.style.transform = 'translateX(-50%)';
+  pop.style.maxWidth = 'min(360px, 92vw)';
+  pop.classList.add('tour-hint-in');
+  _navToastEl = pop;
+  pop.querySelector('.tour-hint-dismiss')?.addEventListener('click', _dismissNavToast);
+  setTimeout(() => { if (_navToastEl === pop) _dismissNavToast(); }, 12000);
+}
+
+export function maybeNavHint(id) {
+  const html = NAV_HINT_COPY[id];
+  if (!html || _navSeen(id)) return;
+  if (id === 'desktopRail' && window.innerWidth < 768) return;
+  if (id === 'mobileMenu' && window.innerWidth >= 768) return;
+  if (id === 'mobileMini' && window.innerWidth >= 768) return;
+  _showNavToast(html, id);
+}
+
+function _initNavHints() {
+  const rail = document.getElementById('icon-rail');
+  if (rail && typeof MutationObserver !== 'undefined') {
+    new MutationObserver(() => {
+      if (rail.classList.contains('mobile-mini')) maybeNavHint('mobileMini');
+    }).observe(rail, { attributes: true, attributeFilter: ['class'] });
+  }
 }
 
 if (typeof window !== 'undefined') {
+  window.maybeNavHint = maybeNavHint;
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
@@ -176,4 +257,4 @@ if (typeof window !== 'undefined') {
   }
 }
 
-export default { init };
+export default { init, maybeNavHint };

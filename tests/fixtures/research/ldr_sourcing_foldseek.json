@@ -1,0 +1,78 @@
+{
+  "description": "Golden sourcing snapshot after L6/L7 enrichment (mocked ladder). Foldseek E2E shape: many metadata rows, few enriched.",
+  "question": "What is Foldseek protein structure search?",
+  "findings_before": [
+    {
+      "citation_num": 1,
+      "title": "Fast and accurate protein structure search with Foldseek",
+      "url": "https://doi.org/10.1038/s41587-023-01773-0",
+      "doi_or_id": "10.1038/s41587-023-01773-0",
+      "content": "Nature Biotechnology",
+      "search_provider": "openalex"
+    },
+    {
+      "citation_num": 2,
+      "title": "Clustering predicted structures at the scale of the known protein universe",
+      "url": "https://doi.org/10.1038/s41586-023-06510-w",
+      "doi_or_id": "10.1038/s41586-023-06510-w",
+      "content": "Nature",
+      "search_provider": "openalex"
+    },
+    {
+      "citation_num": 3,
+      "title": "Baktfold preprint on structure annotation",
+      "url": "https://arxiv.org/abs/2401.12345",
+      "content": "arXiv preprint listing",
+      "search_provider": "semantic_scholar"
+    },
+    {
+      "citation_num": 4,
+      "title": "Semantic Scholar page only",
+      "url": "https://www.semanticscholar.org/paper/abc123",
+      "content": "Failed to fetch",
+      "search_provider": "ldr"
+    }
+  ],
+  "findings_after_enrich": [
+    {
+      "citation_num": 1,
+      "title": "Fast and accurate protein structure search with Foldseek",
+      "doi_or_id": "10.1038/s41587-023-01773-0",
+      "abstract": "Foldseek enables fast protein structure search using a 3Di structural alphabet and sequence alignment algorithms. The method scales to large structure databases and supports remote homology detection across diverse folds. ",
+      "sourcing_tier": "abstract_only",
+      "allow_substantive_claims": true
+    },
+    {
+      "citation_num": 2,
+      "title": "Clustering predicted structures at the scale of the known protein universe",
+      "doi_or_id": "10.1038/s41586-023-06510-w",
+      "abstract": "We cluster hundreds of millions of predicted structures using Foldseek at the scale of the known protein universe. The pipeline groups structural neighbors and enables comparative analysis of AlphaFold Database entries at unprecedented scale. ",
+      "sourcing_tier": "abstract_only",
+      "allow_substantive_claims": true
+    },
+    {
+      "citation_num": 3,
+      "title": "Baktfold preprint on structure annotation",
+      "url": "https://arxiv.org/abs/2401.12345",
+      "evidence": "Full arXiv HTML text describing structure annotation methods and benchmarks across protein folds. Structural alignment metrics and sensitivity analysis are reported for diverse protein families and remote homologs. Methods compare Foldseek-class tools against sequence-only baselines on standard benchmarks. Results show improved annotation sensitivity while maintaining computational efficiency for large databases. Additional sections cover limitations, dataset construction, and reproducibility of the annotation pipeline across bacterial and viral genomes studied in the benchmark.",
+      "deep_read_loaded": true,
+      "web_enriched": true,
+      "sourcing_tier": "adequate",
+      "allow_substantive_claims": true
+    },
+    {
+      "citation_num": 4,
+      "title": "Semantic Scholar page only",
+      "url": "https://www.semanticscholar.org/paper/abc123",
+      "content": "Failed to fetch",
+      "sourcing_tier": "metadata_only",
+      "allow_substantive_claims": false
+    }
+  ],
+  "expected_tier_counts": {
+    "abstract_only": 2,
+    "adequate": 1,
+    "metadata_only": 1
+  },
+  "expected_usable_fraction_min": 0.5
+}

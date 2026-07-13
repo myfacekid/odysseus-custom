@@ -8,6 +8,7 @@ import markdownModule from '../markdown.js';
 import codeRunnerModule from '../codeRunner.js';
 import runPanelModule from './runPanel.js';
 import workspaceShell from './workspaceShell.js';
+import { formatButtonHtml, wireMarkdownFormat } from '../ui/editorChrome.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
@@ -95,6 +96,7 @@ function _els() {
     diskBanner: _pane?.querySelector('#project-editor-disk-banner'),
     diskBannerMsg: _pane?.querySelector('#project-editor-disk-banner-msg'),
     previewBtn: _pane?.querySelector('#project-editor-preview-btn'),
+    formatWrap: _pane?.querySelector('#project-editor-format-wrap'),
     mdPreview: _pane?.querySelector('#project-editor-md-preview'),
     htmlPreview: _pane?.querySelector('#project-editor-html-preview'),
     metaStatus: _pane?.querySelector('#project-editor-meta-status'),
@@ -428,7 +430,10 @@ function _updateRunButton() {
 }
 
 function _updateLangBadge() {
-  const { lang } = _els();
+  const { lang, formatWrap } = _els();
+  if (formatWrap) {
+    formatWrap.classList.toggle('hidden', _language !== 'markdown' || !_path);
+  }
   if (!lang) return;
   const icon = langIcon(_language);
   const label = _language === 'plaintext' ? 'Text' : _language;
@@ -755,6 +760,9 @@ function _renderChrome() {
         '<span id="project-editor-path" class="project-editor-path" title=""></span>' +
         '<span id="project-editor-lang" class="project-editor-lang"></span>' +
         '<span class="project-editor-head-actions">' +
+          '<span id="project-editor-format-wrap" class="project-editor-format-wrap hidden">' +
+            formatButtonHtml() +
+          '</span>' +
           '<button type="button" id="project-editor-preview-btn" class="doc-action-icon-btn hidden" title="Preview markdown or HTML" aria-pressed="false">' +
             _PREVIEW_SVG +
           '</button>' +
@@ -783,6 +791,7 @@ function _renderChrome() {
       '</div>' +
     '</div>';
   _bindEditorEvents();
+  wireMarkdownFormat(_pane?.querySelector('#project-editor-format-wrap'), () => _els().textarea);
 }
 
 export async function openFile(payload) {

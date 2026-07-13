@@ -26,7 +26,29 @@ function _markDismissed(ids) {
   _saveDismissed(set);
 }
 
+// Graph-connection review is a one-time decision per research: once the user
+// accepts/rejects the proposed links, the "Review connections" CTA should not
+// reappear (in this session or after a reload).
+const _REVIEWED_CONN_KEY = 'odysseus-research-conn-reviewed';
+function _loadReviewedConns() {
+  try {
+    const raw = localStorage.getItem(_REVIEWED_CONN_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch { return new Set(); }
+}
+export function isConnectionsReviewed(id) {
+  return _loadReviewedConns().has(id);
+}
+function _markConnectionsReviewed(id) {
+  const set = _loadReviewedConns();
+  set.add(id);
+  try { localStorage.setItem(_REVIEWED_CONN_KEY, JSON.stringify([...set])); } catch {}
+}
+
+let _hydrated = false;
 let _activePollInterval = null;
+
+export function isHydrated() { return _hydrated; }
 
 export function init(apiBase) {
   _apiBase = apiBase;
@@ -91,8 +113,10 @@ async function _reconnectActive() {
       }
     }
 
+  } catch {} finally {
+    if (!_hydrated) _hydrated = true;
     _notify();
-  } catch {}
+  }
 }
 
 function _parseDuration(s) {
@@ -272,6 +296,9 @@ function _connectStream(job) {
       if (d.final) {
         if (d.error) job.errorMsg = d.error;
         _finishJob(job, d.status === 'done' ? 'done' : d.status === 'cancelled' ? 'cancelled' : 'error');
+        if (d.graph_connection_proposals?.proposal_count) {
+          job.graph_connection_proposals = d.graph_connection_proposals;
+        }
         if (d.status === 'done') _fetchResult(job);
         return;
       }
@@ -332,8 +359,75 @@ async function _fetchResult(job) {
     job.findings = d.raw_findings;
     if (d.evidence_registry) job.evidence_registry = d.evidence_registry;
     if (d.category && !job.category) job.category = d.category;
+    if (d.graph_connection_proposals?.proposal_count) {
+      job.graph_connection_proposals = d.graph_connection_proposals;
+    }
     _notify();
+    _maybeShowResearchConnections(job);
   } catch {}
+}
+
+function _connectionsAnchorEl(job) {
+  try {
+    return document.querySelector(
+      `[data-job-id="${job.id}"] [data-action="connections"]`,
+    );
+  } catch { return null; }
+}
+
+async function _maybeShowResearchConnections(job) {
+  const hook = job?.graph_connection_proposals;
+  const proposals = hook?.proposals;
+  if (!proposals?.length || job._connectionsPromptShown) return;
+  if (isConnectionsReviewed(job.id)) return;
+  job._connectionsPromptShown = true;
+  try {
+    const mod = await import('../knowledge.js');
+    const handler = mod.handleConnectionProposals || mod.default?.handleConnectionProposals;
+    if (handler) {
+      handler({
+        proposals,
+        source: 'research',
+        alreadyEnqueued: true,
+        research_session_id: job.id,
+        anchorEl: _connectionsAnchorEl(job),
+        // Terminal decision (accept/reject all) — retire the CTA for good.
+        onResolved: () => {
+          _markConnectionsReviewed(job.id);
+          job.graph_connection_proposals = null;
+          job._connectionsPromptShown = false;
+          _notify();
+        },
+      });
+    }
+  } catch {}
+}
+
+export function showResearchConnections(job) {
+  if (!job?.graph_connection_proposals?.proposals?.length) return;
+  job._connectionsPromptShown = false;
+  void _maybeShowResearchConnections(job);
+}
+
+/**
+ * Toggle the graph-connections review card for a research job.
+ * Opens the review card when closed, dismisses it when already open.
+ * Resolves to `true` when the card is now open, `false` when now closed.
+ */
+export async function toggleResearchConnections(job) {
+  if (!job?.graph_connection_proposals?.proposals?.length) return false;
+  try {
+    const mod = await import('../knowledge.js');
+    if (mod.isConnectionBatchOpen?.(job.id)) {
+      mod.closeConnectionBatchCard?.();
+      return false;
+    }
+    job._connectionsPromptShown = false;
+    await _maybeShowResearchConnections(job);
+    return mod.isConnectionBatchOpen?.(job.id) ?? true;
+  } catch {
+    return false;
+  }
 }
 
 function _notify() { if (_renderCb) _renderCb(); }

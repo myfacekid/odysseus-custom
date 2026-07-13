@@ -184,7 +184,7 @@ def research_zotero_findings(
     owner: str = "",
     *,
     limit: int = 5,
-    extract_pdfs: bool = True,
+    extract_pdfs: bool = False,
     seed_library: bool = False,
     pdf_max_chars: int = 15000,
 ) -> ResearchZoteroOutcome:

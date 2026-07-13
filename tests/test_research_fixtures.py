@@ -25,7 +25,7 @@ def _load_fixture(name: str) -> dict:
 
 @pytest.mark.parametrize(
     "filename",
-    ["compare_alphafold_esm.json", "literature_review_gap.json"],
+    ["compare_alphafold_esm.json", "literature_review_gap.json", "ldr_compare_foldseek.json"],
 )
 def test_fixture_source_breakdown(filename):
     data = _load_fixture(filename)
@@ -45,6 +45,31 @@ def test_compare_fixture_graph_links_and_node():
     assert node["id"] == "research:fixture-compare-alphafold-esm"
     assert node["meta"]["research_mode"] == "compare"
     assert node["meta"]["seed_count"] == 2
+
+
+def test_phase5_session_json_fields():
+    """Phase 5 acceptance: persisted JSON includes seeds, mode, source breakdown."""
+    data = _load_fixture("compare_alphafold_esm.json")
+    assert data.get("research_mode") == "compare"
+    assert len(data.get("seed_papers") or []) >= 2
+    assert len(data.get("seed_paper_details") or []) >= 2
+    br = data.get("source_breakdown") or compute_source_breakdown(data)
+    assert br.get("total", 0) >= 1
+    assert br.get("seeds", 0) >= 1
+
+
+def test_phase5_graph_edge_targets_include_seeds():
+    """Phase 5 acceptance: research session links to seed paper nodes."""
+    data = _load_fixture("compare_alphafold_esm.json")
+    from src.research_typed_edges import build_research_graph_edges
+
+    edges = build_research_graph_edges(data["session_id"], data)
+    assert edges
+    seed_edges = [e for e in edges if e.get("from", "").startswith("research:")]
+    assert seed_edges
+    targets = {e.get("to") for e in seed_edges}
+    assert "paper:AFOLD001" in targets
+    assert "paper:ESMF001" in targets
 
 
 def test_compare_fixture_export_and_visual_report():

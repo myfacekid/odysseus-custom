@@ -3842,6 +3842,72 @@ async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict
         return {"error": "search_knowledge timed out", "exit_code": 1}
 
 
+async def do_compare_papers(content: str, owner: Optional[str] = None) -> Dict:
+    """Compare 2–3 papers side-by-side; >3 papers starts async Deep Research compare."""
+    import asyncio
+    import httpx
+    from src.paper_compare import execute_compare_papers
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments", "exit_code": 1}
+    if not isinstance(args, dict):
+        args = {}
+    loop = asyncio.get_running_loop()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: execute_compare_papers(args, owner=owner or ""),
+            ),
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        return {"error": "compare_papers timed out", "exit_code": 1}
+
+    if not result.get("defer_to_research"):
+        return result
+
+    keys = result.get("paper_keys") or []
+    focus = (result.get("focus") or "methods").strip()
+    question = (result.get("question") or "").strip()
+    topic = question or f"Compare {len(keys)} papers (focus: {focus})"
+    payload: Dict[str, Any] = {
+        "query": topic,
+        "mode": "compare",
+        "seed_papers": keys,
+        "include_zotero": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{_COOKBOOK_BASE}/api/research/start",
+                json=payload,
+                headers=_internal_headers(owner),
+            )
+        if resp.status_code >= 400:
+            return {
+                "error": f"research/start returned HTTP {resp.status_code}: {resp.text[:200]}",
+                "exit_code": 1,
+            }
+        data = resp.json()
+        sid = data.get("session_id", "?")
+        return {
+            "output": (
+                f"More than 3 papers — started Deep Research compare: [{topic}](#research-{sid}). "
+                f"Seed papers: {', '.join(keys)}. Open the Deep Research sidebar for the full report."
+            ),
+            "session_id": sid,
+            "anchor": f"[{topic}](#research-{sid})",
+            "ui_event": "research_started",
+            "research_session_id": sid,
+            "paper_keys": keys,
+            "exit_code": 0,
+        }
+    except Exception as e:
+        return {"error": str(e), "exit_code": 1}
+
+
 async def do_search_zotero(content: str, owner: Optional[str] = None) -> Dict:
     """Search the user's Zotero library or list collection folders."""
     import asyncio

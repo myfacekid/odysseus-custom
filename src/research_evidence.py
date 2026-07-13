@@ -91,10 +91,31 @@ def source_id_for_finding(finding: dict) -> str:
     return f"src:unknown:{digest}"
 
 
-    return f"src:unknown:{digest}"
-
-
 _ZOTERO_KEY_IN_SOURCE_RE = re.compile(r"^[A-Z0-9]{8}$", re.I)
+
+# Minimum length/word count before a title is trusted as a dedup key. Short or
+# generic titles ("Introduction", "PDF", "Home") collide across unrelated
+# papers, so only distinctive titles are used to merge duplicate sources.
+_TITLE_KEY_MIN_CHARS = 20
+_TITLE_KEY_MIN_WORDS = 3
+
+
+def normalize_title_key(title: str) -> str:
+    """Normalize a paper title into a stable dedup key.
+
+    Returns "" when the title is too short/generic to safely merge on, so
+    callers never collapse distinct papers that share a boilerplate heading.
+    """
+    raw = (title or "").strip().lower()
+    if not raw:
+        return ""
+    key = re.sub(r"[^a-z0-9]+", " ", raw)
+    key = re.sub(r"\s+", " ", key).strip()
+    if len(key) < _TITLE_KEY_MIN_CHARS:
+        return ""
+    if len(key.split()) < _TITLE_KEY_MIN_WORDS:
+        return ""
+    return key
 
 
 def normalize_doi(value: str) -> str:
@@ -241,6 +262,7 @@ class EvidenceRegistry:
         self._by_id: Dict[str, EvidenceSource] = {}
         self._by_doi: Dict[str, str] = {}
         self._by_zotero: Dict[str, str] = {}
+        self._by_title: Dict[str, str] = {}
 
     def __len__(self) -> int:
         return len(self._sources)
@@ -259,6 +281,9 @@ class EvidenceRegistry:
             k = (key or "").strip().upper()
             if _ZOTERO_KEY_IN_SOURCE_RE.match(k):
                 self._by_zotero.setdefault(k, src.source_id)
+        title_key = normalize_title_key(src.title or "")
+        if title_key:
+            self._by_title.setdefault(title_key, src.source_id)
 
     def _resolve_canonical_source_id(self, finding: dict) -> Optional[str]:
         """Map a finding to an existing registry row when it is the same paper."""
@@ -278,6 +303,13 @@ class EvidenceRegistry:
         doi = doi_from_finding(finding)
         if doi and doi in self._by_doi:
             return self._by_doi[doi]
+
+        # Same paper reached via a different URL (no shared DOI/key) — match on
+        # a distinctive normalized title so it reuses one citation number
+        # instead of appearing twice in the References list.
+        title_key = normalize_title_key(finding.get("title") or "")
+        if title_key and title_key in self._by_title:
+            return self._by_title[title_key]
 
         return None
 
@@ -303,6 +335,9 @@ class EvidenceRegistry:
                 existing.is_seed = True
                 finding["is_seed"] = True
             _merge_quantitative_fields(existing, finding)
+            # Merging may have filled a previously-blank title/DOI — re-index so
+            # later duplicates of the same paper resolve to this row too.
+            self._index_source(existing)
             if finding.get("allow_substantive_claims") is False and existing.is_seed:
                 pass
             elif finding.get("allow_substantive_claims") is False:
@@ -362,10 +397,18 @@ class EvidenceRegistry:
     def sources(self) -> List[EvidenceSource]:
         return list(self._sources)
 
-    def select_for_synthesis(self, findings: List[dict], window: int) -> List[dict]:
-        """Tiered context: always include seed sources + last *window* others."""
+    def select_for_synthesis(
+        self,
+        findings: List[dict],
+        window: int,
+        *,
+        relevance_query: str = "",
+    ) -> List[dict]:
+        """Tiered context: always include seed sources + best *window* others."""
         if not findings:
             return []
+
+        from src.research_relevance import score_finding_relevance
 
         self.sync_findings(findings)
         seen: Set[str] = set()
@@ -377,15 +420,33 @@ class EvidenceRegistry:
             if sid in seen:
                 continue
             seen.add(sid)
-            if f.get("is_seed") or (self._by_id.get(sid) and self._by_id[sid].is_seed):
+            # Seeds and "always_include" findings (e.g. forward-citation results
+            # that directly answer the query) are guaranteed into synthesis and
+            # never dropped for weak lexical overlap with the question.
+            is_priority = (
+                f.get("is_seed")
+                or f.get("always_include")
+                or (self._by_id.get(sid) and self._by_id[sid].is_seed)
+            )
+            if is_priority:
                 seeds.append(f)
             else:
                 others.append(f)
 
         if window < 1:
             window = 1
-        recent = others[-window:] if len(others) > window else others
-        return seeds + recent
+        gate_q = (relevance_query or "").strip()
+        if gate_q and others:
+            others.sort(
+                key=lambda f: score_finding_relevance(f, gate_q),
+                reverse=True,
+            )
+            selected_others = others[:window]
+        elif len(others) > window:
+            selected_others = others[-window:]
+        else:
+            selected_others = others
+        return seeds + selected_others
 
     def format_registry_block(self, findings: List[dict]) -> str:
         """Prompt block listing citation numbers tied to stable source IDs."""

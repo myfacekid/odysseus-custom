@@ -190,7 +190,7 @@ function _showNotesFirstOpenHint(pane) {
   hint.id = 'notes-first-open-hint';
   hint.className = 'tour-hint';
   hint.innerHTML = `
-    <div class="tour-hint-text"><b>Todos</b> tracks Immediate Tasks, Intermediate Goals, Long Horizon, and Miscellaneous — linked in your knowledge graph.</div>
+    <div class="tour-hint-text"><b>Todos</b> tracks Immediate Tasks, Intermediate Goals, Long Horizon, and Miscellaneous — linked in <b>Links</b>.</div>
     <button type="button" class="tour-hint-dismiss">OK</button>
   `;
   document.body.appendChild(hint);
@@ -2172,8 +2172,8 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
   }
   html += `</div></div>
     <div class="one-thing-footer">
-      <button type="button" class="one-thing-sync-btn" title="Rebuild knowledge graph index">Rebuild links</button>
-      <span class="one-thing-sync-hint">${_showingArchived ? 'Archived tasks stay in Nobody until restored.' : 'Changes save instantly · graph updates in the background · use Rebuild links to refresh the index'}</span>
+      <button type="button" class="one-thing-sync-btn" title="Rebuild Links index">Rebuild links</button>
+      <span class="one-thing-sync-hint">${_showingArchived ? 'Archived tasks stay in Nobody until restored.' : 'Changes save instantly · Links updates in the background · use Rebuild links to refresh the index'}</span>
     </div>
   </div>`;
   body.insertAdjacentHTML('beforeend', html);
@@ -2304,7 +2304,7 @@ function _wireOneThingSyncBtn(body) {
       if (!res.ok) throw new Error(data.detail || 'sync failed');
       _oneThingBoard = null;
       await _renderOneThingView(body, { refresh: 'full' });
-      uiModule.showToast?.('Knowledge graph rebuilt');
+      uiModule.showToast?.('Links index rebuilt');
     } catch {
       uiModule.showToast?.('Graph rebuild failed', 4000);
     } finally {

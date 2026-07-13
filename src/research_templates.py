@@ -13,6 +13,9 @@ RESEARCH_MODES = frozenset({
 _SHARED_REQUIREMENTS = """\
 - Write at MINIMUM {min_words} words — thorough but scientifically precise, not promotional
 - Use numbered inline citations [1], [2], etc. for every substantive claim
+- Engage with EVERY gathered source that bears on the question — do not rely on
+  only a handful. Integrate and cite all relevant sources from the evidence
+  registry so the synthesis reflects the full body of retrieved literature
 - Include specific data (effect sizes, sample sizes, p-values) ONLY when listed in the quantitative evidence block — never invent numbers
 - Distinguish peer-reviewed sources from preprints where known
 - Note where evidence is strong, weak, or absent
@@ -142,7 +145,11 @@ Write a rigorous **academic {spec['title']}** answering this research question:
 
 Requirements:
 {_SHARED_REQUIREMENTS.format(min_words=min_words)}
-- Structure with clear ## headings: {sections}, References
+- Begin the report with a single "# " top-level title on its own line that is
+  SPECIFIC to this question and its findings (e.g. name the intervention,
+  population, or debate). Do NOT use a generic word like "Report", "Background",
+  "Summary", or a section name as the title.
+- After the title, structure the body with clear ## headings: {sections}, References
 """
 
 

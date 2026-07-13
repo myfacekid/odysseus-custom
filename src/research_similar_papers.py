@@ -1,9 +1,10 @@
-"""Similar-paper discovery for Deep Research (Phase 2).
+"""Similar-paper discovery for Deep Research (Phase 2 / L1).
 
 Primary discovery uses PubMed and Google Scholar web searches (see
-``research_web_search.similar_paper_queries_from_seeds``). OpenAlex and
-Semantic Scholar remain available as a fallback when scholarly web search
-returns too few on-topic hits.
+``research_web_search.similar_paper_queries_from_seeds``). When scholarly web
+search is sparse, **keyword search** on OpenAlex / Semantic Scholar (via
+``src.research_engines``) replaces co-citation recommenders (S2 ``forpaper``,
+OpenAlex ``related_to``).
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -160,52 +162,22 @@ def _finding_from_s2_paper(paper: dict) -> Optional[dict]:
     }
 
 
-def _openalex_id_from_doi(doi: str) -> Optional[str]:
-    if not doi:
-        return None
-    encoded = urllib.parse.quote(f"https://doi.org/{doi}", safe="")
-    data = _http_json(f"{_OPENALEX_BASE}/works/{encoded}?select=id,related_works")
-    if not data:
-        return None
-    wid = (data.get("id") or "").rsplit("/", 1)[-1]
-    return wid or None
-
-
 def openalex_similar_works(
     *,
     doi: str = "",
     openalex_id: str = "",
     limit: int = 8,
+    query: str = "",
 ) -> List[dict]:
-    """Return similar-work findings from OpenAlex related_works."""
-    wid = (openalex_id or "").strip()
-    if not wid and doi:
-        wid = _openalex_id_from_doi(doi.strip()) or ""
+    """Keyword search on OpenAlex (replaces ``related_to`` co-citation expansion)."""
+    from src.research_engines.keyword_search import _engine_keyword_search
 
-    if not wid:
+    search_q = (query or "").strip()
+    if not search_q and doi:
+        search_q = doi
+    if not search_q:
         return []
-
-    if wid.startswith("http"):
-        wid = wid.rsplit("/", 1)[-1]
-
-    filter_val = f"related_to:{wid}"
-    url = (
-        f"{_OPENALEX_BASE}/works?"
-        f"filter={urllib.parse.quote(filter_val, safe=':')}&per_page={min(limit, 25)}"
-        f"&select=id,title,doi,publication_year,authorships,type,abstract_inverted_index"
-    )
-    data = _http_json(url)
-    if not data:
-        return []
-
-    findings: List[dict] = []
-    for work in data.get("results") or []:
-        f = _finding_from_openalex_work(work)
-        if f:
-            findings.append(f)
-        if len(findings) >= limit:
-            break
-    return findings
+    return _engine_keyword_search("openalex", search_q, limit=limit)
 
 
 def semantic_scholar_recommendations(
@@ -213,50 +185,53 @@ def semantic_scholar_recommendations(
     doi: str = "",
     paper_id: str = "",
     limit: int = 8,
+    query: str = "",
 ) -> List[dict]:
-    """Return recommendation findings from Semantic Scholar."""
-    pid = (paper_id or "").strip()
-    if not pid and doi:
-        pid = f"DOI:{doi.strip()}"
-    if not pid:
-        return []
+    """Keyword search on Semantic Scholar (replaces ``forpaper`` recommendations)."""
+    from src.research_engines.keyword_search import _engine_keyword_search
 
-    fields = "title,authors,year,abstract,url,externalIds,isOpenAccess,openAccessPdf,citationCount"
-    encoded_pid = urllib.parse.quote(pid, safe=":")
-    url = f"{_S2_BASE}/recommendations/v1/papers/forpaper/{encoded_pid}?fields={fields}&limit={min(limit, 25)}"
-    data = _http_json(url)
-    if not data:
+    search_q = (query or "").strip()
+    if not search_q and doi:
+        search_q = doi
+    if not search_q:
         return []
+    return _engine_keyword_search("semantic_scholar", search_q, limit=limit)
 
-    findings: List[dict] = []
-    for paper in data.get("recommendedPapers") or []:
-        f = _finding_from_s2_paper(paper)
-        if f:
-            findings.append(f)
-        if len(findings) >= limit:
-            break
-    return findings
+
+def _soft_age_score(year: int, *, now_year: Optional[int] = None) -> float:
+    """Gentle preference for newer work — never penalize seminal older papers."""
+    if year <= 0:
+        return 0.0
+    now_year = now_year or datetime.now().year
+    age = now_year - year
+    if age <= 5:
+        return 0.3
+    if age <= 15:
+        return 0.15
+    if age <= 30:
+        return 0.05
+    return 0.0
 
 
 def _rank_similar(finding: dict) -> float:
+    from src.research_relevance import score_seed_overlap
+
     score = 0.0
     if finding.get("peer_review_status") == "peer-reviewed":
         score += 2.0
     try:
         yr = int(finding.get("year") or 0)
-        if yr >= 2020:
-            score += 1.5
-        elif yr >= 2015:
-            score += 1.0
+        score += _soft_age_score(yr)
     except ValueError:
         pass
     cite = finding.get("citation_count")
     if isinstance(cite, (int, float)):
         score += min(cite / 100.0, 3.0)
-    if finding.get("similar_source") == "semantic_scholar":
-        score += 0.25
     if finding.get("evidence") and len(finding["evidence"]) > 200:
         score += 0.5
+    seed_overlap = finding.get("_seed_overlap_score")
+    if isinstance(seed_overlap, (int, float)):
+        score += seed_overlap * 4.0
     return score
 
 
@@ -277,60 +252,81 @@ def similar_papers_from_seeds(
     total_limit: int = 12,
     exclude_keys: Optional[Set[str]] = None,
     relevance_query: str = "",
+    research_mode: str = "",
+    use_semantic_scholar: Optional[bool] = None,
+    avoid_topics: Optional[List[str]] = None,
+    plan_anchor_terms: Optional[List[str]] = None,
 ) -> SimilarPapersOutcome:
-    """Fallback similar-paper pass via OpenAlex + Semantic Scholar APIs."""
-    from src.research_relevance import build_relevance_query, is_similar_paper_relevant
+    """Keyword-search similar papers via LDR engines (OpenAlex + optional S2).
+
+    Replaces co-citation APIs (OpenAlex ``related_to``, S2 ``forpaper``) with
+    title/abstract-derived keyword queries — better topical fit for compare mode.
+    """
+    from src.research_engines.keyword_search import build_seed_search_queries, keyword_search_findings
+    from src.research_engines.registry import DEFAULT_SIMILAR_ENGINES
+    from src.research_relevance import build_relevance_query, is_similar_paper_relevant, score_seed_overlap
 
     exclude = {k.upper() for k in (exclude_keys or set()) if k}
-    seen: Set[str] = set()
-    pooled: List[dict] = []
-    oa_count = 0
-    s2_count = 0
     gate_q = (relevance_query or build_relevance_query("", seed_findings=seed_findings)).strip()
+    mode = (research_mode or "").strip().lower()
 
+    engines = list(DEFAULT_SIMILAR_ENGINES)
+    if use_semantic_scholar is False:
+        engines = [e for e in engines if e != "semantic_scholar"]
+    elif use_semantic_scholar is None and mode in ("compare", "similar_papers"):
+        engines = [e for e in engines if e != "semantic_scholar"]
+
+    queries: List[str] = []
     for seed in seed_findings or []:
         if not seed.get("is_seed") and not seed.get("paper_key"):
             continue
-        doi = (seed.get("doi_or_id") or "").strip()
-        if doi and not doi.startswith("10."):
-            doi = ""
-        if not doi:
-            # Try to pull DOI from URL
-            url = seed.get("url") or ""
-            m = re.search(r"doi\.org/(10\.\S+)", url, re.I)
-            if m:
-                doi = m.group(1).rstrip("/")
+        queries.extend(build_seed_search_queries(seed))
 
-        per_seed = max(limit_per_seed, 1)
-        for f in openalex_similar_works(doi=doi, limit=per_seed):
-            key = _dedupe_key(f)
-            if key in seen:
-                continue
-            zkey = (seed.get("paper_key") or seed.get("zotero_key") or "").upper()
-            if zkey and zkey in exclude:
-                continue
-            seen.add(key)
-            pooled.append(f)
-            oa_count += 1
+    if not queries:
+        return SimilarPapersOutcome([], note="Similar papers (keyword): no seed queries")
 
-        for f in semantic_scholar_recommendations(doi=doi, limit=per_seed):
-            key = _dedupe_key(f)
-            if key in seen:
-                continue
-            seen.add(key)
-            pooled.append(f)
-            s2_count += 1
+    outcome = keyword_search_findings(
+        queries,
+        engines=tuple(engines),
+        limit_per_query=max(limit_per_seed, 1),
+    )
+    pooled = list(outcome.findings)
+    oa_count = outcome.engine_counts.get("openalex", 0)
+    s2_count = outcome.engine_counts.get("semantic_scholar", 0)
+
+    if exclude:
+        pooled = [
+            f for f in pooled
+            if (f.get("doi_or_id") or "").upper() not in exclude
+            and not any(
+                k in exclude
+                for k in (
+                    (f.get("paper_key") or "").upper(),
+                    (f.get("zotero_key") or "").upper(),
+                )
+            )
+        ]
 
     if gate_q:
         pooled = [
             f for f in pooled
-            if is_similar_paper_relevant(f, gate_q, seed_findings)
+            if is_similar_paper_relevant(
+                f,
+                gate_q,
+                seed_findings,
+                research_mode=mode,
+                avoid_topics=avoid_topics,
+                plan_anchor_terms=plan_anchor_terms,
+            )
         ]
+
+    for f in pooled:
+        f["_seed_overlap_score"] = score_seed_overlap(f, seed_findings)
 
     pooled.sort(key=_rank_similar, reverse=True)
     findings = pooled[: max(total_limit, 1)]
     note = (
-        f"Similar papers (API fallback): {len(findings)} "
+        f"Similar papers (keyword fallback): {len(findings)} "
         f"(OpenAlex {oa_count}, Semantic Scholar {s2_count})"
     )
     return SimilarPapersOutcome(findings, oa_count, s2_count, note=note)

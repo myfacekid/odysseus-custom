@@ -901,6 +901,43 @@ async def action_audit_skills(owner: str, **kwargs) -> Tuple[str, bool]:
         return str(e), False
 
 
+async def action_audit_links(owner: str, **kwargs) -> Tuple[str, bool]:
+    """Re-validate pending learned connections — flag conflicts / missing nodes."""
+    try:
+        from src.link_audit import audit_pending_links
+        from src.event_bus import get_task_scheduler
+
+        if not owner:
+            return "audit_links requires an owner — refusing to run without scope.", False
+
+        result = audit_pending_links(owner)
+        if not result.get("ok"):
+            return result.get("error") or "Link audit failed", False
+        if not result.get("audited"):
+            raise TaskNoop("no pending connections to audit")
+
+        message = result.get("message") or "Link audit complete"
+        flagged = int(result.get("flagged") or 0)
+        if flagged > 0:
+            sched = get_task_scheduler()
+            if sched:
+                sched.add_notification(
+                    "Link Audit",
+                    "success",
+                    owner=owner,
+                    body=(
+                        f"{flagged} pending connection(s) need attention "
+                        "(conflicts or missing nodes) — review in Connections"
+                    ),
+                )
+        return message, True
+    except TaskNoop:
+        raise
+    except Exception as e:
+        logger.error(f"audit_links action failed: {e}")
+        return str(e), False
+
+
 BUILTIN_ACTIONS = {
     "tidy_sessions": action_tidy_sessions,
     "tidy_documents": action_tidy_documents,
@@ -915,6 +952,7 @@ BUILTIN_ACTIONS = {
     "run_local": action_run_local,
     "test_skills": action_test_skills,
     "audit_skills": action_audit_skills,
+    "audit_links": action_audit_links,
     # ping_notes removed from the registry — runs only inside `_note_pings_loop`.
 }
 
@@ -930,4 +968,5 @@ BUILTIN_ACTION_INFO = {
     "run_script": "Run a script locally or on ODYSSEUS_SCRIPT_HOST",
     "test_skills": "Run the per-skill Test on every skill: agent run + LLM judge → records verdict on the skill (pass/needs_work/fail/inconclusive). Advisory only — never rewrites or demotes anything.",
     "audit_skills": "Audit unaudited skills after enough new skills are added: test, narrow metadata, self-edit/retry, optional teacher rewrite, tag duplicates/trivial skills, and publish/draft using the auto-approve threshold.",
+    "audit_links": "After enough learned connections are proposed, re-validate the pending queue for conflicts and missing graph nodes — flags issues only; never auto-accepts or rejects.",
 }

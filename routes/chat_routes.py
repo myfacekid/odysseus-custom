@@ -1014,7 +1014,7 @@ def setup_chat_routes(
                                 elif data.get("type") in (
                                     "tool_start", "tool_output", "agent_step",
                                     "doc_stream_open", "doc_stream_delta",
-                                    "doc_update", "doc_suggestions", "link_suggestion", "ui_control",
+                                    "doc_update", "doc_suggestions", "link_suggestion", "graph_merge_proposals", "ui_control",
                                 ):
                                     if data.get("type") == "agent_step":
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))

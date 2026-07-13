@@ -28,17 +28,20 @@ def get_task_scheduler():
     return _task_scheduler
 
 
-def fire_event(event_name: str, owner: Optional[str] = None):
+def fire_event(event_name: str, owner: Optional[str] = None, *, count: int = 1):
     """Fire an event — increments counters and triggers tasks that hit threshold.
+
+    *count* adds multiple increments in one call (e.g. batch enqueue of N proposals).
 
     Safe to call from both sync and async contexts.
     """
+    increment = max(1, int(count or 1))
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_handle_event(event_name, owner))
+        loop.create_task(_handle_event(event_name, owner, increment))
     except RuntimeError:
         # No running loop — run in a new one (shouldn't happen in FastAPI)
-        asyncio.run(_handle_event(event_name, owner))
+        asyncio.run(_handle_event(event_name, owner, increment))
 
 
 def _resolve_event_owner(owner: Optional[str]) -> Optional[str]:
@@ -69,7 +72,7 @@ def _resolve_event_owner(owner: Optional[str]) -> Optional[str]:
     return None
 
 
-async def _handle_event(event_name: str, owner: Optional[str] = None):
+async def _handle_event(event_name: str, owner: Optional[str] = None, count: int = 1):
     """Process an event: increment counters, fire tasks that hit their threshold."""
     from core.database import SessionLocal, ScheduledTask
 
@@ -90,9 +93,10 @@ async def _handle_event(event_name: str, owner: Optional[str] = None):
         if not tasks:
             return
 
+        increment = max(1, int(count or 1))
         for task in tasks:
             threshold = task.trigger_count or 1
-            task.trigger_counter = (task.trigger_counter or 0) + 1
+            task.trigger_counter = (task.trigger_counter or 0) + increment
 
             if task.trigger_counter >= threshold:
                 task.trigger_counter = 0

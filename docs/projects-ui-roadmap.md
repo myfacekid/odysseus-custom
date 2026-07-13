@@ -8,7 +8,7 @@ Use this doc when starting future chats: *"Follow docs/projects-ui-roadmap.md Ph
 
 **Last updated:** 2026-06-01
 
-**Status:** G1–G8 implemented. Optional future: center split ratio drag, tab reorder polish, footer maximize.
+**Status:** G1–G8 implemented. Suite cohesion (P1–P9) shipped then **paused**. **Current direction:** `docs/projects-context-layer-roadmap.md` (Projects as harness context layer; workspace UI hidden).
 
 **Prerequisite:** Phases A–E feature-complete (file tree, editor, run, chat, links rail, tool policy). Backend/API changes should be minimal.
 
@@ -379,7 +379,9 @@ Estimate **3–4 weeks** focused UI work after E sign-off. Each phase is shippab
 
 | Doc | Relationship |
 |-----|--------------|
+| `docs/projects-suite-roadmap.md` | **Next:** P1–P8 suite cohesion — sidebar, top bar, motion, layout presets, shared primitives |
 | `docs/projects-roadmap.md` | Feature phases A–F; IDE trajectory |
+| `docs/ui-simplification-roadmap.md` | U1–U8 harness-wide simplification; shared tooltip/overflow/composer patterns |
 | `docs/deep-research-roadmap.md` | Research content in link viewer |
 | Phase D “Layout v2” row | Superseded in detail by this doc |
 
@@ -395,3 +397,4 @@ Estimate **3–4 weeks** focused UI work after E sign-off. Each phase is shippab
 | 2026-06-01 | G7: panel resize, split view, md/html preview, pin + tab reorder |
 | 2026-06-01 | G8: empty-state heroes, tab overflow, Ctrl+P quick open, editor status parity, run badge |
 | 2026-06-01 | Theme-aware color system: `--project-depth-accent` / `--project-breadth-accent`, hue guard, theme matrix QA |
+| 2026-07-11 | G1–G8 complete; suite integration deferred to `docs/projects-suite-roadmap.md` (P1–P8) |

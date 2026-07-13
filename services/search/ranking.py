@@ -76,8 +76,16 @@ def _domain(url: str) -> str:
         return ""
 
 
-def rank_search_results(query: str, results: List[dict]) -> List[dict]:
-    """Rank search results by title relevance, snippet quality, domain authority, and recency."""
+def rank_search_results(
+    query: str,
+    results: List[dict],
+    *,
+    recency_weight: float = 1.0,
+) -> List[dict]:
+    """Rank search results by title relevance, snippet quality, domain authority, and recency.
+
+    *recency_weight* scales the recency term (0 disables it — used by Deep Research).
+    """
     query_terms = [t.lower() for t in re.findall(r"\b\w+\b", query)]
     query_lc = query.lower()
     is_news_query = any(term in _NEWS_HINTS for term in query_terms)
@@ -142,7 +150,7 @@ def rank_search_results(query: str, results: List[dict]) -> List[dict]:
             2.0 * title_score(title)
             + 1.0 * snippet_score(snippet)
             + 1.5 * domain_score(url)
-            + 1.0 * recency_score(age)
+            + recency_weight * recency_score(age)
             + news_quality_adjustment(title, snippet, url)
         )
         ranked.append((score, result))

@@ -196,6 +196,36 @@ def test_manual_link_add_remove_and_rebuild_merge(tmp_path, monkeypatch):
     assert any(e["from"] == "task:a" and e["to"] == "document:doc-1" for e in merged)
 
 
+def test_manual_edge_reason_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    owner = "tester"
+    nodes = {
+        "paper:A": {"id": "paper:A", "type": "paper", "title": "A", "snippet": "s", "meta": {}},
+        "paper:B": {"id": "paper:B", "type": "paper", "title": "B", "snippet": "s", "meta": {}},
+    }
+    save_graph(owner, nodes, [])
+
+    result = add_graph_link(
+        owner,
+        "paper:A",
+        "paper:B",
+        kind="derives_from",
+        reason="B extends methods from A",
+        source="agent",
+    )
+    assert result["ok"] is True
+    assert result["kind"] == "derives_from"
+
+    manual = load_manual_edges(owner)
+    edge = next(e for e in manual if e["to"] == "paper:B")
+    assert edge["kind"] == "derives_from"
+    assert edge["reason"] == "B extends methods from A"
+
+    synced = load_edges(owner)
+    merged_edge = next(e for e in synced if e["to"] == "paper:B")
+    assert merged_edge["reason"] == "B extends methods from A"
+
+
 def test_document_filter_matches_library_only(tmp_path, monkeypatch):
     monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
     owner = "tester"
@@ -308,6 +338,8 @@ def test_paper_nodes_indexed_from_catalog(tmp_path, monkeypatch):
     content = execute_knowledge_tool({"action": "read", "id": "paper:PAPER1"}, owner=owner)
     assert content["exit_code"] == 0
     assert "Attention Is All You Need" in content["output"]
+    assert "Transformers." in content["output"]
+    assert "PDF extraction skipped" in content["output"]
 
     with patch(
         "src.zotero_client.fetch_paper_pdf_text",
@@ -319,3 +351,27 @@ def test_paper_nodes_indexed_from_catalog(tmp_path, monkeypatch):
         )
     assert "Full paper body from PDF." in content_pdf["output"]
     assert "PDF text (from your Zotero library)" in content_pdf["output"]
+
+
+def test_search_expand_hops_includes_edge_kinds(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.knowledge_graph.KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    owner = "tester"
+    a = "document:a"
+    b = "document:b"
+    save_graph(owner, {
+        a: {"id": a, "type": "document", "title": "Methods", "snippet": "m", "meta": {}},
+        b: {"id": b, "type": "document", "title": "Results", "snippet": "r", "meta": {}},
+    }, [])
+    add_graph_link(
+        owner,
+        a,
+        b,
+        kind="derives_from",
+        reason="Results extend methods",
+    )
+    from src.knowledge_graph import search_knowledge
+
+    result = search_knowledge(owner, "Methods", expand_hops=1, limit=5)
+    links = result.get("expanded_links") or []
+    assert any(l.get("kind") == "derives_from" for l in links)
+    assert any(l.get("reason") == "Results extend methods" for l in links)

@@ -214,6 +214,7 @@ HOUSEKEEPING_DEFAULTS = {
     "mark_email_boundaries": {"name": "Email Mark Boundaries",   "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */2 * * *", "ship_paused": True, "legacy_names": ["Mark Email Boundaries"]},
     "check_email_urgency":   {"name": "Email Tags",               "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 * * * *", "ship_paused": True, "old_cron_expressions": ["*/15 * * * *"], "legacy_names": ["Email Triage", "Urgent Email"]},
     "audit_skills":          {"name": "Skills Audit",             "trigger_type": "event", "trigger_event": "skill_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Audit Skills"]},
+    "audit_links":           {"name": "Link Audit",               "trigger_type": "event", "trigger_event": "link_proposed", "trigger_count": 10, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Audit Links", "Audit Learned Links"]},
 }
 
 RETIRED_HOUSEKEEPING_ACTIONS = frozenset({
@@ -956,6 +957,7 @@ class TaskScheduler:
         "tidy_research",
         "test_skills",
         "audit_skills",
+        "audit_links",
     })
 
     _MODEL_BACKED_ACTIONS = frozenset({

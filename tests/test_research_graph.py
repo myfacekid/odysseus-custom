@@ -8,6 +8,7 @@ import pytest
 from src.research_graph import (
     collect_research_link_targets,
     compute_source_breakdown,
+    propose_research_graph_links,
     research_node_dict,
     sync_research_graph_links,
 )
@@ -62,43 +63,53 @@ def test_research_node_dict():
     assert node["meta"]["seed_count"] == 2
 
 
-def test_sync_research_graph_links(tmp_path, monkeypatch):
+def test_propose_research_graph_links_enqueues_not_manual(tmp_path, monkeypatch):
     from src import knowledge_graph as kg
+    from src.pending_graph_edges import load_pending_edges
 
     owner = "tester"
     owner_dir = tmp_path / "knowledge" / "users" / owner
     owner_dir.mkdir(parents=True)
     monkeypatch.setattr(kg, "KNOWLEDGE_ROOT", tmp_path / "knowledge")
 
-    # Seed paper node already in graph
-    paper_id = kg.node_id("paper", "PAPER123")
+    paper_a = kg.node_id("paper", "AFOLD001")
+    paper_b = kg.node_id("paper", "ESMF001")
     kg.save_graph(owner, {
-        paper_id: {
-            "id": paper_id,
-            "type": "paper",
-            "title": "Attention",
-            "snippet": "test",
-            "meta": {"zotero_key": "PAPER123"},
-        }
+        paper_a: {"id": paper_a, "type": "paper", "title": "AlphaFold", "snippet": "s", "meta": {}},
+        paper_b: {"id": paper_b, "type": "paper", "title": "ESMFold", "snippet": "s", "meta": {}},
     }, [])
 
-    data = {
-        "query": "Compare models",
-        "research_mode": "compare",
-        "seed_paper_details": [{"zotero_key": "PAPER123", "title": "Attention"}],
-        "evidence_registry": {"sources": []},
-        "owner": owner,
-    }
-    result = sync_research_graph_links(owner, "rp-test-1", data)
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "research" / "compare_alphafold_esm.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    fixture["owner"] = owner
+    result = propose_research_graph_links(owner, "fixture-compare-alphafold-esm", fixture)
     assert result["ok"] is True
-    assert "research:rp-test-1" == result["research_id"]
-    assert paper_id in result["linked"]
+    assert result["proposal_count"] >= 1
 
     manual = kg.load_manual_edges(owner)
-    assert any(
-        e.get("from") == "research:rp-test-1" and e.get("to") == paper_id
-        for e in manual
-    )
+    assert not any(e.get("from", "").startswith("research:") for e in manual)
 
-    node = kg.get_node(owner, "research:rp-test-1")
-    assert node and node.get("type") == "research"
+    pending = load_pending_edges(owner)
+    assert any(p.get("from", "").startswith("research:") for p in pending)
+    assert any(p.get("kind") != "relates" or p.get("reason") for p in pending)
+
+    nodes = kg.load_nodes(owner)
+    assert "research:fixture-compare-alphafold-esm" in nodes
+
+
+def test_sync_research_graph_links_alias(tmp_path, monkeypatch):
+    from src import knowledge_graph as kg
+
+    owner = "tester"
+    monkeypatch.setattr(kg, "KNOWLEDGE_ROOT", tmp_path / "knowledge")
+    paper_a = kg.node_id("paper", "AFOLD001")
+    kg.save_graph(owner, {
+        paper_a: {"id": paper_a, "type": "paper", "title": "AlphaFold", "snippet": "s", "meta": {}},
+    }, [])
+    fixture = {"query": "q", "research_mode": "literature_review", "seed_papers": ["AFOLD001"]}
+    out = sync_research_graph_links(owner, "sess-alias", fixture)
+    assert out["ok"] is True
+    assert "proposal_count" in out

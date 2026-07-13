@@ -29,6 +29,34 @@ from .skill_format import Skill, slugify
 
 logger = logging.getLogger(__name__)
 
+_SERVICE_SKILL_OWNERS = frozenset({"api", "internal-tool"})
+
+
+def resolve_skill_owner(owner: Optional[str] = None) -> Optional[str]:
+    """Normalize skill owner and default to the primary account when unset.
+
+    Agent/chat callers sometimes pass None even for logged-in users; without an
+    owner stamp, strict ``load(owner=…)`` hides the skill in Brain while the
+    agent can still see it via ``load(None)``.
+    """
+    stamped = (owner or "").strip()
+    if stamped and stamped not in _SERVICE_SKILL_OWNERS:
+        return stamped
+    try:
+        from src.constants import DATA_DIR
+
+        auth_path = os.path.join(DATA_DIR, "auth.json")
+        with open(auth_path, encoding="utf-8") as f:
+            users = (json.load(f) or {}).get("users") or {}
+        if not users:
+            return stamped or None
+        for uname, udata in users.items():
+            if (udata or {}).get("is_admin"):
+                return uname
+        return next(iter(users))
+    except Exception:
+        return stamped or None
+
 
 # ---------------------------------------------------------------------------
 # Token / similarity helpers (kept for the relevance fallback)
@@ -316,6 +344,8 @@ class SkillsManager:
         status: str = "draft",
         version: str = "1.0.0",
     ) -> Dict:
+        owner = resolve_skill_owner(owner)
+
         # Normalize name
         nm = slugify(name or title or description or "skill")
 

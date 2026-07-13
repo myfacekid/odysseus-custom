@@ -21,6 +21,12 @@ import workspaceResize from './workspaceResize.js';
 import workspaceSplit from './workspaceSplit.js';
 import workspaceQuickOpen from './workspaceQuickOpen.js';
 import runBadge from './runBadge.js';
+import projectSidebar from './sidebar.js';
+import { initTooltips } from '../ui/tooltip.js';
+import { setProjectRunActivity } from '../activityStrip.js';
+import { showLoadingRow } from '../ui/feedback.js';
+import workspaceLayout from './workspaceLayout.js';
+import { hideProjectsUi, isProjectsUiEnabled } from './featureFlag.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
@@ -120,6 +126,8 @@ function _updateCenterView(tab) {
     linkViewerModule.hide();
     return;
   }
+  well?.classList.add('project-center-well--switching');
+  window.setTimeout(() => well?.classList.remove('project-center-well--switching'), 100);
   empty?.classList.add('hidden');
   if (tab.kind === 'depth') {
     editorPane?.classList.remove('hidden');
@@ -289,7 +297,19 @@ function _mountRunPanel(project) {
     isDirty: () => editorModule.isDirty(),
     save: (opts) => editorModule.save(opts),
     onRunComplete: () => void fileTreeModule.refresh(),
-    onRunStateChange: (state) => runBadge.setRunTabBadge(state),
+    onRunStateChange: (state) => {
+      runBadge.setRunTabBadge(state);
+      const path = editorModule.getOpenPath?.() || _openProjectFile;
+      if (state === 'running' && path) {
+        setProjectRunActivity({
+          label: path.split('/').pop() || path,
+          detail: 'Running',
+          key: path,
+        });
+      } else {
+        setProjectRunActivity(null);
+      }
+    },
   });
 }
 
@@ -314,12 +334,6 @@ function _mountFileTree(project) {
       return undefined;
     },
   });
-}
-
-function _statusBadge(project) {
-  const status = project?.working_dir_status || '';
-  if (status === 'ok') return '';
-  return `<span class="project-status project-status-${esc(status)}">${esc(status)}</span>`;
 }
 
 async function _fetchProject(projectId) {
@@ -348,20 +362,8 @@ function _upsertProjectCache(project) {
 
 function _renderProjectList() {
   const list = document.getElementById('project-list');
-  if (!list) return;
-  if (!_projects.length) {
-    list.innerHTML = '<div class="project-list-empty">No projects yet</div>';
-    return;
-  }
-  list.innerHTML = _projects.map((p) => {
-    const warn = p.working_dir_warning
-      ? `<span class="project-warn-dot" title="${esc(p.working_dir_warning)}">!</span>`
-      : '';
-    return `<button type="button" class="list-item project-list-item${p.id === _openProjectId ? ' active' : ''}" data-project-id="${esc(p.id)}">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.55;"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>
-      <span class="grow project-list-title">${esc(p.title || p.id)}${warn}${_statusBadge(p)}</span>
-    </button>`;
-  }).join('');
+  projectSidebar.renderProjectList(list, _projects, _openProjectId);
+  projectSidebar.scheduleMetaHydration(_projects);
 }
 
 async function _validateDir(path) {
@@ -896,9 +898,14 @@ const EDGE_KIND_LABELS = {
   parent: 'Parent',
   link: 'Link',
   related: 'Related',
+  relates: 'Relates',
+  derives_from: 'Derives from',
+  refutes: 'Refutes',
+  depends_on: 'Depends on',
   wikilink: 'Wikilink',
   in_collection: 'Collection',
   supports: 'Supports',
+  summarizes: 'Summarizes',
 };
 
 const LINK_TYPE_ORDER = {
@@ -959,6 +966,21 @@ function _projectLinkRows(fromId, linksData) {
   }
 
   rows.sort((a, b) => {
+    const ka = (a.kind || 'relates').toLowerCase();
+    const kb = (b.kind || 'relates').toLowerCase();
+    const kindOrder = {
+      refutes: 0,
+      derives_from: 1,
+      supports: 2,
+      depends_on: 3,
+      summarizes: 4,
+      relates: 8,
+      related: 8,
+      link: 9,
+    };
+    const oka = kindOrder[ka] ?? 50;
+    const okb = kindOrder[kb] ?? 50;
+    if (oka !== okb) return oka - okb;
     const ta = (a.row.node?.type || a.linkedId.split(':')[0] || 'zzz').toLowerCase();
     const tb = (b.row.node?.type || b.linkedId.split(':')[0] || 'zzz').toLowerCase();
     const oa = LINK_TYPE_ORDER[ta] ?? 99;
@@ -971,7 +993,87 @@ function _projectLinkRows(fromId, linksData) {
   return rows;
 }
 
-function _renderLinksRail(project, linksData) {
+function _renderProjectPendingRows(project, pendingRows) {
+  if (!pendingRows?.length) return '';
+  const flagged = pendingRows.filter((r) => r.audit_flagged || ['conflict', 'missing_node', 'invalid'].includes(r.audit_status)).length;
+  const items = pendingRows.slice(0, 8).map((row) => {
+    const fromTitle = row.from_title || row.from;
+    const toTitle = row.to_title || row.to;
+    const kind = row.kind || 'relates';
+    const auditBadge = row.audit_status && row.audit_status !== 'ok'
+      ? `<span class="learned-conn-audit learned-conn-audit--${esc(row.audit_status)}" title="${esc((row.audit_errors || []).join('; '))}">${esc(row.audit_status.replace(/_/g, ' '))}</span>`
+      : '';
+    return `<div class="project-pending-row" data-proposal-id="${esc(row.id)}">
+      <div class="project-pending-flow">
+        <span class="kg-link-kind">${esc(_projectEdgeKindLabel(kind, 'out'))}</span>
+        ${auditBadge}
+        <span class="kg-node-title">${esc(fromTitle)} → ${esc(toTitle)}</span>
+      </div>
+      ${row.reason ? `<div class="project-link-reason">${esc(row.reason)}</div>` : ''}
+      <div class="project-pending-actions">
+        <button type="button" class="admin-btn-sm project-pending-reject">Reject</button>
+        <button type="button" class="admin-btn-sm project-pending-accept">Accept</button>
+      </div>
+    </div>`;
+  }).join('');
+  const more = pendingRows.length > 8
+    ? `<div class="project-pending-more">+ ${pendingRows.length - 8} more in Connections</div>`
+    : '';
+  const flaggedHint = flagged
+    ? ` · ${flagged} need attention`
+    : '';
+  return `<div class="project-pending-section" id="project-pending-section">
+    <div class="project-pending-head">
+      <span class="project-breadth-hint">Pending connections (${pendingRows.length}${flaggedHint})</span>
+      <button type="button" class="admin-btn-sm" id="project-pending-open-brain">Open Connections</button>
+    </div>
+    <div class="project-pending-list">${items}${more}</div>
+  </div>`;
+}
+
+function _wireProjectPendingActions(project, pendingRows) {
+  const mount = document.getElementById('project-links-mount');
+  if (!mount || !pendingRows?.length) return;
+  mount.querySelector('#project-pending-open-brain')?.addEventListener('click', () => {
+    void import('../learned_connections.js').then((m) => {
+      const open = m.openBrainConnectionsTab || m.default?.openBrainConnectionsTab;
+      if (open) open();
+    });
+  });
+  mount.querySelectorAll('.project-pending-accept').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.closest('.project-pending-row')?.dataset?.proposalId;
+      const row = pendingRows.find((r) => r.id === id);
+      if (!row) return;
+      btn.disabled = true;
+      void import('../connection_actions.js').then((mod) => mod.acceptPendingRow(row))
+        .then(() => {
+          uiModule.showToast?.('Connection saved');
+          return _reloadWorkspaceLinks(project.id);
+        })
+        .catch((e) => {
+          btn.disabled = false;
+          uiModule.showToast?.(e.message || 'Accept failed', 4000);
+        });
+    });
+  });
+  mount.querySelectorAll('.project-pending-reject').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.closest('.project-pending-row')?.dataset?.proposalId;
+      const row = pendingRows.find((r) => r.id === id);
+      if (!row) return;
+      btn.disabled = true;
+      void import('../connection_actions.js').then((mod) => mod.rejectPendingProposals([row]))
+        .then(() => _reloadWorkspaceLinks(project.id))
+        .catch((e) => {
+          btn.disabled = false;
+          uiModule.showToast?.(e.message || 'Reject failed', 4000);
+        });
+    });
+  });
+}
+
+function _renderLinksRail(project, linksData, pendingRows = []) {
   const mount = document.getElementById('project-links-mount');
   if (!mount || !project?.id) return;
 
@@ -1000,8 +1102,9 @@ function _renderLinksRail(project, linksData) {
     const title = _projectLinkTitle(n, linkedId);
     const nodeBadge = n ? _projectTypeBadge(n) : `<span class="kg-type kg-type-research">Unknown</span>`;
     const edgeLabel = _projectEdgeKindLabel(kind, direction);
+    const edgeReason = (edge.reason || '').trim();
     const dirIcon = direction === 'out' ? '→' : '←';
-    return `<div class="kg-link-row-wrap project-link-row-wrap${stale ? ' project-link-row-stale' : ''}">
+    return `<div class="kg-link-row-wrap project-link-row-wrap${stale ? ' project-link-row-stale' : ''}" data-edge-kind="${esc(kind)}">
       <button type="button" class="kg-link-row project-link-row" data-node-id="${esc(linkedId)}"${
         stale
           ? ` data-stale="1" data-remove-from="${esc(removeFrom)}" data-remove-to="${esc(removeTo)}" data-edge-kind="${esc(kind)}"`
@@ -1012,10 +1115,11 @@ function _renderLinksRail(project, linksData) {
           <span class="project-link-row-meta">
             <span class="project-link-edge" title="${esc(direction === 'out' ? 'Outgoing link' : 'Incoming link')}">
               <span class="project-link-direction" aria-hidden="true">${dirIcon}</span>
-              <span class="kg-link-kind project-link-edge-kind">${esc(edgeLabel)}</span>
+              <span class="kg-link-kind project-link-edge-kind${kind === 'refutes' ? ' project-link-edge-inhibitory' : ''}">${esc(edgeLabel)}</span>
             </span>
             ${nodeBadge}
           </span>
+          ${edgeReason ? `<span class="project-link-reason">${esc(edgeReason)}</span>` : ''}
         </span>
         ${stale ? '<span class="project-link-stale">missing</span>' : ''}
       </button>
@@ -1027,10 +1131,21 @@ function _renderLinksRail(project, linksData) {
     <div class="project-links-head">
       <div class="project-links-head-row">
         <input type="search" id="project-links-search" class="project-left-search project-left-search--compact" placeholder="Filter links…" autocomplete="off" spellcheck="false" aria-label="Filter links" />
+        <select id="project-links-kind-filter" class="project-left-search project-left-search--compact" aria-label="Filter by edge kind">
+          <option value="">All kinds</option>
+          <option value="derives_from">Derives from</option>
+          <option value="refutes">Refutes</option>
+          <option value="supports">Supports</option>
+          <option value="relates">Relates</option>
+          <option value="depends_on">Depends on</option>
+          <option value="summarizes">Summarizes</option>
+        </select>
         ${staleCount ? `<button type="button" class="admin-btn-sm project-links-stale-btn project-links-head-btn" id="project-links-remove-stale-btn" title="Remove stale links">Stale (${staleCount})</button>` : ''}
+        <button type="button" class="admin-btn-sm project-links-head-btn" id="project-links-batch-merge-btn" title="Review batch edge proposals">Batch merge</button>
       </div>
       ${staleCount ? `<div class="project-links-stale-hint">${staleCount} stale link${staleCount === 1 ? '' : 's'} — node missing from graph</div>` : ''}
     </div>
+    ${_renderProjectPendingRows(project, pendingRows)}
     <div class="project-links-list">${rows || `<div class="project-empty-hero project-empty-hero--compact">
       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
       <div class="project-empty-hero-title">No links yet</div>
@@ -1045,12 +1160,27 @@ function _renderLinksRail(project, linksData) {
     });
   }
 
-  mount.querySelector('#project-links-search')?.addEventListener('input', (e) => {
-    const q = (e.target.value || '').trim().toLowerCase();
+  const applyLinkFilters = () => {
+    const q = (mount.querySelector('#project-links-search')?.value || '').trim().toLowerCase();
+    const kindFilter = (mount.querySelector('#project-links-kind-filter')?.value || '').trim().toLowerCase();
     mount.querySelectorAll('.project-link-row-wrap').forEach((row) => {
       const text = row.textContent.toLowerCase();
-      row.classList.toggle('project-link-row-wrap--filtered', q && !text.includes(q));
+      const kind = (row.dataset.edgeKind || '').toLowerCase();
+      const hideText = q && !text.includes(q);
+      const hideKind = kindFilter && kind !== kindFilter;
+      row.classList.toggle('project-link-row-wrap--filtered', hideText || hideKind);
     });
+  };
+
+  mount.querySelector('#project-links-search')?.addEventListener('input', applyLinkFilters);
+  mount.querySelector('#project-links-kind-filter')?.addEventListener('change', applyLinkFilters);
+
+  mount.querySelector('#project-links-batch-merge-btn')?.addEventListener('click', () => {
+    const open = knowledgeModule.openGraphMergeReview;
+    if (open) open([]);
+    else {
+      window.dispatchEvent(new CustomEvent('graph-merge-proposals', { detail: { proposals: [] } }));
+    }
   });
 
   mount.querySelector('#project-links-remove-stale-btn')?.addEventListener('click', () => {
@@ -1109,6 +1239,8 @@ function _renderLinksRail(project, linksData) {
       }
     });
   });
+
+  _wireProjectPendingActions(project, pendingRows);
 }
 
 export async function refreshProjectWorkspaceLinks(projectId) {
@@ -1117,28 +1249,40 @@ export async function refreshProjectWorkspaceLinks(projectId) {
 }
 
 async function _reloadWorkspaceLinks(projectId) {
-  const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/links`, {
-    credentials: 'same-origin',
-  });
-  if (!res.ok) return;
-  const links = await res.json();
+  const mount = document.getElementById('project-links-mount');
+  if (mount && !mount.querySelector('.project-links-head')) {
+    showLoadingRow(mount, 'Loading links…');
+  }
+  const [linksRes, pendingMod] = await Promise.all([
+    fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/links`, { credentials: 'same-origin' }),
+    import('../connection_actions.js'),
+  ]);
+  if (!linksRes.ok) return;
+  const links = await linksRes.json();
+  let pendingRows = [];
+  try {
+    pendingRows = await pendingMod.fetchPendingConnections({ project_id: projectId });
+  } catch {
+    pendingRows = [];
+  }
   const project = _projects.find((p) => p.id === projectId) || await _fetchProject(projectId);
-  _renderLinksRail(project, links);
+  const linkCount = (links.outgoing?.length || 0) + (links.incoming?.length || 0);
+  projectSidebar.recordProjectLinkCount(projectId, linkCount);
+  _renderLinksRail(project, links, pendingRows);
+  if (!projectId || projectId !== _openProjectId) _renderProjectList();
 }
 
 function _updateProjectModePill(project) {
   const pill = document.getElementById('project-mode-pill');
+  const overflowWrap = document.getElementById('project-overflow-wrap');
   const label = document.getElementById('project-mode-pill-label');
-  if (!pill) return;
   if (project?.id) {
-    pill.classList.remove('hidden');
-    if (label) {
-      label.textContent = project.title || project.id;
-      label.title = project.title || project.id;
-    }
-    pill.title = `Project workspace — ${project.title || project.id}`;
+    overflowWrap?.classList.remove('hidden');
+    pill?.classList.add('hidden');
+    if (label) label.textContent = project.title || project.id;
   } else {
-    pill.classList.add('hidden');
+    overflowWrap?.classList.add('hidden');
+    pill?.classList.add('hidden');
     if (label) label.textContent = 'Project';
   }
 }
@@ -1170,21 +1314,65 @@ function _setProjectMainVisible(show) {
   const panel = _workspaceRoot();
   const container = document.getElementById('chat-container');
   if (!panel || !container) return;
-  if (show) {
+
+  const finishOpen = () => {
     container.classList.add('project-active');
     container.classList.remove('welcome-active');
-    panel.classList.remove('hidden');
+    panel.classList.remove('hidden', 'project-workspace-exiting');
     panel.setAttribute('aria-hidden', 'false');
     chatSidebarModule.dockComposer?.();
     if (window.chatModule?.hideWelcomeScreen) window.chatModule.hideWelcomeScreen();
-  } else {
+  };
+
+  const finishClose = () => {
     chatSidebarModule.undockComposer?.();
     container.classList.remove('project-active');
     container.classList.remove('project-chat-docked');
     panel.classList.add('hidden');
+    panel.classList.remove('project-workspace-entering', 'project-workspace-exiting');
     panel.setAttribute('aria-hidden', 'true');
     _updateProjectModePill(null);
     document.getElementById('project-onboarding')?.remove();
+  };
+
+  if (show) {
+    if (panel.classList.contains('hidden')) {
+      panel.classList.remove('hidden');
+      panel.classList.add('project-workspace-entering');
+      const onEnd = (e) => {
+        if (e.target !== panel || e.animationName !== 'project-workspace-enter') return;
+        panel.classList.remove('project-workspace-entering');
+        panel.removeEventListener('animationend', onEnd);
+      };
+      panel.addEventListener('animationend', onEnd);
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduced) {
+        panel.classList.remove('project-workspace-entering');
+        panel.removeEventListener('animationend', onEnd);
+      }
+    }
+    finishOpen();
+  } else if (!panel.classList.contains('hidden')) {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) {
+      finishClose();
+      return;
+    }
+    panel.classList.add('project-workspace-exiting');
+    const onEnd = (e) => {
+      if (e.target !== panel || e.animationName !== 'project-workspace-exit') return;
+      panel.removeEventListener('animationend', onEnd);
+      finishClose();
+    };
+    panel.addEventListener('animationend', onEnd);
+    window.setTimeout(() => {
+      if (panel.classList.contains('project-workspace-exiting')) {
+        panel.removeEventListener('animationend', onEnd);
+        finishClose();
+      }
+    }, 280);
+  } else {
+    finishClose();
   }
 }
 
@@ -1193,10 +1381,13 @@ function _renderWorkspaceShell(project) {
   if (!root || !project) return;
 
   const currentMetaEl = uiModule.el('current-meta');
-  if (currentMetaEl) currentMetaEl.textContent = project.title || project.id;
+  if (currentMetaEl) {
+    currentMetaEl.textContent = project.title || project.id;
+    currentMetaEl.title = project.working_dir || '';
+  }
 
   const titleEl = root.querySelector('#project-workspace-title');
-  if (titleEl) titleEl.textContent = project.title || project.id;
+  if (titleEl) titleEl.textContent = '';
 
   const meta = root.querySelector('#project-workspace-meta');
   if (meta) {
@@ -1272,6 +1463,7 @@ async function _restoreWorkspaceState(projectId) {
 }
 
 export async function openProjectWorkspace(projectId) {
+  if (!isProjectsUiEnabled()) return;
   if (!projectId) return;
   const panel = _workspaceRoot();
   if (!panel) return;
@@ -1297,11 +1489,13 @@ export async function openProjectWorkspace(projectId) {
   _renderProjectList();
   _renderWorkspaceShell(project);
   _updateProjectModePill(project);
+  _initProjectHeaderTooltips();
   _maybeShowProjectOnboarding();
   _setProjectMainVisible(true);
   _initCenterTabs();
   workspaceShell.mount(projectId);
   workspaceResize.mount(projectId);
+  workspaceLayout.mount(projectId);
   workspaceSplit.mount(projectId);
   _bindSplitToggle();
   _bindCenterEmptyActions();
@@ -1335,10 +1529,12 @@ function _doCloseProjectWorkspace({ restoreChat = true, wasOpen = false } = {}) 
   tabHost.reset();
   workspaceShell.unmount();
   workspaceResize.unmount();
+  workspaceLayout.unmount();
   workspaceSplit.unmount();
   workspaceShortcuts.unmount();
   workspaceQuickOpen.unmount();
   runBadge.setRunTabBadge(null);
+  setProjectRunActivity(null);
   _updateCenterView(null);
   _openProjectFile = null;
   workspaceState.clearLastOpenProject();
@@ -1356,16 +1552,67 @@ function _doCloseProjectWorkspace({ restoreChat = true, wasOpen = false } = {}) 
   window.chatModule?.showWelcomeScreen?.();
 }
 
-async function _editWorkingDir() {
-  if (!_openProjectId) return;
-  if (editorModule.isDirty()) {
+async function _renameProjectById(projectId) {
+  if (!projectId) return;
+  const project = _projects.find((p) => p.id === projectId) || await _fetchProject(projectId).catch(() => null);
+  if (!project) return;
+  const name = await styledPrompt('Rename project:', {
+    title: 'Rename',
+    defaultValue: project.title || '',
+    confirmText: 'Save',
+  });
+  if (!name?.trim()) return;
+  const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}`, {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: name.trim() }),
+  });
+  if (!res.ok) {
+    uiModule.showToast?.('Rename failed', 3000);
+    return;
+  }
+  const updated = (await res.json()).project;
+  _upsertProjectCache(updated);
+  await refreshProjectList();
+  if (_openProjectId === projectId) _renderWorkspaceShell(updated);
+  uiModule.showToast?.('Renamed');
+}
+
+async function _archiveProjectById(projectId, { bulk = false, quiet = false } = {}) {
+  if (!projectId) return;
+  if (_openProjectId === projectId && editorModule.isDirty()) {
     const ok = await editorModule.confirmCloseIfDirty();
     if (!ok) return;
   }
-  const project = _projects.find((p) => p.id === _openProjectId);
+  if (!bulk && !quiet) {
+    if (!await uiModule.styledConfirm('Archive this project? It will be hidden from the list.', { confirmText: 'Archive', danger: true })) return;
+  }
+  const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) {
+    if (!quiet) uiModule.showToast?.('Archive failed', 3000);
+    return;
+  }
+  if (_openProjectId === projectId) await closeProjectWorkspace({ restoreChat: true });
+  _projects = _projects.filter((p) => p.id !== projectId);
+  _renderProjectList();
+  if (!bulk && !quiet) uiModule.showToast?.('Project archived');
+}
+
+async function _editWorkingDirForId(projectId) {
+  if (!projectId) return;
+  if (_openProjectId === projectId && editorModule.isDirty()) {
+    const ok = await editorModule.confirmCloseIfDirty();
+    if (!ok) return;
+  }
+  const project = _projects.find((p) => p.id === projectId) || await _fetchProject(projectId).catch(() => null);
+  if (!project) return;
   const next = await promptWorkingDir({
     title: 'Change project folder',
-    defaultValue: project?.working_dir || '',
+    defaultValue: project.working_dir || '',
     confirmText: 'Validate & save',
   });
   if (!next) return;
@@ -1385,7 +1632,7 @@ async function _editWorkingDir() {
     uiModule.showToast?.(validation.working_dir_warning, 6000);
   }
 
-  const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(_openProjectId)}`, {
+  const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}`, {
     method: 'PATCH',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
@@ -1397,16 +1644,89 @@ async function _editWorkingDir() {
   }
   const updated = (await res.json()).project;
   _upsertProjectCache(updated);
-  _renderWorkspaceShell(updated);
-  _mountEditor(updated);
-  _mountFileTree(updated);
-  _mountRunPanel(updated);
-  _mountChatSidebar(updated);
+  if (_openProjectId === projectId) {
+    _renderWorkspaceShell(updated);
+    _mountEditor(updated);
+    _mountFileTree(updated);
+    _mountRunPanel(updated);
+    _mountChatSidebar(updated);
+  }
   await refreshProjectList();
   uiModule.showToast?.('Working directory updated');
 }
 
+function _initProjectOverflowMenu() {
+  const btn = document.getElementById('project-overflow-btn');
+  const menu = document.getElementById('project-overflow-menu');
+  if (!btn || !menu) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (menu.classList.contains('open')) {
+      menu.classList.remove('open');
+      return;
+    }
+    window.closeAllPopups?.(menu);
+    if (menu.parentElement !== document.body) document.body.appendChild(menu);
+    const rect = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.classList.add('open');
+    requestAnimationFrame(() => {
+      const mr = menu.getBoundingClientRect();
+      if (mr.right > window.innerWidth - 8) menu.style.left = `${rect.right - mr.width}px`;
+      if (mr.bottom > window.innerHeight - 8) menu.style.top = `${rect.top - mr.height - 4}px`;
+    });
+  });
+
+  const close = () => menu.classList.remove('open');
+  document.getElementById('project-overflow-rename')?.addEventListener('click', () => {
+    close();
+    if (_openProjectId) void _renameProjectById(_openProjectId);
+  });
+  document.getElementById('project-overflow-dir')?.addEventListener('click', () => {
+    close();
+    if (_openProjectId) void _editWorkingDirForId(_openProjectId);
+  });
+  document.getElementById('project-overflow-close')?.addEventListener('click', () => {
+    close();
+    void closeProjectWorkspace({ restoreChat: true });
+  });
+  document.getElementById('project-overflow-archive')?.addEventListener('click', () => {
+    close();
+    if (_openProjectId) void _archiveProjectById(_openProjectId);
+  });
+}
+
+function _initProjectHeaderTooltips() {
+  const root = _workspaceRoot();
+  if (!root) return;
+  initTooltips(root.querySelector('.project-workspace-header-actions') || root);
+}
+
+function _bindProjectSelectAll() {
+  const dot = document.getElementById('project-select-all-dot');
+  const label = document.getElementById('project-select-all-label');
+  if (!dot || !label) return;
+  const toggleAll = () => {
+    const rows = document.querySelectorAll('.project-list-item[data-project-id]');
+    const allSelected = rows.length > 0 && [...rows].every((row) => row.querySelector('.project-select-cb')?._checked);
+    projectSidebar.toggleSelectAll(!allSelected);
+    const next = !allSelected;
+    dot.textContent = next ? '●' : '○';
+    dot.style.opacity = next ? '1' : '0.4';
+    dot.style.color = next ? 'var(--accent, var(--red))' : '';
+  };
+  dot.addEventListener('click', toggleAll);
+  label.addEventListener('click', toggleAll);
+}
+
 export async function restoreLastOpenProjectIfAny() {
+  if (!isProjectsUiEnabled()) {
+    workspaceState.clearLastOpenProject();
+    return false;
+  }
   const projectId = workspaceState.getLastOpenProject();
   if (!projectId) return false;
   try {
@@ -1423,65 +1743,55 @@ export async function restoreLastOpenProjectIfAny() {
 }
 
 export function initProjects() {
-  const createBtn = document.getElementById('project-create-btn');
-  createBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    void createProjectDialog();
+  if (!isProjectsUiEnabled()) {
+    hideProjectsUi();
+    workspaceState.clearLastOpenProject();
+    window._pendingProjectRestore = null;
+    return;
+  }
+
+  if (!window._projectPendingRefreshBound) {
+    window._projectPendingRefreshBound = true;
+    window.addEventListener('learned-connections-refresh', () => {
+      if (_openProjectId) void _reloadWorkspaceLinks(_openProjectId);
+    });
+  }
+
+  // "New Project" now lives as its own top-level sidebar button (mirroring
+  // "New Chat") so Chats and Projects share the same create ecosystem. The
+  // legacy header "+" id is still bound in case it's present.
+  ['sidebar-new-project-btn', 'project-create-btn'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void createProjectDialog();
+    });
   });
 
   const list = document.getElementById('project-list');
-  list?.addEventListener('click', (e) => {
-    const row = e.target.closest('[data-project-id]');
-    if (!row?.dataset.projectId) return;
-    void openProjectWorkspace(row.dataset.projectId);
+
+  projectSidebar.initProjectSidebar({
+    onOpen: (id) => { void openProjectWorkspace(id); },
+    onCreate: () => { void createProjectDialog(); },
+    onRename: (id) => _renameProjectById(id),
+    onChangeDir: (id) => _editWorkingDirForId(id),
+    onArchive: (id, opts) => _archiveProjectById(id, opts),
+    onRefresh: () => refreshProjectList(),
+    onListRender: () => _renderProjectList(),
+  });
+  _bindProjectSelectAll();
+  _initProjectOverflowMenu();
+  _initProjectHeaderTooltips();
+
+  document.getElementById('project-edit-dir-btn')?.addEventListener('click', () => {
+    if (_openProjectId) void _editWorkingDirForId(_openProjectId);
   });
 
-  document.getElementById('project-edit-dir-btn')?.addEventListener('click', () => void _editWorkingDir());
-
-  document.getElementById('project-rename-btn')?.addEventListener('click', async () => {
-    if (!_openProjectId) return;
-    const project = _projects.find((p) => p.id === _openProjectId);
-    const name = await styledPrompt('Rename project:', {
-      title: 'Rename',
-      defaultValue: project?.title || '',
-      confirmText: 'Save',
-    });
-    if (!name?.trim()) return;
-    const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(_openProjectId)}`, {
-      method: 'PATCH',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: name.trim() }),
-    });
-    if (!res.ok) {
-      uiModule.showToast?.('Rename failed', 3000);
-      return;
-    }
-    const updated = (await res.json()).project;
-    _upsertProjectCache(updated);
-    await refreshProjectList();
-    _renderWorkspaceShell(updated);
-    uiModule.showToast?.('Renamed');
+  document.getElementById('project-rename-btn')?.addEventListener('click', () => {
+    if (_openProjectId) void _renameProjectById(_openProjectId);
   });
 
-  document.getElementById('project-archive-btn')?.addEventListener('click', async () => {
-    if (!_openProjectId) return;
-    if (editorModule.isDirty()) {
-      const ok = await editorModule.confirmCloseIfDirty();
-      if (!ok) return;
-    }
-    if (!await uiModule.styledConfirm('Archive this project? It will be hidden from the list.', { confirmText: 'Archive', danger: true })) return;
-    const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(_openProjectId)}`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-    });
-    if (!res.ok) {
-      uiModule.showToast?.('Archive failed', 3000);
-      return;
-    }
-    await closeProjectWorkspace({ restoreChat: true });
-    await refreshProjectList();
-    uiModule.showToast?.('Project archived');
+  document.getElementById('project-archive-btn')?.addEventListener('click', () => {
+    if (_openProjectId) void _archiveProjectById(_openProjectId);
   });
 
   void refreshProjectList();

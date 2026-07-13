@@ -1,0 +1,96 @@
+{
+  "session_id": "fixture-ldr-compare-foldseek",
+  "owner": "fixture-user",
+  "query": "Compare Foldseek and ESM3 for protein structure search and representation",
+  "research_mode": "compare",
+  "research_engine": "ldr",
+  "status": "done",
+  "category": "academic",
+  "include_preprints": false,
+  "include_zotero": true,
+  "include_knowledge": false,
+  "seed_papers": ["FOLD001", "ESM3001"],
+  "seed_paper_details": [
+    {
+      "zotero_key": "FOLD001",
+      "title": "Foldseek: fast and accurate protein structure search",
+      "authors": "van Kempen, M.",
+      "year": "2024",
+      "doi": "10.1038/s41592-023-02049-6",
+      "has_pdf": true,
+      "collection_paths": ["Protein/Structure"]
+    },
+    {
+      "zotero_key": "ESM3001",
+      "title": "ESM3: Simulating evolution with a sequence-structure language model",
+      "authors": "Hayes, T.",
+      "year": "2025",
+      "doi": "10.1126/science.adp1546",
+      "has_pdf": true,
+      "collection_paths": ["Protein/Structure"]
+    }
+  ],
+  "source_breakdown": {
+    "web": 1,
+    "zotero": 2,
+    "graph": 0,
+    "seeds": 2,
+    "total": 3
+  },
+  "evidence_registry": {
+    "sources": [
+      {
+        "source_id": "src:zotero:FOLD001",
+        "citation_num": 1,
+        "title": "Foldseek: fast and accurate protein structure search",
+        "authors": "van Kempen, M.",
+        "year": "2024",
+        "doi_or_id": "10.1038/s41592-023-02049-6",
+        "url": "https://doi.org/10.1038/s41592-023-02049-6",
+        "source_type": "zotero",
+        "is_seed": true,
+        "search_kind": "ldr",
+        "sourcing_tier": "adequate",
+        "content_excerpt": "Foldseek compares structures using a 3Di structural alphabet and enables fast database search."
+      },
+      {
+        "source_id": "src:zotero:ESM3001",
+        "citation_num": 2,
+        "title": "ESM3: Simulating evolution with a sequence-structure language model",
+        "authors": "Hayes, T.",
+        "year": "2025",
+        "doi_or_id": "10.1126/science.adp1546",
+        "url": "https://doi.org/10.1126/science.adp1546",
+        "source_type": "zotero",
+        "is_seed": true,
+        "search_kind": "ldr",
+        "sourcing_tier": "adequate",
+        "content_excerpt": "ESM3 jointly models sequence and structure with a generative language model."
+      },
+      {
+        "source_id": "src:web:https://doi.org/10.5555/structure-neighbor",
+        "citation_num": 3,
+        "title": "Independent benchmark of structure search tools",
+        "url": "https://doi.org/10.5555/structure-neighbor",
+        "source_type": "web",
+        "search_provider": "openalex",
+        "search_kind": "ldr",
+        "sourcing_tier": "abstract_only",
+        "content_excerpt": "Benchmark compares Foldseek-class tools against sequence-structure models on diverse folds."
+      }
+    ]
+  },
+  "raw_report": "## Executive Summary\n\nFoldseek [1] provides fast structure search via a structural alphabet, while ESM3 [2] learns joint sequence-structure representations. An independent benchmark [3] highlights accuracy–speed trade-offs.\n\n## Methods Compared\n\nFoldseek [1] uses 3Di tokens; ESM3 [2] uses a generative multimodal model.\n\n## Limitations of This Report\n\nSource [3] was abstract-only.\n\n## References\n\n[1] Foldseek\n[2] ESM3\n[3] Benchmark",
+  "stats": {
+    "Duration": "142.3s",
+    "Rounds": 1,
+    "Queries": 0,
+    "URLs": 3,
+    "Sources": 3,
+    "Engine": "LDR LangGraph",
+    "Search": "searxng",
+    "Mode": "Academic",
+    "Preprints": "Excluded"
+  },
+  "completed_at": 1700000100
+}

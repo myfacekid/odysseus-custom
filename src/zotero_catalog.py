@@ -66,6 +66,38 @@ def _write_jsonl(path: Path, rows: List[dict]) -> None:
     tmp.replace(path)
 
 
+def section_cache_path(owner: str, zotero_key: str) -> Path:
+    safe_key = re.sub(r"[^\w.-]", "_", (zotero_key or "").strip()) or "unknown"
+    return _owner_dir(owner) / "sections" / f"{safe_key}.json"
+
+
+def load_section_cache(owner: str, zotero_key: str) -> Optional[dict]:
+    path = section_cache_path(owner, zotero_key)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def save_section_cache(owner: str, zotero_key: str, payload: dict) -> None:
+    path = section_cache_path(owner, zotero_key)
+    _write_json(path, payload)
+
+
+def section_cache_valid(cache: Optional[dict], catalog_row: Optional[dict]) -> bool:
+    if not cache or not isinstance(cache.get("sections"), dict):
+        return False
+    if not catalog_row:
+        return bool(cache.get("sections"))
+    expected = (catalog_row.get("date_modified") or "").strip()
+    if expected and cache.get("date_modified") != expected:
+        return False
+    return bool(cache.get("sections"))
+
+
 def load_catalog(owner: str) -> List[dict]:
     path = catalog_path(owner)
     if not path.is_file():

@@ -88,8 +88,10 @@ DEFAULT_SETTINGS = {
     "research_extraction_concurrency": 3,
     # Max chars extracted per paper/page during research (PDF, web, catalog).
     "research_max_content_chars": 15000,
-    # How many non-seed findings are passed into each synthesis round.
-    "research_synthesis_window": 10,
+    # How many non-seed findings are passed into each synthesis round. Higher
+    # values let the model reference more of the gathered papers (at the cost of
+    # a larger synthesis prompt). Bounded to [1, 50] in research_utils.
+    "research_synthesis_window": 20,
     # Hard wall-clock cap on a single deep-research run. The previous 600s
     # (10 min) default cut off slow local / edge LLMs mid-synthesis; 1800s
     # (30 min) is comfortable for most local setups while still bounding
@@ -98,6 +100,12 @@ DEFAULT_SETTINGS = {
     # unbounded model/API bill. Other values are bounded to [60, 86400].
     # Tune via Settings or by editing data/settings.json.
     "research_run_timeout_seconds": 1800,
+    # Deep research backend: "ldr" (default, LangGraph via local-deep-research) or
+    # "iterresearch" (legacy fallback when LDR deps are unavailable).
+    "research_engine": "ldr",
+    # Academic API keys for LDR engine layer (Phase L1).
+    "openalex_email": "",
+    "semantic_scholar_api_key": "",
     "zotero_api_key": "",
     "zotero_user_id": "",
     "agent_max_tool_calls": 0,
