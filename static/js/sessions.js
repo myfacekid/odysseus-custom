@@ -10,7 +10,8 @@ import { initModelPicker, updateModelPicker } from './modelPicker.js';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
 import { getLastOpenProject, clearLastOpenProject } from './projects/workspaceState.js';
-import { isProjectsUiEnabled } from './projects/featureFlag.js';
+import { isProjectsUiEnabled, isProjectsContextLayerEnabled } from './projects/featureFlag.js';
+import { getActiveProjectId, ACTIVE_PROJECT_EVENT } from './projects/activeState.js';
 
 const API_BASE = window.location.origin;
 
@@ -57,6 +58,7 @@ const FOLDER_MAX_VISIBLE = 5;
 let _showAllSessions = false;
 let _expandedFolders = {};  // folderName -> true if "show more" clicked
 let _sortMode = Storage.get('odysseus-session-sort') || 'active'; // default to last active
+let _sessionScope = Storage.get('odysseus-session-scope') || 'all'; // all | project
 let _autoCreateInProgress = false; // guard against recursive auto-create
 const _INCOGNITO_SESSIONS_KEY = 'ody-incognito-sessions'; // sessionStorage key for incognito session IDs
 const _isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -384,6 +386,14 @@ function createSessionItem(s) {
   span.textContent = label;
   span.title = (s.model ? s.model.split('/').pop() + ' · ' : '') + chatTitle;
   span.classList.add('text-ellipsis');
+  if (s.project_id && isProjectsContextLayerEnabled()) {
+    const badge = document.createElement('span');
+    badge.className = 'session-project-badge';
+    badge.title = 'Scoped to a project';
+    badge.setAttribute('aria-label', 'Project-scoped chat');
+    badge.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>';
+    span.appendChild(badge);
+  }
 
   // Double-click to rename (only when session is already selected)
   if (!isOpenClaw) {
@@ -791,7 +801,15 @@ function _renderSessionListImpl() {
 
   // Get saved order from localStorage
   const savedOrder = Storage.get('session-order');
-  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isIncognitoSession(s.id) && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
+  let orderedSessions = sessions.filter(s => !s.archived && s.folder !== 'Assistant' && !_isIncognitoSession(s.id) && (s.name || '').trim() !== 'Outis' && (s.name || '').trim() !== 'Nobody' && (s.name || '').trim() !== 'Incognito');
+
+  // Optional: only chats linked to the active project
+  if (isProjectsContextLayerEnabled() && _sessionScope === 'project') {
+    const pid = getActiveProjectId();
+    if (pid) {
+      orderedSessions = orderedSessions.filter((s) => s.project_id === pid);
+    }
+  }
 
   if (savedOrder) {
     try {
@@ -1915,7 +1933,7 @@ export async function materializePendingSession() {
   const incognitoChk = document.getElementById('incognito-toggle');
   const isIncognito = incognitoChk && incognitoChk.checked;
   const base = (pending.modelId || 'model').split('/').pop();
-  const name = isIncognito ? 'Nobody' : `${base} ${new Date().toLocaleTimeString()}`;
+  const name = isIncognito ? 'Outis' : `${base} ${new Date().toLocaleTimeString()}`;
 
   const fd = new FormData();
   fd.append('name', name);
@@ -1926,6 +1944,10 @@ export async function materializePendingSession() {
   }
   if (pending.endpointId) {
     fd.append('endpoint_id', pending.endpointId);
+  }
+  if (isProjectsContextLayerEnabled()) {
+    const activeProject = getActiveProjectId();
+    if (activeProject) fd.append('project_id', activeProject);
   }
 
   let res;
@@ -2329,6 +2351,11 @@ if (document.readyState === 'loading') {
 } else {
   _initAllDropdowns();
 }
+
+// Re-render chat list when active project changes (scope filter)
+window.addEventListener(ACTIVE_PROJECT_EVENT, () => {
+  try { renderSessionList(); } catch { /* ignore */ }
+});
 
 // Shared global listener to close all session dropdowns on click-away or Escape
 function _initDropdownDismiss() {
@@ -3165,6 +3192,14 @@ export function setSortMode(mode) {
   renderSessionList();
 }
 
+export function getSessionScope() { return _sessionScope; }
+
+export function setSessionScope(scope) {
+  _sessionScope = scope === 'project' ? 'project' : 'all';
+  Storage.set('odysseus-session-scope', _sessionScope);
+  renderSessionList();
+}
+
 export function setSessionHasDocs(sessionId, hasDocs) {
   const s = sessions.find(s => s.id === sessionId);
   if (s && s.has_documents !== hasDocs) {
@@ -3204,7 +3239,9 @@ const sessionModule = {
   closeArchive,
   setSessionHasDocs,
   getSortMode,
-  setSortMode
+  setSortMode,
+  getSessionScope,
+  setSessionScope,
 };
 
 export { updateModelPicker };

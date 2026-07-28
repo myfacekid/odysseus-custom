@@ -26,7 +26,12 @@ import { initTooltips } from '../ui/tooltip.js';
 import { setProjectRunActivity } from '../activityStrip.js';
 import { showLoadingRow } from '../ui/feedback.js';
 import workspaceLayout from './workspaceLayout.js';
-import { hideProjectsUi, isProjectsUiEnabled } from './featureFlag.js';
+import {
+  hideProjectsUi,
+  isProjectsUiEnabled,
+  isProjectServerDirBrowseEnabled,
+} from './featureFlag.js';
+import { initActiveProjectChip } from './activeChip.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
@@ -556,7 +561,7 @@ async function _applyNativeFolderSelection(input, pickPromise) {
       }
       if (resolved.guess) _setPathInput(input, resolved.guess);
       else _setPathInput(input, provisional);
-      uiModule.showToast?.('Using best guess — confirm the path or use Browse server folders', 5000);
+      uiModule.showToast?.('Using best guess — confirm or edit the path below', 5000);
       return true;
     }
     if (resolved.guess) {
@@ -564,7 +569,7 @@ async function _applyNativeFolderSelection(input, pickPromise) {
     }
     uiModule.showToast?.(
       resolved.guess
-        ? 'Confirm the resolved path below, or use Browse server folders to adjust'
+        ? 'Confirm the resolved path below, or edit it if needed'
         : 'Folder name captured — confirm the full server path below',
       5000,
     );
@@ -576,6 +581,7 @@ async function _applyNativeFolderSelection(input, pickPromise) {
 }
 
 async function _browseServerDirectory(initialPath = '', onReady = null) {
+  if (!isProjectServerDirBrowseEnabled()) return null;
   const overlay = _ensureDirPromptOverlay();
   const mainPanel = overlay.querySelector('#project-dir-prompt-main');
   const browsePanel = overlay.querySelector('#project-dir-inline-browse');
@@ -683,7 +689,7 @@ function _ensureDirPromptOverlay() {
             '<button type="button" id="project-dir-prompt-browse" class="admin-btn-sm">Browse server folders…</button>' +
           '</div>' +
         '</div>' +
-        '<div id="project-dir-inline-browse" class="project-dir-inline-browse hidden">' +
+        '<div id="project-dir-inline-browse" class="project-dir-inline-browse hidden" hidden aria-hidden="true">' +
           '<div id="project-dir-browse-path" class="project-dir-browse-path"></div>' +
           '<div id="project-dir-browse-note" class="admin-toggle-sub project-dir-browse-note"></div>' +
           '<div id="project-dir-browse-list" class="project-dir-browse-list"></div>' +
@@ -722,6 +728,8 @@ async function promptWorkingDir({
   const footerEl = overlay.querySelector('.modal-footer');
   const _prevFocus = document.activeElement;
 
+  const serverBrowse = isProjectServerDirBrowseEnabled();
+
   titleEl.textContent = title;
   msgEl.textContent = message || '';
   msgEl.style.display = message ? '' : 'none';
@@ -731,6 +739,11 @@ async function promptWorkingDir({
   mainPanel?.classList.remove('hidden');
   browsePanel?.classList.add('hidden');
   footerEl?.classList.remove('hidden');
+  if (browseBtn) {
+    browseBtn.hidden = !serverBrowse;
+    browseBtn.setAttribute('aria-hidden', serverBrowse ? 'false' : 'true');
+    browseBtn.style.display = serverBrowse ? '' : 'none';
+  }
 
   return new Promise((resolve) => {
     let settled = false;
@@ -747,11 +760,11 @@ async function promptWorkingDir({
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
       nativeBtn.removeEventListener('click', onNativeClick);
-      browseBtn.removeEventListener('click', onBrowseClick);
+      if (serverBrowse) browseBtn?.removeEventListener('click', onBrowseClick);
       overlay.removeEventListener('click', onBackdrop);
       document.removeEventListener('keydown', onKey);
       input.removeEventListener('keydown', onInputKey);
-      browseBtn.disabled = false;
+      if (browseBtn) browseBtn.disabled = false;
       browseBack = null;
       try { _prevFocus?.focus?.(); } catch {}
       resolve(result);
@@ -762,7 +775,7 @@ async function promptWorkingDir({
     function onKey(e) {
       if (e.key !== 'Escape') return;
       e.preventDefault();
-      if (browsePanel && !browsePanel.classList.contains('hidden')) {
+      if (serverBrowse && browsePanel && !browsePanel.classList.contains('hidden')) {
         browseBack?.();
         return;
       }
@@ -789,7 +802,7 @@ async function promptWorkingDir({
       });
     }
     async function onBrowseClick() {
-      if (browseBtn.disabled) return;
+      if (!serverBrowse || !browseBtn || browseBtn.disabled) return;
       browseBtn.disabled = true;
       try {
         browseBack = null;
@@ -810,7 +823,7 @@ async function promptWorkingDir({
     okBtn.addEventListener('click', onOk);
     cancelBtn.addEventListener('click', onCancel);
     nativeBtn.addEventListener('click', onNativeClick);
-    browseBtn.addEventListener('click', onBrowseClick);
+    if (serverBrowse) browseBtn?.addEventListener('click', onBrowseClick);
     overlay.addEventListener('click', onBackdrop);
     document.addEventListener('keydown', onKey);
     input.addEventListener('keydown', onInputKey);
@@ -824,30 +837,30 @@ async function promptWorkingDir({
   });
 }
 
-async function createProjectDialog() {
+export async function createProjectDialog({ openWorkspace = true, setActive = false } = {}) {
   const title = await styledPrompt('Project name:', {
     title: 'New project',
     placeholder: 'e.g. AlphaFold comparison',
     confirmText: 'Next',
   });
-  if (!title?.trim()) return;
+  if (!title?.trim()) return null;
 
   const workingDir = await promptWorkingDir({
     title: 'Project folder (depth boundary)',
     confirmText: 'Create',
   });
-  if (!workingDir) return;
+  if (!workingDir) return null;
 
   let validation;
   try {
     validation = await _validateDir(workingDir);
   } catch (e) {
     uiModule.showToast?.(e.message || 'Could not validate path', 4000);
-    return;
+    return null;
   }
   if (validation.working_dir_status !== 'ok') {
     uiModule.showToast?.(`Folder status: ${validation.working_dir_status}`, 5000);
-    return;
+    return null;
   }
   if (validation.working_dir_warning) {
     uiModule.showToast?.(validation.working_dir_warning, 6000);
@@ -865,12 +878,23 @@ async function createProjectDialog() {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     uiModule.showToast?.(data.detail || 'Create failed', 4000);
-    return;
+    return null;
   }
   if (data.project) _upsertProjectCache(data.project);
   await refreshProjectList();
   uiModule.showToast?.('Project created');
-  if (data.project?.id) openProjectWorkspace(data.project.id);
+  if (data.project?.id) {
+    if (setActive || (!openWorkspace && !isProjectsUiEnabled())) {
+      try {
+        const { setActiveProjectId } = await import('./activeState.js');
+        setActiveProjectId(data.project.id);
+      } catch { /* ignore */ }
+    }
+    if (openWorkspace && isProjectsUiEnabled()) {
+      openProjectWorkspace(data.project.id);
+    }
+  }
+  return data.project || null;
 }
 
 export async function refreshProjectList() {
@@ -1743,10 +1767,17 @@ export async function restoreLastOpenProjectIfAny() {
 }
 
 export function initProjects() {
+  // Always park the workspace shell when the IDE flag is off.
   if (!isProjectsUiEnabled()) {
     hideProjectsUi();
     workspaceState.clearLastOpenProject();
     window._pendingProjectRestore = null;
+  }
+
+  // Context-layer chip mounts regardless of workspace shell.
+  initActiveProjectChip();
+
+  if (!isProjectsUiEnabled()) {
     return;
   }
 
@@ -1818,4 +1849,7 @@ if (typeof window !== 'undefined') {
   };
   window.getOpenProjectId = () => _openProjectId;
   window.saveActiveProjectFile = (opts) => editorModule.save?.(opts || { silent: true });
+  import('./activeState.js').then((m) => {
+    window.getActiveProjectId = m.getActiveProjectId;
+  }).catch(() => {});
 }

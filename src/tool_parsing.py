@@ -113,6 +113,7 @@ _TOOL_NAME_MAP = {
     "read_project_file": "read_project_file",
     "write_project_file": "write_project_file",
     "run_project_script": "run_project_script",
+    "promote_project_file": "promote_project_file",
     "document": "update_document",
     "update_document": "update_document",
     "create_document": "create_document",

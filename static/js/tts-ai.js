@@ -478,7 +478,7 @@ export function addAITTSButton(messageElement, text) {
     playButton.type = 'button';
     playButton.title = 'Read aloud';
     playButton.innerHTML = ICON_PLAY;
-    playButton.style.cssText = 'background:none;border:none;color:#6b7280;cursor:pointer;padding:2px 6px;border-radius:4px;transition:color .15s;line-height:1;display:inline-flex;align-items:center;';
+    playButton.style.cssText = 'background:none;border:none;color:#6b7280;cursor:pointer;padding:2px 6px;border-radius:2px;transition:color .15s;line-height:1;display:inline-flex;align-items:center;';
 
     playButton.addEventListener('mouseenter', () => { playButton.style.color = '#ccc'; });
     playButton.addEventListener('mouseleave', () => {

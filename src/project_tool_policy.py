@@ -17,6 +17,7 @@ PROJECT_DEPTH_ALLOWED_TOOLS: FrozenSet[str] = frozenset({
     "read_project_file",
     "write_project_file",
     "run_project_script",
+    "promote_project_file",
 })
 
 # Generic / unscoped tools that must not run inside a project workspace chat.
@@ -143,5 +144,5 @@ def project_tool_block_reason(
     return (
         f"Tool '{tool_name}' is not available in project workspace chats. "
         "Use project-scoped tools (read_project_file, write_project_file, "
-        "run_project_script) for files under the project working directory."
+        "run_project_script, promote_project_file) for files under the project working directory."
     )

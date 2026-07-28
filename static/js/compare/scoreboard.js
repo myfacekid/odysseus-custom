@@ -179,19 +179,19 @@ export function showScoreboard() {
   const clearBtn = document.createElement('button');
   clearBtn.className = 'scoreboard-clear-btn';
   clearBtn.textContent = 'Clear History';
-  clearBtn.style.cssText = 'display:block;margin:16px 0 4px auto;padding:4px 12px;background:none;border:1px solid var(--border);color:var(--fg);border-radius:4px;cursor:pointer;font-size:11px;opacity:0.4;transition:opacity 0.15s;';
+  clearBtn.style.cssText = 'display:block;margin:16px 0 4px auto;padding:4px 12px;background:none;border:1px solid var(--border);color:var(--fg);border-radius:2px;cursor:pointer;font-size:11px;opacity:0.4;transition:opacity 0.15s;';
   clearBtn.addEventListener('mouseenter', () => { clearBtn.style.opacity = '1'; });
   clearBtn.addEventListener('mouseleave', () => { clearBtn.style.opacity = '0.6'; });
   clearBtn.addEventListener('click', () => {
     // Inline confirmation
     const confirmRow = document.createElement('div');
-    confirmRow.style.cssText = 'display:flex;gap:8px;justify-content:center;align-items:center;margin-top:8px;padding:8px 12px;border:1px solid color-mix(in srgb, var(--red) 40%, var(--border));border-radius:6px;background:color-mix(in srgb, var(--red) 5%, transparent);';
+    confirmRow.style.cssText = 'display:flex;gap:8px;justify-content:center;align-items:center;margin-top:8px;padding:8px 12px;border:1px solid color-mix(in srgb, var(--red) 40%, var(--border));border-radius:2px;background:color-mix(in srgb, var(--red) 5%, transparent);';
     const confirmLabel = document.createElement('span');
     confirmLabel.style.cssText = 'font-size:12px;opacity:0.7;';
     confirmLabel.textContent = 'Clear all vote history?';
     const yesBtn = document.createElement('button');
     yesBtn.textContent = 'Clear';
-    yesBtn.style.cssText = 'padding:4px 12px;background:var(--red);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;';
+    yesBtn.style.cssText = 'padding:4px 12px;background:var(--red);color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px;font-weight:600;';
     yesBtn.addEventListener('click', () => {
       Storage.setJSON(VOTES_STORAGE_KEY, []);
       overlay.remove();
@@ -200,7 +200,7 @@ export function showScoreboard() {
     const noBtn = document.createElement('button');
     noBtn.textContent = 'Cancel';
     noBtn.className = 'cmp-btn-secondary';
-    noBtn.style.cssText = 'padding:4px 12px;border-radius:4px;font-size:12px;';
+    noBtn.style.cssText = 'padding:4px 12px;border-radius:2px;font-size:12px;';
     noBtn.addEventListener('click', () => confirmRow.remove());
     confirmRow.appendChild(confirmLabel);
     confirmRow.appendChild(yesBtn);

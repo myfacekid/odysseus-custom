@@ -16,6 +16,9 @@ import spinnerModule from './spinner.js';
 import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
+import { makeWindowDraggable } from './windowDrag.js';
+import { snapModalToZone, markTileWindow } from './tileManager.js';
+import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPalette.js';
 
   let API_BASE = '';
   let isOpen = false;
@@ -73,7 +76,7 @@ import * as Modals from './modalManager.js';
   {
     const s = document.createElement('style');
     s.id = 'doc-tab-menu-styles';
-    s.textContent = `.doc-tab-menu-btn{background:none!important;border:none!important;outline:none!important;box-shadow:none!important;color:var(--fg);opacity:0.25;cursor:pointer;padding:2px 4px!important;height:auto!important;line-height:1;transition:opacity .15s;flex-shrink:0;-webkit-appearance:none;appearance:none}.doc-tab-menu-btn:focus,.doc-tab-menu-btn:active{outline:none!important;box-shadow:none!important;background:none!important}.doc-tab:hover .doc-tab-menu-btn{opacity:.5}.doc-tab-menu-btn:hover{opacity:1!important}.doc-tab-dropdown .dropdown-item-compact{padding:6px 8px;border-radius:6px;cursor:pointer;white-space:nowrap;border-bottom:none;display:flex;align-items:center;gap:10px;font-size:11px}.doc-tab-dropdown .dropdown-item-compact:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}.doc-tab-dropdown .dropdown-item-compact .dropdown-icon{width:14px;height:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;opacity:0.5}.doc-tab-dropdown .dropdown-divider{height:1px;margin:3px 0;background:color-mix(in srgb,var(--border) 40%,transparent)}.doc-tab-action-delete{color:var(--red,#e06c75)!important}.doc-tab-action-delete .dropdown-icon{opacity:0.7!important}`;
+    s.textContent = `.doc-tab-menu-btn{background:none!important;border:none!important;outline:none!important;box-shadow:none!important;color:var(--fg);opacity:0.25;cursor:pointer;padding:2px 4px!important;height:auto!important;line-height:1;transition:opacity .15s;flex-shrink:0;-webkit-appearance:none;appearance:none}.doc-tab-menu-btn:focus,.doc-tab-menu-btn:active{outline:none!important;box-shadow:none!important;background:none!important}.doc-tab:hover .doc-tab-menu-btn{opacity:.5}.doc-tab-menu-btn:hover{opacity:1!important}.doc-tab-dropdown .dropdown-item-compact{padding:6px 8px;border-radius:2px;cursor:pointer;white-space:nowrap;border-bottom:none;display:flex;align-items:center;gap:10px;font-size:11px}.doc-tab-dropdown .dropdown-item-compact:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}.doc-tab-dropdown .dropdown-item-compact .dropdown-icon{width:14px;height:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;opacity:0.5}.doc-tab-dropdown .dropdown-divider{height:1px;margin:3px 0;background:color-mix(in srgb,var(--border) 40%,transparent)}.doc-tab-action-delete{color:var(--red,#e06c75)!important}.doc-tab-action-delete .dropdown-icon{opacity:0.7!important}`;
     document.head.appendChild(s);
   }
 
@@ -728,7 +731,7 @@ import * as Modals from './modalManager.js';
             btn.className = 'confirm-btn confirm-btn-secondary';
             btn.style.cssText = 'padding:3px 10px;font-size:0.78rem;';
             const thumb = document.createElement('img');
-            thumb.style.cssText = 'max-height:32px;max-width:140px;object-fit:contain;border:1px solid var(--border);border-radius:3px;background:#fff;display:none;';
+            thumb.style.cssText = 'max-height:32px;max-width:140px;object-fit:contain;border:1px solid var(--border);border-radius:2px;background:#fff;display:none;';
             const clearBtn = document.createElement('button');
             clearBtn.textContent = '×';
             clearBtn.title = 'Remove signature from this field';
@@ -1133,7 +1136,7 @@ import * as Modals from './modalManager.js';
       // Lock the wrap to the page's exact aspect ratio so percentage-positioned
       // inputs stay aligned no matter how wide the panel is rendered.
       const pageWrap = document.createElement('div');
-      pageWrap.style.cssText = `position:relative;margin:0 auto 16px auto;width:${page.width}px;max-width:calc(100% - 24px);aspect-ratio:${page.width} / ${page.height};background:#fff;box-shadow:0 4px 16px rgba(0,0,0,0.4);container-type:size;`;
+      pageWrap.style.cssText = `position:relative;margin:0 auto 16px auto;width:${page.width}px;max-width:calc(100% - 24px);aspect-ratio:${page.width} / ${page.height};background:#fff;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);container-type:size;`;
       const img = document.createElement('img');
       img.src = `${API_BASE}/api/document/${docId}/page/${page.page}.png`;
       img.style.cssText = 'display:block;width:100%;height:100%;user-select:none;-webkit-user-drag:none;pointer-events:none;';
@@ -1253,7 +1256,7 @@ import * as Modals from './modalManager.js';
           today.type = 'button';
           today.textContent = 'Today';
           today.title = "Set to today's date";
-          today.style.cssText = `position:absolute;left:calc(${lPct}% + ${wPct}%);top:${tPct}%;height:${hPct}%;margin-left:4px;padding:0 6px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 55%, transparent);background:rgba(255,255,255,0.95);color:var(--accent, var(--red));border-radius:3px;cursor:pointer;font-size:10px;line-height:1;white-space:nowrap;`;
+          today.style.cssText = `position:absolute;left:calc(${lPct}% + ${wPct}%);top:${tPct}%;height:${hPct}%;margin-left:4px;padding:0 6px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 55%, transparent);background:rgba(255,255,255,0.95);color:var(--accent, var(--red));border-radius:2px;cursor:pointer;font-size:10px;line-height:1;white-space:nowrap;`;
           today.addEventListener('click', () => {
             const d = new Date();
             const dd = String(d.getDate()).padStart(2, '0');
@@ -1386,12 +1389,12 @@ import * as Modals from './modalManager.js';
     const grip = document.createElement('div');
     grip.title = 'Drag to move';
     grip.textContent = '☰';
-    grip.style.cssText = `position:absolute;top:${OFF}px;left:${OFF}px;width:${HS}px;height:${HS}px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 65%, transparent);background:#fff;color:var(--accent, var(--red));border-radius:3px;cursor:move;font-size:11px;line-height:${HS - 2}px;text-align:center;display:${HIDE};touch-action:none;`;
+    grip.style.cssText = `position:absolute;top:${OFF}px;left:${OFF}px;width:${HS}px;height:${HS}px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 65%, transparent);background:#fff;color:var(--accent, var(--red));border-radius:2px;cursor:move;font-size:11px;line-height:${HS - 2}px;text-align:center;display:${HIDE};touch-action:none;`;
 
     // ↘ resize handle — same size as the × button.
     const resize = document.createElement('div');
     resize.title = 'Drag to resize';
-    resize.style.cssText = `position:absolute;bottom:${OFF}px;right:${OFF}px;width:${HS}px;height:${HS}px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 65%, transparent);background:#fff;color:var(--accent, var(--red));border-radius:3px;cursor:nwse-resize;display:${HIDE};touch-action:none;`;
+    resize.style.cssText = `position:absolute;bottom:${OFF}px;right:${OFF}px;width:${HS}px;height:${HS}px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 65%, transparent);background:#fff;color:var(--accent, var(--red));border-radius:2px;cursor:nwse-resize;display:${HIDE};touch-action:none;`;
     resize.innerHTML = '<svg width="14" height="14" viewBox="0 0 10 10" style="display:block;margin:auto;height:100%;"><path d="M2 8 L8 2 M5 8 L8 5" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>';
 
     let menuBtn = null;
@@ -1617,14 +1620,14 @@ import * as Modals from './modalManager.js';
     if (kind === 'text') {
       const popover = document.createElement('div');
       popover.className = 'pdf-annotation-text-menu';
-      popover.style.cssText = `position:absolute;bottom:${OFF + HS + 4}px;left:${OFF}px;display:none;background:#fff;border:1px solid var(--accent, var(--red));border-radius:4px;padding:6px 8px;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;flex-direction:column;align-items:stretch;gap:6px;font-size:10px;color:#222;white-space:nowrap;`;
+      popover.style.cssText = `position:absolute;bottom:${OFF + HS + 4}px;left:${OFF}px;display:none;background:#fff;border:1px solid var(--accent, var(--red));border-radius:2px;padding:6px 8px;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);z-index:10;flex-direction:column;align-items:stretch;gap:6px;font-size:10px;color:#222;white-space:nowrap;`;
       popover.innerHTML = `
         <div style="display:flex;align-items:center;gap:6px;">
           <span>Line spacing</span>
           <input type="range" min="1" max="3" step="0.05" value="${ann.lineHeight || 1.3}" style="width:90px;accent-color:var(--accent, var(--red));" />
-          <input type="number" class="lh-val" min="0.5" max="5" step="0.01" value="${(ann.lineHeight || 1.3).toFixed(2)}" style="width:54px;font-size:10px;padding:1px 7px 1px 3px;border:1px solid var(--accent, var(--red));border-radius:3px;text-align:right;accent-color:var(--accent, var(--red));" />
+          <input type="number" class="lh-val" min="0.5" max="5" step="0.01" value="${(ann.lineHeight || 1.3).toFixed(2)}" style="width:54px;font-size:10px;padding:1px 7px 1px 3px;border:1px solid var(--accent, var(--red));border-radius:2px;text-align:right;accent-color:var(--accent, var(--red));" />
         </div>
-        <button type="button" class="pdf-ann-today" style="height:22px;padding:0 7px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 55%, transparent);background:color-mix(in srgb, var(--accent, var(--red)) 10%, transparent);color:var(--accent, var(--red));border-radius:4px;cursor:pointer;font-size:10px;font-family:inherit;text-align:left;">Today</button>
+        <button type="button" class="pdf-ann-today" style="height:22px;padding:0 7px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 55%, transparent);background:color-mix(in srgb, var(--accent, var(--red)) 10%, transparent);color:var(--accent, var(--red));border-radius:2px;cursor:pointer;font-size:10px;font-family:inherit;text-align:left;">Today</button>
       `;
       const slider = popover.querySelector('input[type="range"]');
       const valInput = popover.querySelector('.lh-val');
@@ -2478,7 +2481,7 @@ import * as Modals from './modalManager.js';
     // Create the editor pane
     const pane = document.createElement('div');
     pane.id = 'doc-editor-pane';
-    pane.className = 'doc-editor-pane';
+    pane.className = 'doc-editor-pane tile-window';
     // ── Mobile: make toolbar/footer buttons work on the FIRST tap with the
     // keyboard up ──
     // Normally a tap while the keyboard is open is eaten by the OS keyboard
@@ -2512,7 +2515,7 @@ import * as Modals from './modalManager.js';
     pane.innerHTML = `
       <input type="hidden" id="doc-title-input" value="" />
       <div class="doc-mobile-grabber" id="doc-mobile-grabber" aria-hidden="true"></div>
-      <div class="doc-editor-header" id="doc-editor-actions">
+      <div class="doc-editor-header modal-header" id="doc-editor-actions">
         <button id="doc-undo-btn" class="doc-action-icon-btn" title="Undo (Ctrl+Z)" style="gap:4px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span style="font-size:11px;">Undo</span></button>
         <button id="doc-header-preview-btn" class="doc-action-icon-btn" title="Run / Preview" style="display:none;opacity:0.85;gap:4px;"></button>
         <span id="doc-stream-indicator" class="doc-stream-indicator" style="display:none"><span class="doc-stream-dot"></span> editing</span>
@@ -2586,6 +2589,7 @@ import * as Modals from './modalManager.js';
         </div>
         <button type="button" class="md-scroll-arrow md-scroll-left" id="md-scroll-left" title="Scroll left" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
         <button type="button" class="md-scroll-arrow md-scroll-right" id="md-scroll-right" title="Scroll right" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+        <button type="button" class="md-toolbar-undock-btn doc-action-icon-btn" id="md-toolbar-undock-btn" title="Undock as palette window" aria-label="Undock format toolbar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 17h7M17.5 14v6"/></svg></button>
       </div>
       <div id="doc-find-bar" class="doc-find-bar" style="display:none">
         <input id="doc-find-input" class="doc-find-input" type="text" placeholder="Find..." />
@@ -2603,7 +2607,7 @@ import * as Modals from './modalManager.js';
       <div id="doc-csv-preview" class="doc-csv-preview" style="display:none"></div>
       <iframe id="doc-html-preview" class="doc-html-preview" sandbox="allow-scripts allow-modals" style="display:none"></iframe>
       <div id="doc-pdf-view" style="display:none;width:100%;flex:1;min-height:0;overflow:auto;background:#525659;padding:20px 0;position:relative;">
-        <div id="doc-pdf-save-pill" style="display:none;position:absolute;top:8px;right:14px;padding:4px 10px;border-radius:12px;font-size:11px;z-index:5;pointer-events:none;background:transparent;color:transparent;"></div>
+        <div id="doc-pdf-save-pill" style="display:none;position:absolute;top:8px;right:14px;padding:4px 10px;border-radius:2px;font-size:11px;z-index:5;pointer-events:none;background:transparent;color:transparent;"></div>
       </div>
       <!-- Action footer sits AFTER all the content/preview panes so it stays
            pinned to the bottom no matter which pane (editor / md-preview /
@@ -2614,12 +2618,12 @@ import * as Modals from './modalManager.js';
           <button type="button" id="doc-footer-export-btn" class="doc-split-btn doc-split-caret" title="Export as…" aria-label="Export options"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></button>
         </span>
       </div>
-      <div id="doc-version-panel" class="doc-version-panel hidden">
-        <div class="doc-version-header">
+      <div id="doc-version-panel" class="doc-version-panel tile-window hidden" data-tile-window="1">
+        <div class="doc-version-header doc-version-panel-header modal-header tile-window-header">
           <span>Version History</span>
           <button id="doc-version-close" class="doc-action-icon-btn" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
-        <div id="doc-version-list" class="doc-version-list"></div>
+        <div id="doc-version-list" class="doc-version-list tile-window-content"></div>
       </div>
       <div id="doc-mobile-footer" class="doc-mobile-footer">
         <button id="doc-mobile-close" class="doc-mobile-footer-btn" type="button">Unlink</button>
@@ -2703,6 +2707,9 @@ import * as Modals from './modalManager.js';
         pane.style.opacity = '';
       }, { once: true });
     });
+
+    _wireDocTileWindow(pane);
+    _wireMdToolbarUndock(pane);
 
     // Wire up divider drag to resize
     initDividerDrag(divider, pane, isRight);
@@ -6381,7 +6388,7 @@ import * as Modals from './modalManager.js';
     if (!_docTabMenu) {
       _docTabMenu = document.createElement('div');
       _docTabMenu.className = 'doc-tab-dropdown';
-      _docTabMenu.style.cssText = 'position:fixed;z-index:1000;min-width:0;width:max-content;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);backdrop-filter:blur(12px);font-size:12px;display:none;';
+      _docTabMenu.style.cssText = 'position:fixed;z-index:1000;min-width:0;width:max-content;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:2px;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);backdrop-filter:blur(12px);font-size:12px;display:none;';
       document.body.appendChild(_docTabMenu);
       // Close on outside click
       document.addEventListener('click', (e) => {
@@ -6917,6 +6924,77 @@ import * as Modals from './modalManager.js';
     }
   }
 
+  /** Wire desktop drag / dock / tile snap for the doc editor pane. */
+  function _wireDocTileWindow(pane) {
+    if (!pane || pane.dataset.windowDragWired === '1') return;
+    const header = pane.querySelector('#doc-editor-actions, .doc-editor-header, .modal-header');
+    if (!header) return;
+    pane.dataset.windowDragWired = '1';
+    markTileWindow(pane, { content: pane });
+    makeWindowDraggable(pane, {
+      content: pane,
+      header,
+      fsClass: 'doc-fullscreen',
+      skipSelector: 'button, input, select, textarea, label, .doc-mobile-grabber',
+      enableDock: true,
+      enableLeftDock: true,
+      onEnterFullscreen: () => {
+        const container = document.getElementById('chat-container');
+        pane.classList.add('doc-fullscreen');
+        if (container) container.style.display = 'none';
+        snapModalToZone(pane, { name: 'fullscreen' });
+      },
+      onExitFullscreen: (cx, cy) => {
+        const container = document.getElementById('chat-container');
+        pane.classList.remove('doc-fullscreen');
+        if (container) container.style.display = '';
+        if (typeof cx === 'number' && typeof cy === 'number') {
+          const w = pane.offsetWidth || 480;
+          const h = pane.offsetHeight || 560;
+          pane.style.position = 'fixed';
+          pane.style.left = `${Math.max(0, cx - w / 2)}px`;
+          pane.style.top = `${Math.max(0, cy - 24)}px`;
+          pane.style.width = `${w}px`;
+          pane.style.height = `${h}px`;
+          pane.style.right = 'auto';
+          pane.style.bottom = 'auto';
+          pane.style.maxWidth = 'none';
+          pane.style.zIndex = '160';
+        }
+      },
+    });
+  }
+
+  /** Opt-in undock of the markdown format toolbar into a tiled palette. */
+  function _wireMdToolbarUndock(pane) {
+    const toolbar = pane?.querySelector?.('#doc-md-toolbar') || document.getElementById('doc-md-toolbar');
+    const btn = pane?.querySelector?.('#md-toolbar-undock-btn') || document.getElementById('md-toolbar-undock-btn');
+    if (!toolbar || !btn || btn.dataset.undockWired === '1') return;
+    btn.dataset.undockWired = '1';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.innerWidth <= 768) return;
+      undockToolbarAsWindow(toolbar, {
+        id: 'doc-md-toolbar',
+        title: 'Format',
+        preferredZone: 'right-half',
+        host: pane,
+      });
+    });
+    const tryRestore = () => {
+      if (toolbar.style.display === 'none') return;
+      restoreToolbarUndockIfNeeded(toolbar, {
+        id: 'doc-md-toolbar',
+        title: 'Format',
+        preferredZone: 'right-half',
+        host: pane,
+      });
+    };
+    requestAnimationFrame(tryRestore);
+    setTimeout(tryRestore, 400);
+  }
+
   /** Toggle fullscreen on doc editor pane */
   function toggleFullscreen() {
     const pane = document.getElementById('doc-editor-pane');
@@ -6927,12 +7005,17 @@ import * as Modals from './modalManager.js';
     // `body:has(.doc-editor-pane.doc-fullscreen) .doc-divider-collapse` slides
     // it into a forced-inside position). Hiding the divider here would hide
     // the chevron with it.
-    if (pane.classList.contains('doc-fullscreen')) {
+    if (pane.classList.contains('doc-fullscreen') || pane.dataset._tileZone === 'fullscreen') {
       pane.classList.remove('doc-fullscreen');
       if (container) container.style.display = '';
+      ['position', 'left', 'top', 'right', 'bottom', 'width', 'max-width', 'height',
+        'max-height', 'margin', 'transform', 'z-index'].forEach((p) => pane.style.removeProperty(p));
+      delete pane.dataset._tileZone;
+      delete pane.dataset._preSnap;
     } else {
       pane.classList.add('doc-fullscreen');
       if (container) container.style.display = 'none';
+      if (window.innerWidth > 768) snapModalToZone(pane, { name: 'fullscreen' });
     }
     // Re-check md toolbar overflow after layout change
     const mdToolbar = document.getElementById('doc-md-toolbar');
@@ -7768,6 +7851,36 @@ import * as Modals from './modalManager.js';
     }
   }
 
+  /** Wire desktop drag / tile for the version history companion panel. */
+  function _wireVersionTileWindow(panel) {
+    if (!panel || panel.dataset.windowDragWired === '1') return;
+    const header = panel.querySelector('.doc-version-header, .doc-version-panel-header');
+    if (!header) return;
+    panel.dataset.windowDragWired = '1';
+    markTileWindow(panel, { content: panel });
+    makeWindowDraggable(panel, {
+      content: panel,
+      header,
+      skipSelector: 'button, input, select, textarea, label',
+      enableDock: true,
+      enableLeftDock: true,
+      onEnterFullscreen: () => snapModalToZone(panel, { name: 'fullscreen' }),
+      onExitFullscreen: (cx, cy) => {
+        const w = panel.offsetWidth || 320;
+        const h = panel.offsetHeight || 420;
+        panel.style.position = 'fixed';
+        panel.style.left = `${Math.max(0, (cx || window.innerWidth / 2) - w / 2)}px`;
+        panel.style.top = `${Math.max(0, (cy || 80) - 20)}px`;
+        panel.style.width = `${w}px`;
+        panel.style.height = `${h}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.maxWidth = 'none';
+        panel.style.zIndex = '180';
+      },
+    });
+  }
+
   /** Toggle version history panel */
   let _versionClickOutside = null;
   let _versionSavedContent = null;  // stash current content for preview/revert
@@ -7780,26 +7893,7 @@ import * as Modals from './modalManager.js';
       const ta = document.getElementById('doc-editor-textarea');
       _versionSavedContent = ta ? ta.value : null;
 
-      // Position next to sidebar on desktop
-      const sidebar = document.getElementById('sidebar');
       const isMobile = window.innerWidth <= 768;
-      if (!isMobile && sidebar) {
-        const sidebarRight = sidebar.classList.contains('right-side');
-        const collapsed = document.body.classList.contains('sidebar-collapsed');
-        if (sidebarRight || collapsed) {
-          panel.style.left = '0';
-          panel.style.right = 'auto';
-        } else {
-          panel.style.left = sidebar.offsetWidth + 'px';
-          panel.style.right = 'auto';
-        }
-      } else if (isMobile) {
-        // Clear any stale inline positioning from a prior desktop open so the
-        // mobile bottom-sheet (CSS) isn't pushed off-screen.
-        panel.style.left = '';
-        panel.style.right = '';
-        panel.style.top = '';
-      }
 
       // Move panel to body so it's not clipped by doc pane overflow
       if (panel.parentElement !== document.body) {
@@ -7807,8 +7901,20 @@ import * as Modals from './modalManager.js';
       }
 
       panel.classList.remove('hidden');
+      if (!isMobile) {
+        _wireVersionTileWindow(panel);
+        // Default open as right-half tile companion
+        snapModalToZone(panel, { name: 'right-half' });
+      } else {
+        // Clear any stale inline positioning from a prior desktop open so the
+        // mobile bottom-sheet (CSS) isn't pushed off-screen.
+        panel.style.left = '';
+        panel.style.right = '';
+        panel.style.top = '';
+      }
+
       await loadVersionHistory();
-      // Close on click outside
+      // Close on click outside (skip while dragging tile chrome)
       setTimeout(() => {
         _versionClickOutside = (e) => {
           if (!panel.contains(e.target) && e.target.id !== 'doc-version-badge') {
@@ -7824,7 +7930,11 @@ import * as Modals from './modalManager.js';
 
   function _closeVersionPanel() {
     const panel = document.getElementById('doc-version-panel');
-    if (panel) panel.classList.add('hidden');
+    if (panel) {
+      panel.classList.add('hidden');
+      delete panel.dataset._tileZone;
+      delete panel.dataset._preSnap;
+    }
     // Restore to latest (stashed) content
     if (_versionSavedContent !== null) {
       const ta = document.getElementById('doc-editor-textarea');

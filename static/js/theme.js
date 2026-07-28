@@ -8,7 +8,53 @@ import { hexToRgb } from './color/hex.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
+// Protesilaos Modus themes — https://protesilaos.com/emacs/modus-themes-colors (CC0)
+// App `red` is the UI accent/brand token; true palette red lives in accentError.
+const _MODUS_OPERANDI_TINTED = {
+  bg: '#fbf7f0', fg: '#000000', panel: '#efe9dd', border: '#9f9690', red: '#0031a9',
+  advanced: {
+    accentPrimary: '#0031a9', accentWarm: '#6d5000', accentError: '#a60000',
+    brandColor: '#0031a9', sendBtnBg: '#0031a9', sendBtnHover: '#3546c2',
+    toggleActive: '#0031a9', inputBg: '#fbf7f0', codeBg: '#efe9dd', codeFg: '#000000',
+  },
+};
+
 export const THEMES = {
+  'modus-operandi': {
+    bg: '#ffffff', fg: '#000000', panel: '#f2f2f2', border: '#9f9f9f', red: '#0031a9',
+    advanced: {
+      accentPrimary: '#0031a9', accentWarm: '#6f5500', accentError: '#a60000',
+      brandColor: '#0031a9', sendBtnBg: '#0031a9', sendBtnHover: '#3548cf',
+      toggleActive: '#0031a9', inputBg: '#ffffff', codeBg: '#f2f2f2', codeFg: '#000000',
+    },
+  },
+  'modus-operandi-tinted': _MODUS_OPERANDI_TINTED,
+  // Legacy alias — same object as tinted; hidden from the picker swatch grid.
+  modus: _MODUS_OPERANDI_TINTED,
+  'modus-vivendi': {
+    bg: '#000000', fg: '#ffffff', panel: '#1e1e1e', border: '#646464', red: '#2fafff',
+    advanced: {
+      accentPrimary: '#2fafff', accentWarm: '#d0bc00', accentError: '#ff5f59',
+      brandColor: '#2fafff', sendBtnBg: '#2fafff', sendBtnHover: '#79a8ff',
+      toggleActive: '#2fafff', inputBg: '#000000', codeBg: '#1e1e1e', codeFg: '#ffffff',
+    },
+  },
+  'modus-vivendi-tinted': {
+    bg: '#0d0e1c', fg: '#ffffff', panel: '#1d2235', border: '#61647a', red: '#2fafff',
+    advanced: {
+      accentPrimary: '#2fafff', accentWarm: '#d0bc00', accentError: '#ff5f59',
+      brandColor: '#2fafff', sendBtnBg: '#2fafff', sendBtnHover: '#79a8ff',
+      toggleActive: '#2fafff', inputBg: '#0d0e1c', codeBg: '#1d2235', codeFg: '#ffffff',
+    },
+  },
+  'doom-one': {
+    bg: '#282c34', fg: '#bbc2cf', panel: '#21242b', border: '#3f444a', red: '#51afef',
+    advanced: {
+      accentPrimary: '#51afef', accentWarm: '#ECBE7B', accentError: '#ff6c6b',
+      brandColor: '#51afef', sendBtnBg: '#51afef', sendBtnHover: '#2257A0',
+      toggleActive: '#51afef', inputBg: '#21242b', codeBg: '#21242b', codeFg: '#bbc2cf',
+    },
+  },
   dark:       { bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', red:'#e06c75' },
   light:      { bg:'#f0ebe3', fg:'#5a5248', panel:'#faf6f0', border:'#d4cdc2', red:'#c47d5a' },
   midnight:   { bg:'#0d1117', fg:'#c9d1d9', panel:'#161b22', border:'#30363d', red:'#f85149' },
@@ -31,14 +77,45 @@ export const THEMES = {
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
 };
 
-const DEFAULT_THEME = 'dark';
-const LS_KEY = 'odysseus-theme';
+export const DEFAULT_THEME = 'modus-operandi-tinted';
+// Canonical key is Storage.KEYS.THEME ('nobody-theme'); legacy odysseus-/oculus-
+// theme keys are migrated on read and cleared on write/remove.
+const LS_KEY = Storage.KEYS.THEME;
 const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
+// Alias keys that resolve in THEMES but are omitted from the swatch grid.
+const THEME_ALIAS_KEYS = new Set(['modus']);
+
+const THEME_LABELS = {
+  dark: 'odysseus',
+  gpt: 'GPT',
+  'modus-operandi': 'Operandi',
+  'modus-operandi-tinted': 'Operandi Tinted',
+  'modus-vivendi': 'Vivendi',
+  'modus-vivendi-tinted': 'Vivendi Tinted',
+};
 
 const FONT_MAP = {
-  mono: "'Fira Code', monospace",
+  // Monospace
+  mono: "'Iosevka', monospace",
+  fira: "'Fira Code', monospace",
+  jetbrains: "'JetBrains Mono', monospace",
+  'roboto-mono': "'Roboto Mono', monospace",
+  // Sans-serif
+  'ibm-plex': "'IBM Plex Sans', system-ui, sans-serif",
+  'source-sans': "'Source Sans 3', system-ui, sans-serif",
+  atkinson: "'Atkinson Hyperlegible', system-ui, sans-serif",
+  manrope: "'Manrope', system-ui, sans-serif",
+  'space-grotesk': "'Space Grotesk', system-ui, sans-serif",
+  outfit: "'Outfit', system-ui, sans-serif",
   sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-  serif: "Georgia, 'Times New Roman', serif",
+  // Serif
+  literata: "'Literata', Georgia, serif",
+  'source-serif': "'Source Serif 4', Georgia, serif",
+  lora: "'Lora', Georgia, serif",
+  newsreader: "'Newsreader', Georgia, serif",
+  fraunces: "'Fraunces', Georgia, serif",
+  // Legacy alias (pre-expansion Georgia option)
+  serif: "'Literata', Georgia, serif",
 };
 const DEFAULT_FONT = 'mono';
 const DEFAULT_DENSITY = 'comfortable';
@@ -46,18 +123,24 @@ const MAX_CUSTOM_THEMES = 8;
 
 // Default background patterns for built-in themes
 const THEME_DEFAULT_PATTERN = {
-  dark:       'none',
-  light:      'dots',
-  midnight:   'rain',
-  paper:      'dots',
-  cyberpunk:  'synapse',
-  retrowave:  'embers',
-  forest:     'petals',
-  ocean:      'constellations',
-  terminal:   'perlin-flow',
-  organs:     'rain',
-  ume:        'petals',
-  cute:       'sparkles',
+  modus:                   'dots',
+  'modus-operandi':        'dots',
+  'modus-operandi-tinted': 'dots',
+  'modus-vivendi':         'none',
+  'modus-vivendi-tinted':  'none',
+  'doom-one':              'none',
+  dark:                    'none',
+  light:                   'dots',
+  midnight:                'rain',
+  paper:                   'dots',
+  cyberpunk:               'synapse',
+  retrowave:               'embers',
+  forest:                  'petals',
+  ocean:                   'constellations',
+  terminal:                'perlin-flow',
+  organs:                  'rain',
+  ume:                     'petals',
+  cute:                    'sparkles',
 };
 
 // Default effect colors for specific themes (overrides --fg)
@@ -102,6 +185,7 @@ export function saveCustomTheme(name, colors, opts) {
     if (opts.bgEffectIntensity !== undefined) entry.bgEffectIntensity = opts.bgEffectIntensity;
     if (opts.bgEffectSize !== undefined) entry.bgEffectSize = opts.bgEffectSize;
     if (opts.frosted !== undefined) entry.frosted = !!opts.frosted;
+    if (opts.glass !== undefined) entry.glass = !!opts.glass;
   }
   ct[name] = entry;
   _saveCustomThemes(ct);
@@ -283,6 +367,7 @@ function generateHarmonyColors(accentHex, harmonyType, mode) {
 }
 
 export function applyColors(colors) {
+  if (!colors || !colors.bg) return;
   const s = document.documentElement.style;
   s.setProperty('--bg', colors.bg);
   s.setProperty('--fg', colors.fg);
@@ -329,7 +414,7 @@ export function applyColors(colors) {
 
 // Per-route SVG shape registry — kept in sync with the inline favicon
 // script in index.html so a theme change keeps the route icon, not the
-// default boat. Returns the inner SVG markup colored with `fg`.
+// default brand eye. Returns the inner SVG markup colored with `fg`.
 const _ROUTE_FAVICON_SHAPES = {
   '/calendar':
     "<rect x='4' y='6' width='24' height='22' rx='2' fill='none' stroke='__C__' stroke-width='2.5'/>" +
@@ -372,7 +457,7 @@ function _updateFavicon(fg) {
   if (routeShape) {
     svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(fg)}</svg>`;
   } else {
-    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 4L16 22L6 22Z' fill='${fg}'/><path d='M16 8L16 22L24 22Z' fill='${fg}' opacity='0.6'/><path d='M4 24Q10 20 16 24Q22 28 28 24' stroke='${fg}' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>`;
+    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2.5 16C7 7.5 12.5 4.5 16 4.5s9 3 13.5 11.5C25 24.5 19.5 27.5 16 27.5S7 24.5 2.5 16z' fill='none' stroke='${fg}' stroke-width='2' stroke-linejoin='round'/><circle cx='16' cy='16' r='6.2' fill='none' stroke='${fg}' stroke-width='1.4'/><circle cx='16' cy='16' r='4' fill='${fg}'/><path d='M16 13.15c1.65.04 2.95 1.2 2.95 2.4 0 1.55-1.4 2.2-2.65 2.2-1.15 0-2.05-.55-2.05-1.4 0-.8.7-1.2 1.4-1.2.55 0 1 .28 1 .72' fill='none' stroke='#06060c' stroke-width='1.1' stroke-linecap='round'/><circle cx='16' cy='16' r='0.85' fill='#06060c'/></svg>`;
   }
   const href = 'data:image/svg+xml,' + encodeURIComponent(svg);
   let link = document.querySelector("link[rel='icon']");
@@ -420,6 +505,10 @@ export function applyFontDensity(font, density) {
   }
   if (!family) family = FONT_MAP[DEFAULT_FONT];
   document.documentElement.style.setProperty('--font-family', family);
+  // Hint for CSS: mono theme fonts are narrower; proportional ones wrap on reading surfaces.
+  const monoKeys = new Set(['mono', 'fira', 'jetbrains', 'roboto-mono']);
+  document.documentElement.dataset.fontKind = monoKeys.has(f) ? 'mono' : 'proportional';
+  document.documentElement.dataset.themeFont = f;
   document.documentElement.classList.remove('density-compact', 'density-spacious');
   if (d !== 'comfortable') document.documentElement.classList.add('density-' + d);
 }
@@ -427,13 +516,24 @@ export function applyFontDensity(font, density) {
 const _BG_CLASSES = ['bg-pattern-dots',
   'bg-pattern-synapse', 'bg-pattern-rain', 'bg-pattern-constellations',
   'bg-pattern-perlin-flow',
-  'bg-pattern-petals', 'bg-pattern-sparkles', 'bg-pattern-embers'];
-const _CANVAS_PATTERNS = { synapse: _initSynapse, rain: _initRain, constellations: _initConstellations,
+  'bg-pattern-petals', 'bg-pattern-sparkles', 'bg-pattern-embers',
+  'bg-pattern-fireflies', 'bg-pattern-aurora', 'bg-pattern-paper-grain',
+  'bg-pattern-ripple', 'bg-pattern-drift-grid', 'bg-pattern-orbit-rings',
+  'bg-pattern-fog'];
+const _CANVAS_PATTERNS = {
+  synapse: _initSynapse, rain: _initRain, constellations: _initConstellations,
   'perlin-flow': _initPerlinFlow,
-  petals: _initPetals, sparkles: _initSparkles, embers: _initEmbers };
+  petals: _initPetals, sparkles: _initSparkles, embers: _initEmbers,
+  fireflies: _initFireflies, aurora: _initAurora, 'paper-grain': _initPaperGrain,
+  ripple: _initRipple, 'drift-grid': _initDriftGrid, 'orbit-rings': _initOrbitRings,
+  fog: _initFog,
+};
 
 export function applyBgEffectColor(color) {
-  document.documentElement.style.setProperty('--bg-effect-color', color || '');
+  // Empty must remove the property — setting '' still counts as "set", so CSS
+  // `var(--bg-effect-color, var(--fg))` would not fall back to --fg (breaks dots).
+  if (color) document.documentElement.style.setProperty('--bg-effect-color', color);
+  else document.documentElement.style.removeProperty('--bg-effect-color');
 }
 
 export function applyBgEffectIntensity(v) {
@@ -452,7 +552,7 @@ export function applyBgEffectSize(v) {
  *  treatment to every panel, sidebar, modal, dropdown, and popover via CSS
  *  rules scoped to `body.theme-frosted`. */
 export function applyFrostedGlass(on) {
-  document.body.classList.toggle('theme-frosted', !!on);
+  if (document.body) document.body.classList.toggle('theme-frosted', !!on);
   const s = document.documentElement.style;
   if (on) {
     s.setProperty('--project-glass-bg', 'color-mix(in srgb, var(--panel) 16%, transparent)');
@@ -463,23 +563,34 @@ export function applyFrostedGlass(on) {
   }
 }
 
-// Read current size multiplier for JS effects (canvas-based).
+/** Opt-in translucent window shells so theme bg effects show through.
+ *  Scoped to `body.theme-glass` — off by default (backdrop-filter is costly). */
+export function applyGlassWindows(on) {
+  if (document.body) document.body.classList.toggle('theme-glass', !!on);
+}
+
+// Read current size / intensity for JS effects (canvas-based).
 function _getEffectSize() {
   const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bg-effect-size'));
   return isNaN(v) ? 1 : v;
 }
+function _getEffectIntensity() {
+  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bg-effect-intensity'));
+  return isNaN(v) ? 1 : Math.max(0, Math.min(1, v));
+}
 
-// Patterns where the intensity/size sliders have no visible effect.
-const _STATIC_PATTERNS = new Set(['none', 'dots']);
+// Patterns with no intensity/size controls (solid only).
+const _STATIC_PATTERNS = new Set(['none']);
 
 export function applyBgPattern(pattern) {
   const p = pattern || 'none';
+  if (!document.body) return;
   document.body.classList.remove(..._BG_CLASSES);
-  // Clean up any canvas backgrounds
-  document.querySelectorAll('#synapse-canvas, #rain-canvas, #constellations-canvas, #perlin-flow-canvas, #petals-canvas, #sparkles-canvas, #embers-canvas').forEach(c => c.remove());
+  // Clean up any canvas backgrounds — detached canvases must stop via contains() check
+  document.querySelectorAll('canvas[data-bg-effect]').forEach(c => c.remove());
   if (p !== 'none') document.body.classList.add('bg-pattern-' + p);
   if (_CANVAS_PATTERNS[p]) _CANVAS_PATTERNS[p]();
-  // Hide sliders that do nothing on static patterns.
+  // Hide sliders that do nothing on solid background.
   const hide = _STATIC_PATTERNS.has(p);
   const ig = document.getElementById('theme-bg-intensity-group');
   const sg = document.getElementById('theme-bg-size-group');
@@ -487,12 +598,29 @@ export function applyBgPattern(pattern) {
   if (sg) sg.style.display = hide ? 'none' : '';
 }
 
-export function getSaved() {
-  const obj = Storage.getJSON(LS_KEY, null);
+function _migrateThemeName(obj) {
+  if (!obj || !obj.name) return obj;
   // Migration: 'chatgpt' preset was renamed to 'gpt'
-  if (obj && obj.name === 'chatgpt') obj.name = 'gpt';
+  if (obj.name === 'chatgpt') obj.name = 'gpt';
   // Migration: 'sakura' preset was renamed to 'ume'
-  if (obj && obj.name === 'sakura') obj.name = 'ume';
+  if (obj.name === 'sakura') obj.name = 'ume';
+  // Migration: legacy 'modus' → canonical Modus Operandi Tinted
+  if (obj.name === 'modus') {
+    obj.name = 'modus-operandi-tinted';
+    if (THEMES['modus-operandi-tinted']) obj.colors = THEMES['modus-operandi-tinted'];
+  }
+  return obj;
+}
+
+export function getSaved() {
+  const raw = Storage.getJSON(LS_KEY, null);
+  if (!raw) return null;
+  const prevName = raw.name;
+  const obj = _migrateThemeName({ ...raw, colors: raw.colors });
+  // Persist rename so the picker highlights the canonical swatch.
+  if (obj && obj.name && obj.name !== prevName) {
+    Storage.setJSON(LS_KEY, obj);
+  }
   return obj;
 }
 
@@ -506,6 +634,7 @@ export function save(name, colors, opts) {
     if (opts.bgEffectIntensity !== undefined && opts.bgEffectIntensity !== 1) obj.bgEffectIntensity = opts.bgEffectIntensity;
     if (opts.bgEffectSize !== undefined && opts.bgEffectSize !== 1) obj.bgEffectSize = opts.bgEffectSize;
     if (opts.frosted) obj.frosted = true;
+    if (opts.glass) obj.glass = true;
   }
   Storage.setJSON(LS_KEY, obj);
   _syncToServer(obj);
@@ -532,11 +661,12 @@ async function _loadFromServer() {
 
 
 function syncPickers(colors) {
-  document.getElementById('clr-bg').value = colors.bg;
-  document.getElementById('clr-fg').value = colors.fg;
-  document.getElementById('clr-panel').value = colors.panel;
-  document.getElementById('clr-border').value = colors.border;
-  document.getElementById('clr-red').value = colors.red;
+  if (!colors) return;
+  const map = { bg: 'clr-bg', fg: 'clr-fg', panel: 'clr-panel', border: 'clr-border', red: 'clr-red' };
+  for (const [key, id] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    if (el && colors[key]) el.value = colors[key];
+  }
   syncAdvancedPickers(colors);
 }
 
@@ -668,8 +798,10 @@ export function initThemeUI() {
   const activeName = saved ? saved.name : DEFAULT_THEME;
   const customThemes = _loadCustomThemes();
 
-  // Render preset swatches
-  grid.innerHTML = Object.entries(THEMES).map(([name, c]) => `
+  // Render preset swatches (skip alias keys so Modus tinted isn't duplicated)
+  grid.innerHTML = Object.entries(THEMES)
+    .filter(([name]) => !THEME_ALIAS_KEYS.has(name))
+    .map(([name, c]) => `
     <div class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}">
       <div class="theme-swatch-colors">
         <span style="background:${c.bg}"></span>
@@ -677,7 +809,7 @@ export function initThemeUI() {
         <span style="background:${c.fg}"></span>
         <span style="background:${c.red}"></span>
       </div>
-      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name)}
+      ${THEME_LABELS[name] || name}
     </div>
   `).join('');
 
@@ -720,6 +852,8 @@ export function initThemeUI() {
     if (sz) opts.bgEffectSize = parseFloat(sz.value) / 100;
     const fr = document.getElementById('theme-frosted-toggle');
     if (fr) opts.frosted = !!fr.checked;
+    const gl = document.getElementById('theme-glass-toggle');
+    if (gl) opts.glass = !!gl.checked;
     return opts;
   }
   function _saveFull(name, colors) { save(name, colors, _getOpts()); }
@@ -748,11 +882,13 @@ export function initThemeUI() {
         const fr = (ct && ct.frosted !== undefined)
           ? !!ct.frosted
           : (THEME_DEFAULT_FROSTED[name] === true);
+        const gl = (ct && ct.glass !== undefined) ? !!ct.glass : false;
         applyFontDensity(f, d);
         applyBgEffectColor(ec);
         applyBgEffectIntensity(ei);
         applyBgEffectSize(sz);
         applyFrostedGlass(fr);
+        applyGlassWindows(gl);
         applyBgPattern(p);
         const fs = document.getElementById('theme-font-select');
         const ds = document.getElementById('theme-density-select');
@@ -761,6 +897,7 @@ export function initThemeUI() {
         const eis = document.getElementById('theme-bg-intensity');
         const szs = document.getElementById('theme-bg-size');
         const frs = document.getElementById('theme-frosted-toggle');
+        const gls = document.getElementById('theme-glass-toggle');
         if (fs) fs.value = f;
         if (ds) ds.value = d;
         if (ps) ps.value = p;
@@ -768,7 +905,8 @@ export function initThemeUI() {
         if (eis) eis.value = String(Math.round(ei * 100));
         if (szs) szs.value = String(Math.round(sz * 100));
         if (frs) frs.checked = fr;
-        save(name, colors, { font: f, density: d, bgPattern: p, bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, frosted: fr });
+        if (gls) gls.checked = gl;
+        save(name, colors, { font: f, density: d, bgPattern: p, bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, frosted: fr, glass: gl });
       });
     });
     g.querySelectorAll('.theme-delete-btn').forEach(btn => {
@@ -966,19 +1104,41 @@ export function initThemeUI() {
     newReset.addEventListener('click', () => {
       Storage.remove(LS_KEY);
       const colors = THEMES[DEFAULT_THEME];
+      const defaultPattern = THEME_DEFAULT_PATTERN[DEFAULT_THEME] || 'none';
+      // Persist + sync so the next load (and other devices) keep Modus instead
+      // of re-hydrating a stale server theme after localStorage was cleared.
+      save(DEFAULT_THEME, colors, {
+        font: DEFAULT_FONT,
+        density: DEFAULT_DENSITY,
+        bgPattern: defaultPattern,
+        bgEffectColor: THEME_DEFAULT_EFFECT_COLOR[DEFAULT_THEME] || '',
+        bgEffectIntensity: THEME_DEFAULT_INTENSITY[DEFAULT_THEME] ?? 1,
+        bgEffectSize: 1,
+        frosted: THEME_DEFAULT_FROSTED[DEFAULT_THEME] === true,
+        glass: false,
+      });
       applyColors(colors);
       syncPickers(colors);
       applyFontDensity(DEFAULT_FONT, DEFAULT_DENSITY);
-      applyBgPattern('none');
+      applyBgEffectColor(THEME_DEFAULT_EFFECT_COLOR[DEFAULT_THEME] || '');
+      applyBgEffectIntensity(THEME_DEFAULT_INTENSITY[DEFAULT_THEME] ?? 1);
+      applyBgEffectSize(1);
+      applyFrostedGlass(THEME_DEFAULT_FROSTED[DEFAULT_THEME] === true);
+      applyGlassWindows(false);
+      applyBgPattern(defaultPattern);
       const fs = document.getElementById('theme-font-select');
       const ds = document.getElementById('theme-density-select');
       const ps = document.getElementById('theme-bg-pattern-select');
+      const frs = document.getElementById('theme-frosted-toggle');
+      const gls = document.getElementById('theme-glass-toggle');
       if (fs) fs.value = DEFAULT_FONT;
       if (ds) ds.value = DEFAULT_DENSITY;
-      if (ps) ps.value = 'none';
+      if (ps) ps.value = defaultPattern;
+      if (frs) frs.checked = THEME_DEFAULT_FROSTED[DEFAULT_THEME] === true;
+      if (gls) gls.checked = false;
       grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
-      const darkSwatch = grid.querySelector('[data-theme="dark"]');
-      if (darkSwatch) darkSwatch.classList.add('active');
+      const defaultSwatch = grid.querySelector(`[data-theme="${DEFAULT_THEME}"]`);
+      if (defaultSwatch) defaultSwatch.classList.add('active');
     });
   }
 
@@ -1124,20 +1284,28 @@ export function initThemeUI() {
   // Font, density, background pattern controls
   const _initFont = (saved && saved.font) || DEFAULT_FONT;
   const _initDensity = (saved && saved.density) || DEFAULT_DENSITY;
-  const _initPattern = (saved && saved.bgPattern) || (saved && THEME_DEFAULT_PATTERN[saved.name]) || 'none';
-  const _initEffectColor = (saved && saved.bgEffectColor) || (saved && THEME_DEFAULT_EFFECT_COLOR[saved.name]) || '';
+  const _initPattern = (saved && saved.bgPattern)
+    || THEME_DEFAULT_PATTERN[(saved && saved.name) || DEFAULT_THEME]
+    || 'none';
+  const _initEffectColor = (saved && saved.bgEffectColor)
+    || THEME_DEFAULT_EFFECT_COLOR[(saved && saved.name) || DEFAULT_THEME]
+    || '';
   const _initEffectIntensity = (saved && saved.bgEffectIntensity !== undefined)
     ? saved.bgEffectIntensity
-    : (saved && THEME_DEFAULT_INTENSITY[saved.name] !== undefined ? THEME_DEFAULT_INTENSITY[saved.name] : 1);
+    : (THEME_DEFAULT_INTENSITY[(saved && saved.name) || DEFAULT_THEME] !== undefined
+        ? THEME_DEFAULT_INTENSITY[(saved && saved.name) || DEFAULT_THEME]
+        : 1);
   const _initEffectSize = (saved && saved.bgEffectSize !== undefined) ? saved.bgEffectSize : 1;
   const _initFrosted = (saved && saved.frosted !== undefined)
     ? !!saved.frosted
-    : (saved && THEME_DEFAULT_FROSTED[saved.name] === true);
+    : (THEME_DEFAULT_FROSTED[(saved && saved.name) || DEFAULT_THEME] === true);
+  const _initGlass = (saved && saved.glass !== undefined) ? !!saved.glass : false;
   applyFontDensity(_initFont, _initDensity);
   applyBgEffectColor(_initEffectColor);
   applyBgEffectIntensity(_initEffectIntensity);
   applyBgEffectSize(_initEffectSize);
   applyFrostedGlass(_initFrosted);
+  applyGlassWindows(_initGlass);
   applyBgPattern(_initPattern);
 
   const fontSelect = document.getElementById('theme-font-select');
@@ -1219,6 +1387,15 @@ export function initThemeUI() {
     frostedToggle.checked = _initFrosted;
     frostedToggle.addEventListener('change', () => {
       applyFrostedGlass(frostedToggle.checked);
+      const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+    });
+  }
+
+  const glassToggle = document.getElementById('theme-glass-toggle');
+  if (glassToggle) {
+    glassToggle.checked = _initGlass;
+    glassToggle.addEventListener('change', () => {
+      applyGlassWindows(glassToggle.checked);
       const s = getSaved(); if (s) _saveFull(s.name, s.colors);
     });
   }
@@ -1305,7 +1482,7 @@ export function initThemeUI() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'odysseus_' + (obj.name || 'theme') + '.json';
+      a.download = 'nobody_' + (obj.name || 'theme') + '.json';
       a.click();
       URL.revokeObjectURL(url);
       newExp.innerHTML = '&#x2713; Downloaded!';
@@ -1536,12 +1713,58 @@ export function closePopup() {
 // Expose for app.js wiring + AI ui_control
 export function getCustomThemes() { return _loadCustomThemes(); }
 
+// ── Canvas bg-effect lifecycle ──
+// applyBgPattern removes canvases then may re-add the same pattern class before
+// the previous rAF fires. Checking only the class would keep orphaned loops
+// painting detached canvases (memory leak). Always require contains(canvas).
+function _mountBgCanvas(id) {
+  if (document.getElementById(id)) return null;
+  const canvas = document.createElement('canvas');
+  canvas.id = id;
+  canvas.dataset.bgEffect = '1';
+  canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
+  canvas.setAttribute('aria-hidden', 'true');
+  document.body.prepend(canvas);
+  return canvas;
+}
+function _bgEffectColor(fallback) {
+  const s = getComputedStyle(document.documentElement);
+  return s.getPropertyValue('--bg-effect-color').trim()
+    || s.getPropertyValue('--fg').trim()
+    || fallback
+    || '#9cdef2';
+}
+function _bgRgba(hex, a) {
+  const { r, g, b } = hexToRgb(hex) || { r: 0, g: 0, b: 0 };
+  return `rgba(${r},${g},${b},${a})`;
+}
+function _startCanvasLoop(canvas, patternClass, onResize, paint) {
+  let raf = 0;
+  window.addEventListener('resize', onResize);
+  function stop() {
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    window.removeEventListener('resize', onResize);
+  }
+  function loop() {
+    if (!document.body.contains(canvas) || !document.body.classList.contains(patternClass)) {
+      stop();
+      return;
+    }
+    raf = requestAnimationFrame(loop);
+    if (document.hidden) return;
+    paint();
+  }
+  raf = requestAnimationFrame(loop);
+  return stop;
+}
+
 // ── Synapse background effect ──
 // Uses the CSS grid pattern as base, overlays fast-moving small light pulses on grid lines
 function _initSynapse() {
   if (document.getElementById('synapse-canvas')) return;
   const canvas = document.createElement('canvas');
   canvas.id = 'synapse-canvas';
+  canvas.dataset.bgEffect = '1';
   canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
   // Decorative background effect — hide from assistive tech so screen readers
   // don't announce an empty canvas and axe's "region" rule doesn't flag it.
@@ -1564,8 +1787,6 @@ function _initSynapse() {
     cols = Math.ceil(W / GRID); rows = Math.ceil(H / GRID);
   }
   resize();
-  const _onResize = () => resize();
-  window.addEventListener('resize', _onResize);
 
   function getColor() {
     const s = getComputedStyle(document.documentElement);
@@ -1575,38 +1796,26 @@ function _initSynapse() {
   function spawnPulse() {
     const speed = SPEED_MIN + Math.random() * (SPEED_MAX - SPEED_MIN);
     if (Math.random() > 0.5) {
-      // Horizontal — pick a grid row
       const row = Math.floor(Math.random() * (rows + 1));
       pulses.push({ x: -TRAIL_LEN, y: row * GRID, dx: speed, dy: 0 });
     } else {
-      // Vertical — pick a grid column
       const col = Math.floor(Math.random() * (cols + 1));
       pulses.push({ x: col * GRID, y: -TRAIL_LEN, dx: 0, dy: speed });
     }
   }
 
-  function draw() {
-    if (!document.body.classList.contains('bg-pattern-synapse')) {
-      window.removeEventListener('resize', _onResize);
-      canvas.remove();
-      return;
-    }
-    requestAnimationFrame(draw);
+  _startCanvasLoop(canvas, 'bg-pattern-synapse', resize, () => {
     ctx.clearRect(0, 0, W, H);
     const c = getColor();
 
-    // Spawn
     if (pulses.length < MAX_PULSES && Math.random() < 0.12) spawnPulse();
 
-    // Draw pulses as small bright dots with a short trail
     for (let i = pulses.length - 1; i >= 0; i--) {
       const p = pulses[i];
       p.x += p.dx; p.y += p.dy;
 
-      // Off screen — remove
       if (p.x > W + TRAIL_LEN || p.y > H + TRAIL_LEN) { pulses.splice(i, 1); continue; }
 
-      // Trail (line gradient fading behind the dot)
       const tx = p.x - (p.dx > 0 ? TRAIL_LEN : 0);
       const ty = p.y - (p.dy > 0 ? TRAIL_LEN : 0);
       const grad = ctx.createLinearGradient(tx, ty, p.x, p.y);
@@ -1620,7 +1829,6 @@ function _initSynapse() {
       ctx.lineTo(p.x, p.y);
       ctx.stroke();
 
-      // Bright dot at head
       ctx.globalAlpha = 0.55;
       ctx.fillStyle = c;
       ctx.beginPath();
@@ -1629,8 +1837,7 @@ function _initSynapse() {
     }
 
     ctx.globalAlpha = 1;
-  }
-  draw();
+  });
 }
 
 // ── Rain — thin vertical streaks falling ──
@@ -1638,9 +1845,8 @@ function _initRain() {
   if (document.getElementById('rain-canvas')) return;
   const canvas = document.createElement('canvas');
   canvas.id = 'rain-canvas';
+  canvas.dataset.bgEffect = '1';
   canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
-  // Decorative background effect — hide from assistive tech so screen readers
-  // don't announce an empty canvas and axe's "region" rule doesn't flag it.
   canvas.setAttribute('aria-hidden', 'true');
   document.body.prepend(canvas);
   const ctx = canvas.getContext('2d');
@@ -1655,8 +1861,6 @@ function _initRain() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   resize();
-  const _onResize = () => resize();
-  window.addEventListener('resize', _onResize);
 
   function getColor() {
     const s = getComputedStyle(document.documentElement);
@@ -1669,18 +1873,10 @@ function _initRain() {
     drops.push({ x: Math.random() * W, y: -len, len, speed, alpha: 0.32 + Math.random() * 0.28 });
   }
 
-  function draw() {
-    if (!document.body.classList.contains('bg-pattern-rain')) {
-      window.removeEventListener('resize', _onResize);
-      canvas.remove();
-      return;
-    }
-    requestAnimationFrame(draw);
+  _startCanvasLoop(canvas, 'bg-pattern-rain', resize, () => {
     ctx.clearRect(0, 0, W, H);
     const c = getColor();
-    // Intensity also controls rain speed + spawn rate (feels slower/lighter when dim)
-    const intenCss = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bg-effect-intensity'));
-    const inten = isNaN(intenCss) ? 1 : intenCss;
+    const inten = _getEffectIntensity();
     const speedMult = 0.35 + inten * 0.65;
     const sizeMult = _getEffectSize();
 
@@ -1704,26 +1900,41 @@ function _initRain() {
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
-  }
-  draw();
+  });
 }
 
-// ── Constellations — static dots that slowly form/dissolve connecting lines ──
+// ── Constellations — drifting stars whose links form and dissolve by proximity ──
 function _initConstellations() {
   if (document.getElementById('constellations-canvas')) return;
   const canvas = document.createElement('canvas');
   canvas.id = 'constellations-canvas';
+  canvas.dataset.bgEffect = '1';
   canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
-  // Decorative background effect — hide from assistive tech so screen readers
-  // don't announce an empty canvas and axe's "region" rule doesn't flag it.
   canvas.setAttribute('aria-hidden', 'true');
   document.body.prepend(canvas);
   const ctx = canvas.getContext('2d');
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   let W, H;
-  const STAR_COUNT = 50;
-  const CONNECT_DIST = 120;
+  // Original free-drift model: links appear when stars wander near each other
+  // and fade as they drift apart (no clustering / home-pull).
+  const STAR_COUNT = 55;
+  const CONNECT_DIST = 145;
   let stars = [];
+  let t = 0;
+
+  function initStars() {
+    stars = [];
+    for (let i = 0; i < STAR_COUNT; i++) {
+      stars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 0.15,
+        vy: (Math.random() - 0.5) * 0.15,
+        r: 1.1 + Math.random() * 1.1,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+  }
 
   function resize() {
     W = window.innerWidth; H = window.innerHeight;
@@ -1731,58 +1942,34 @@ function _initConstellations() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (stars.length === 0) initStars();
   }
-
-  function initStars() {
-    stars = [];
-    for (let i = 0; i < STAR_COUNT; i++) {
-      stars.push({
-        x: Math.random() * W, y: Math.random() * H,
-        vx: (Math.random() - 0.5) * 0.15,
-        vy: (Math.random() - 0.5) * 0.15,
-        r: 0.8 + Math.random() * 0.8,
-        phase: Math.random() * Math.PI * 2,
-      });
-    }
-  }
-
   resize();
   const _onResize = () => { resize(); initStars(); };
-  window.addEventListener('resize', _onResize);
 
-  function getColor() {
-    const s = getComputedStyle(document.documentElement);
-    return s.getPropertyValue('--bg-effect-color').trim() || s.getPropertyValue('--fg').trim() || '#9cdef2';
-  }
-
-  let t = 0;
-  function draw() {
-    if (!document.body.classList.contains('bg-pattern-constellations')) {
-      window.removeEventListener('resize', _onResize);
-      canvas.remove();
-      return;
-    }
-    requestAnimationFrame(draw);
+  _startCanvasLoop(canvas, 'bg-pattern-constellations', _onResize, () => {
     t += 0.01;
     ctx.clearRect(0, 0, W, H);
-    const c = getColor();
+    const c = _bgEffectColor();
+    const sz = Math.max(0.4, _getEffectSize());
+    // Size slider scales stars + link reach freely (no hard 1.4x cap)
+    const connect = CONNECT_DIST * sz;
 
-    // Move stars gently
     for (const s of stars) {
-      s.x += s.vx; s.y += s.vy;
+      s.x += s.vx;
+      s.y += s.vy;
       if (s.x < 0) s.x = W; if (s.x > W) s.x = 0;
       if (s.y < 0) s.y = H; if (s.y > H) s.y = 0;
     }
 
-    // Draw connections
     ctx.strokeStyle = c;
-    ctx.lineWidth = 0.5;
+    ctx.lineWidth = Math.max(0.5, 0.7 * sz);
     for (let i = 0; i < stars.length; i++) {
       for (let j = i + 1; j < stars.length; j++) {
         const dx = stars[i].x - stars[j].x;
         const dy = stars[i].y - stars[j].y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < CONNECT_DIST) {
-          ctx.globalAlpha = (1 - dist / CONNECT_DIST) * 0.15;
+        if (dist < connect) {
+          // Fade in/out with distance — constellation forms then dissolves
+          ctx.globalAlpha = (1 - dist / connect) * 0.18;
           ctx.beginPath();
           ctx.moveTo(stars[i].x, stars[i].y);
           ctx.lineTo(stars[j].x, stars[j].y);
@@ -1791,18 +1978,16 @@ function _initConstellations() {
       }
     }
 
-    // Draw stars with subtle twinkle
     ctx.fillStyle = c;
     for (const s of stars) {
       const twinkle = 0.5 + 0.5 * Math.sin(t * 2 + s.phase);
-      ctx.globalAlpha = 0.15 + twinkle * 0.25;
+      ctx.globalAlpha = 0.15 + twinkle * 0.28;
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.arc(s.x, s.y, s.r * sz, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-  }
-  draw();
+  });
 }
 
 // ── Noise helper for Perlin effects ──
@@ -1814,61 +1999,110 @@ function _bgSmoothNoise(x, y) {
   return a + (b - a) * ux + (cc - a) * uy + (a - b - cc + d) * ux * uy;
 }
 
-// ── Perlin Flow — colored particle streams ──
+// ── Perlin Flow — colored particle streams with finite fading trails ──
 function _initPerlinFlow() {
-  if (document.getElementById('perlin-flow-canvas')) return;
-  const canvas = document.createElement('canvas');
-  canvas.id = 'perlin-flow-canvas';
-  canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
-  // Decorative background effect — hide from assistive tech so screen readers
-  // don't announce an empty canvas and axe's "region" rule doesn't flag it.
-  canvas.setAttribute('aria-hidden', 'true');
-  document.body.prepend(canvas);
+  const canvas = _mountBgCanvas('perlin-flow-canvas');
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   let W, H, t = 0;
+  // Keep particle + trail buffers bounded — no canvas trail accumulation
+  // (slow alpha-fade compositing left residual ink and growing GPU pressure).
+  const MAX_PARTICLES = 100;
+  const TRAIL_LEN = 16;
   const particles = [];
+
+  function makeParticle() {
+    return {
+      x: Math.random() * W,
+      y: Math.random() * H,
+      life: 0.4 + Math.random() * 0.6,
+      // Fixed ring buffers — no per-frame array alloc / shift GC churn
+      tx: new Float32Array(TRAIL_LEN),
+      ty: new Float32Array(TRAIL_LEN),
+      head: 0,
+      len: 0,
+    };
+  }
+  function resetParticle(p) {
+    p.x = Math.random() * W;
+    p.y = Math.random() * H;
+    p.life = 0.5 + Math.random() * 0.5;
+    p.head = 0;
+    p.len = 0;
+  }
+  function pushTrail(p) {
+    p.tx[p.head] = p.x;
+    p.ty[p.head] = p.y;
+    p.head = (p.head + 1) % TRAIL_LEN;
+    if (p.len < TRAIL_LEN) p.len++;
+  }
+  function ensureCount() {
+    const n = Math.max(16, Math.round(MAX_PARTICLES * _getEffectIntensity()));
+    while (particles.length < n) particles.push(makeParticle());
+    while (particles.length > n) particles.pop();
+  }
   function resize() {
     W = window.innerWidth; H = window.innerHeight;
     canvas.width = W * dpr; canvas.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (particles.length === 0) for (let i = 0; i < 200; i++) particles.push({ x: Math.random() * W, y: Math.random() * H, life: Math.random() });
+    // Resizing clears the bitmap; reset trails so we never keep stale pixels
+    for (const p of particles) { p.head = 0; p.len = 0; }
+    if (particles.length === 0) ensureCount();
   }
   resize();
-  const _onResize = () => resize();
-  window.addEventListener('resize', _onResize);
-  function getColor() { const s = getComputedStyle(document.documentElement); return s.getPropertyValue('--bg-effect-color').trim() || s.getPropertyValue('--fg').trim() || '#9cdef2'; }
-  function getBg() { return getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#282c34'; }
-  let _cachedBg = '', _fadeStyle = '';
-  function getFade() {
-    const bg = getBg();
-    if (bg !== _cachedBg) {
-      _cachedBg = bg;
-      // Parse hex to rgb for rgba fade
-      const { r, g, b } = hexToRgb(bg) || { r: 0, g: 0, b: 0 };
-      _fadeStyle = `rgba(${r},${g},${b},0.02)`;
-    }
-    return _fadeStyle;
-  }
-  function draw() {
-    if (!document.body.classList.contains('bg-pattern-perlin-flow')) { window.removeEventListener('resize', _onResize); canvas.remove(); return; }
-    requestAnimationFrame(draw);
-    ctx.fillStyle = getFade();
-    ctx.fillRect(0, 0, W, H);
-    const c = getColor();
-    particles.forEach(p => {
+
+  _startCanvasLoop(canvas, 'bg-pattern-perlin-flow', resize, () => {
+    ensureCount();
+    // Full clear every frame — trails live only in the ring buffers and fade out
+    // as older points drop off / particle life ends (no residual canvas ink).
+    ctx.clearRect(0, 0, W, H);
+    const c = _bgEffectColor();
+    const sz = _getEffectSize();
+    const r = Math.max(0.6, 0.85 * sz);
+    ctx.strokeStyle = c;
+    ctx.fillStyle = c;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
       const n = _bgSmoothNoise(p.x * 0.004 + t * 0.0008, p.y * 0.004 + 100);
       const angle = n * Math.PI * 6;
       const speed = 1 + _bgSmoothNoise(p.x * 0.003, p.y * 0.003 + 50) * 1.5;
-      p.x += Math.cos(angle) * speed; p.y += Math.sin(angle) * speed; p.life -= 0.001;
-      if (p.life <= 0 || p.x < 0 || p.x > W || p.y < 0 || p.y > H) { p.x = Math.random() * W; p.y = Math.random() * H; p.life = 1; }
-      ctx.beginPath(); ctx.arc(p.x, p.y, 1, 0, Math.PI * 2);
-      ctx.fillStyle = c; ctx.globalAlpha = p.life * 0.15; ctx.fill();
-    });
+      p.x += Math.cos(angle) * speed;
+      p.y += Math.sin(angle) * speed;
+      p.life -= 0.004;
+      pushTrail(p);
+
+      if (p.life <= 0 || p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) {
+        resetParticle(p);
+        continue;
+      }
+
+      // Draw trail oldest → newest; alpha rises toward the head so the tail fades out
+      if (p.len > 1) {
+        const start = (p.head - p.len + TRAIL_LEN) % TRAIL_LEN;
+        ctx.lineWidth = Math.max(0.6, r * 0.9);
+        for (let k = 1; k < p.len; k++) {
+          const i0 = (start + k - 1) % TRAIL_LEN;
+          const i1 = (start + k) % TRAIL_LEN;
+          ctx.globalAlpha = p.life * 0.22 * (k / p.len);
+          ctx.beginPath();
+          ctx.moveTo(p.tx[i0], p.ty[i0]);
+          ctx.lineTo(p.tx[i1], p.ty[i1]);
+          ctx.stroke();
+        }
+      }
+
+      ctx.globalAlpha = p.life * 0.28;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.globalAlpha = 1;
     t++;
-  }
-  draw();
+  });
 }
 
 // ── Petals — gentle falling flower petals ──
@@ -1876,9 +2110,8 @@ function _initPetals() {
   if (document.getElementById('petals-canvas')) return;
   const canvas = document.createElement('canvas');
   canvas.id = 'petals-canvas';
+  canvas.dataset.bgEffect = '1';
   canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
-  // Decorative background effect — hide from assistive tech so screen readers
-  // don't announce an empty canvas and axe's "region" rule doesn't flag it.
   canvas.setAttribute('aria-hidden', 'true');
   document.body.prepend(canvas);
   const ctx = canvas.getContext('2d');
@@ -1901,12 +2134,13 @@ function _initPetals() {
     if (petals.length === 0) for (let i = 0; i < 30; i++) { const p = makePetal(); p.y = Math.random() * H; petals.push(p); }
   }
   resize();
-  const _onResize = () => resize();
-  window.addEventListener('resize', _onResize);
-  function getColor() { const s = getComputedStyle(document.documentElement); return s.getPropertyValue('--bg-effect-color').trim() || s.getPropertyValue('--fg').trim() || '#9cdef2'; }
-  function draw() {
-    if (!document.body.classList.contains('bg-pattern-petals')) { window.removeEventListener('resize', _onResize); canvas.remove(); return; }
-    requestAnimationFrame(draw);
+
+  function getColor() {
+    const s = getComputedStyle(document.documentElement);
+    return s.getPropertyValue('--bg-effect-color').trim() || s.getPropertyValue('--fg').trim() || '#9cdef2';
+  }
+
+  _startCanvasLoop(canvas, 'bg-pattern-petals', resize, () => {
     ctx.clearRect(0, 0, W, H);
     const c = getColor();
     const sz = _getEffectSize();
@@ -1916,7 +2150,6 @@ function _initPetals() {
       if (p.y > H + 15) Object.assign(p, makePetal());
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
       ctx.globalAlpha = 0.2;
-      // petal shape — two overlapping ellipses
       ctx.fillStyle = c;
       ctx.beginPath(); ctx.ellipse(-p.size * 0.2 * sz, 0, p.size * 0.6 * sz, p.size * 0.3 * sz, 0.3, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 0.15;
@@ -1924,8 +2157,7 @@ function _initPetals() {
       ctx.restore();
     });
     ctx.globalAlpha = 1;
-  }
-  draw();
+  });
 }
 
 // ── Sparkles — twinkling star-shaped sparkles ──
@@ -1933,9 +2165,8 @@ function _initSparkles() {
   if (document.getElementById('sparkles-canvas')) return;
   const canvas = document.createElement('canvas');
   canvas.id = 'sparkles-canvas';
+  canvas.dataset.bgEffect = '1';
   canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
-  // Decorative background effect — hide from assistive tech so screen readers
-  // don't announce an empty canvas and axe's "region" rule doesn't flag it.
   canvas.setAttribute('aria-hidden', 'true');
   document.body.prepend(canvas);
   const ctx = canvas.getContext('2d');
@@ -1952,12 +2183,13 @@ function _initSparkles() {
     if (sparkles.length === 0) for (let i = 0; i < 35; i++) sparkles.push(makeSpark());
   }
   resize();
-  const _onResize = () => resize();
-  window.addEventListener('resize', _onResize);
-  function getColor() { const s = getComputedStyle(document.documentElement); return s.getPropertyValue('--bg-effect-color').trim() || s.getPropertyValue('--fg').trim() || '#9cdef2'; }
+
+  function getColor() {
+    const s = getComputedStyle(document.documentElement);
+    return s.getPropertyValue('--bg-effect-color').trim() || s.getPropertyValue('--fg').trim() || '#9cdef2';
+  }
   function drawStar(x, y, r, c, alpha) {
     ctx.save(); ctx.translate(x, y); ctx.fillStyle = c; ctx.globalAlpha = alpha;
-    // 4-point star
     ctx.beginPath();
     ctx.moveTo(0, -r); ctx.quadraticCurveTo(r * 0.15, -r * 0.15, r, 0);
     ctx.quadraticCurveTo(r * 0.15, r * 0.15, 0, r);
@@ -1966,9 +2198,8 @@ function _initSparkles() {
     ctx.fill();
     ctx.restore();
   }
-  function draw() {
-    if (!document.body.classList.contains('bg-pattern-sparkles')) { window.removeEventListener('resize', _onResize); canvas.remove(); return; }
-    requestAnimationFrame(draw);
+
+  _startCanvasLoop(canvas, 'bg-pattern-sparkles', resize, () => {
     ctx.clearRect(0, 0, W, H);
     const c = getColor();
     const sizeMult = _getEffectSize();
@@ -1978,12 +2209,10 @@ function _initSparkles() {
       const alpha = Math.max(0, twinkle) * 0.25 * s.life;
       const scale = 0.5 + Math.max(0, twinkle) * 0.5;
       if (alpha > 0.01) drawStar(s.x, s.y, s.size * scale * sizeMult, c, alpha);
-      // respawn when cycle completes
       if (s.phase > Math.PI * 6) Object.assign(s, makeSpark());
     });
     ctx.globalAlpha = 1;
-  }
-  draw();
+  });
 }
 
 // ── Embers — warm particles rising with glow and occasional spark bursts ──
@@ -1991,9 +2220,8 @@ function _initEmbers() {
   if (document.getElementById('embers-canvas')) return;
   const canvas = document.createElement('canvas');
   canvas.id = 'embers-canvas';
+  canvas.dataset.bgEffect = '1';
   canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
-  // Decorative background effect — hide from assistive tech so screen readers
-  // don't announce an empty canvas and axe's "region" rule doesn't flag it.
   canvas.setAttribute('aria-hidden', 'true');
   document.body.prepend(canvas);
   const ctx = canvas.getContext('2d');
@@ -2022,8 +2250,7 @@ function _initEmbers() {
     }
   }
   resize();
-  const _onResize = () => resize();
-  window.addEventListener('resize', _onResize);
+
   function getColor() {
     const s = getComputedStyle(document.documentElement);
     return s.getPropertyValue('--bg-effect-color').trim() || s.getPropertyValue('--fg').trim() || '#c9a95a';
@@ -2032,14 +2259,8 @@ function _initEmbers() {
     const { r, g, b } = hexToRgb(hex) || { r: 0, g: 0, b: 0 };
     return `rgba(${r},${g},${b},${a})`;
   }
-  function draw() {
-    if (!document.body.classList.contains('bg-pattern-embers')) {
-      window.removeEventListener('resize', _onResize);
-      canvas.remove();
-      return;
-    }
-    requestAnimationFrame(draw);
-    // Fade previous frame (destination-out keeps canvas transparent where no embers)
+
+  _startCanvasLoop(canvas, 'bg-pattern-embers', resize, () => {
     ctx.globalCompositeOperation = 'destination-out';
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.fillRect(0, 0, W, H);
@@ -2085,14 +2306,362 @@ function _initEmbers() {
       }
     }
     ctx.globalCompositeOperation = 'source-over';
+  });
+}
+
+// ── Fireflies — sparse drifting glow points ──
+function _initFireflies() {
+  const canvas = _mountBgCanvas('fireflies-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const MAX = 28;
+  let W, H;
+  const flies = [];
+  function makeFly() {
+    return {
+      x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random() - 0.5) * 0.35, vy: (Math.random() - 0.5) * 0.35,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.02 + Math.random() * 0.03,
+      r: 1.2 + Math.random() * 1.8,
+    };
   }
-  draw();
+  function ensureCount() {
+    const n = Math.max(6, Math.round(MAX * _getEffectIntensity()));
+    while (flies.length < n) flies.push(makeFly());
+    while (flies.length > n) flies.pop();
+  }
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!flies.length) ensureCount();
+  }
+  resize();
+  _startCanvasLoop(canvas, 'bg-pattern-fireflies', resize, () => {
+    ensureCount();
+    ctx.clearRect(0, 0, W, H);
+    const color = _bgEffectColor();
+    const sz = _getEffectSize();
+    for (const f of flies) {
+      f.phase += f.speed;
+      f.x += f.vx + Math.sin(f.phase) * 0.15;
+      f.y += f.vy + Math.cos(f.phase * 0.7) * 0.12;
+      if (f.x < -20) f.x = W + 20; if (f.x > W + 20) f.x = -20;
+      if (f.y < -20) f.y = H + 20; if (f.y > H + 20) f.y = -20;
+      const tw = 0.35 + 0.65 * Math.max(0, Math.sin(f.phase));
+      const r = f.r * sz * (0.7 + tw * 0.5);
+      const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r * 5);
+      g.addColorStop(0, _bgRgba(color, 0.55 * tw));
+      g.addColorStop(0.35, _bgRgba(color, 0.18 * tw));
+      g.addColorStop(1, _bgRgba(color, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, r * 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+}
+
+// ── Aurora — soft vertical color bands drifting ──
+function _initAurora() {
+  const canvas = _mountBgCanvas('aurora-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const BANDS = 4;
+  let W, H, t = 0;
+  const bands = [];
+  function initBands() {
+    bands.length = 0;
+    for (let i = 0; i < BANDS; i++) {
+      bands.push({
+        x: (i + 0.5) / BANDS,
+        w: 0.14 + Math.random() * 0.08,
+        amp: 20 + Math.random() * 24,
+        freq: 0.7 + Math.random() * 0.7,
+        phase: Math.random() * Math.PI * 2,
+        drift: 0.00035 + Math.random() * 0.00045,
+      });
+    }
+  }
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!bands.length) initBands();
+  }
+  resize();
+  _startCanvasLoop(canvas, 'bg-pattern-aurora', resize, () => {
+    ctx.clearRect(0, 0, W, H);
+    const color = _bgEffectColor();
+    const sz = _getEffectSize();
+    const inten = _getEffectIntensity();
+    t += 1;
+    // Draw as stacked soft vertical strips — fixed band count, no path growth
+    for (const b of bands) {
+      b.phase += b.drift;
+      const cx = ((b.x + Math.sin(t * 0.0018 + b.phase) * 0.1) % 1 + 1) % 1 * W
+        + Math.sin(t * 0.01 * b.freq + b.phase) * b.amp * sz;
+      const half = Math.max(50, b.w * W * (0.7 + 0.3 * sz));
+      const g = ctx.createLinearGradient(cx - half, 0, cx + half, 0);
+      g.addColorStop(0, _bgRgba(color, 0));
+      g.addColorStop(0.5, _bgRgba(color, 0.1 * inten));
+      g.addColorStop(1, _bgRgba(color, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(cx - half, 0, half * 2, H);
+    }
+  });
+}
+
+// ── Paper grain — fine film grain via reused low-res buffer (no per-frame alloc) ──
+function _initPaperGrain() {
+  const canvas = _mountBgCanvas('paper-grain-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const GW = 128, GH = 128; // fixed tiny buffer — RAM bounded
+  const grain = document.createElement('canvas');
+  grain.width = GW; grain.height = GH;
+  const gctx = grain.getContext('2d', { willReadFrequently: true });
+  const img = gctx.createImageData(GW, GH);
+  const data = img.data;
+  let W, H, tick = 0, pat = null;
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    pat = null; // pattern is tied to grain canvas; refresh after resize
+  }
+  resize();
+  _startCanvasLoop(canvas, 'bg-pattern-paper-grain', resize, () => {
+    tick++;
+    // Refresh noise every other frame — cheaper, still looks alive
+    if (tick % 2 === 0) {
+      const color = _bgEffectColor('#888888');
+      const { r, g, b } = hexToRgb(color) || { r: 128, g: 128, b: 128 };
+      const aBase = Math.round(36 * _getEffectIntensity());
+      for (let i = 0; i < data.length; i += 4) {
+        const n = (Math.random() * 255) | 0;
+        data[i] = r; data[i + 1] = g; data[i + 2] = b;
+        data[i + 3] = Math.min(255, ((n * aBase) / 255) | 0);
+      }
+      gctx.putImageData(img, 0, 0);
+      pat = ctx.createPattern(grain, 'repeat');
+    }
+    ctx.clearRect(0, 0, W, H);
+    if (!pat) return;
+    const s = Math.max(0.5, _getEffectSize());
+    ctx.save();
+    ctx.scale(s, s);
+    ctx.fillStyle = pat;
+    ctx.fillRect(0, 0, W / s, H / s);
+    ctx.restore();
+  });
+}
+
+// ── Ripple — sparse expanding circles ──
+function _initRipple() {
+  const canvas = _mountBgCanvas('ripple-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const MAX = 6;
+  let W, H;
+  const ripples = [];
+  function spawn() {
+    if (ripples.length >= MAX) return;
+    ripples.push({
+      x: Math.random() * W, y: Math.random() * H,
+      r: 4, max: 60 + Math.random() * 100, life: 0.6 + Math.random() * 0.9, alpha: 0.35,
+    });
+  }
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  _startCanvasLoop(canvas, 'bg-pattern-ripple', resize, () => {
+    ctx.clearRect(0, 0, W, H);
+    const color = _bgEffectColor();
+    const inten = _getEffectIntensity();
+    const sz = _getEffectSize();
+    if (ripples.length < Math.max(1, Math.round(MAX * inten)) && Math.random() < 0.025 * inten) spawn();
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const p = ripples[i];
+      p.r += p.speed * sz;
+      const life = 1 - p.r / (p.max * sz);
+      if (life <= 0) { ripples.splice(i, 1); continue; }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.strokeStyle = _bgRgba(color, p.alpha * life * inten);
+      ctx.lineWidth = Math.max(0.6, 1.2 * sz);
+      ctx.stroke();
+    }
+  });
+}
+
+// ── Drift grid — slow parallax of faint diagonal lines ──
+function _initDriftGrid() {
+  const canvas = _mountBgCanvas('drift-grid-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let W, H, t = 0;
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  _startCanvasLoop(canvas, 'bg-pattern-drift-grid', resize, () => {
+    ctx.clearRect(0, 0, W, H);
+    const color = _bgEffectColor();
+    const inten = _getEffectIntensity();
+    const spacing = Math.max(18, 36 / _getEffectSize());
+    t += 0.15;
+    const off = t % spacing;
+    ctx.strokeStyle = _bgRgba(color, 0.08 * inten);
+    ctx.lineWidth = 1;
+    // Two diagonal directions — line count bounded by viewport / spacing
+    const diag = W + H;
+    const n = Math.ceil(diag / spacing) + 2;
+    for (let i = -1; i < n; i++) {
+      const x = i * spacing + off;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x - H, H);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + H, H);
+      ctx.stroke();
+    }
+  });
+}
+
+// ── Orbit rings — slow concentric arcs ──
+function _initOrbitRings() {
+  const canvas = _mountBgCanvas('orbit-rings-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const RINGS = 5;
+  let W, H;
+  const rings = [];
+  for (let i = 0; i < RINGS; i++) {
+    rings.push({
+      frac: 0.12 + i * 0.12,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.003 + i * 0.0012,
+      arc: Math.PI * (0.4 + Math.random() * 0.6),
+      gap: Math.random() * Math.PI * 2,
+    });
+  }
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  _startCanvasLoop(canvas, 'bg-pattern-orbit-rings', resize, () => {
+    ctx.clearRect(0, 0, W, H);
+    const color = _bgEffectColor();
+    const inten = _getEffectIntensity();
+    const sz = _getEffectSize();
+    const cx = W * 0.5, cy = H * 0.5;
+    const base = Math.min(W, H) * 0.5 * sz;
+    ctx.lineCap = 'round';
+    for (const r of rings) {
+      r.phase += r.speed;
+      const rad = base * r.frac;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, r.phase + r.gap, r.phase + r.gap + r.arc);
+      ctx.strokeStyle = _bgRgba(color, 0.14 * inten);
+      ctx.lineWidth = Math.max(0.8, 1.4 * sz);
+      ctx.stroke();
+      // faint counter-arc
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, r.phase + r.gap + Math.PI, r.phase + r.gap + Math.PI + r.arc * 0.5);
+      ctx.strokeStyle = _bgRgba(color, 0.06 * inten);
+      ctx.stroke();
+    }
+  });
+}
+
+// ── Fog / mist — few large soft blobs pooled mostly along the bottom ──
+function _initFog() {
+  const canvas = _mountBgCanvas('fog-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const MAX = 6; // hard cap — each blob is a large gradient
+  let W, H;
+  const blobs = [];
+  function bottomY() {
+    // Bias spawn into the lower ~40% of the viewport
+    return H * (0.55 + Math.random() * 0.45);
+  }
+  function makeBlob() {
+    return {
+      x: Math.random() * W,
+      y: bottomY(),
+      vx: (Math.random() - 0.5) * 0.25,
+      vy: (Math.random() - 0.5) * 0.08,
+      r: 140 + Math.random() * 180,
+      phase: Math.random() * Math.PI * 2,
+    };
+  }
+  function ensureCount() {
+    const n = Math.max(3, Math.round(MAX * _getEffectIntensity()));
+    while (blobs.length < n) blobs.push(makeBlob());
+    while (blobs.length > n) blobs.pop();
+  }
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!blobs.length) ensureCount();
+    else for (const b of blobs) { if (b.y < H * 0.45) b.y = bottomY(); }
+  }
+  resize();
+  _startCanvasLoop(canvas, 'bg-pattern-fog', resize, () => {
+    ensureCount();
+    ctx.clearRect(0, 0, W, H);
+    const color = _bgEffectColor();
+    const sz = _getEffectSize();
+    const inten = _getEffectIntensity();
+    const floor = H * 0.5;
+    for (const b of blobs) {
+      b.phase += 0.004;
+      b.x += b.vx + Math.sin(b.phase) * 0.12;
+      b.y += b.vy + Math.cos(b.phase * 0.8) * 0.05;
+      // Soft spring back toward the lower band so fog stays grounded
+      if (b.y < floor) b.vy += 0.02;
+      if (b.y > H + b.r * 0.2) b.vy -= 0.015;
+      b.vy *= 0.99;
+      if (b.x < -b.r) b.x = W + b.r; if (b.x > W + b.r) b.x = -b.r;
+      if (b.y < H * 0.35) b.y = bottomY();
+      if (b.y > H + b.r) b.y = bottomY();
+      const r = b.r * sz;
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r);
+      g.addColorStop(0, _bgRgba(color, 0.09 * inten));
+      g.addColorStop(0.5, _bgRgba(color, 0.04 * inten));
+      g.addColorStop(1, _bgRgba(color, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
 }
 
 const themeModule = { initThemeUI, togglePopup, closePopup, makeDraggable,
                        THEMES, applyColors, applyFontDensity, applyBgPattern,
                        applyBgEffectColor, applyBgEffectIntensity, applyBgEffectSize,
-                       applyFrostedGlass,
+                       applyFrostedGlass, applyGlassWindows,
                        save, getSaved, saveCustomTheme, deleteCustomTheme,
                        getCustomThemes };
 
@@ -2100,13 +2669,26 @@ export default themeModule;
 
 // Init on DOM ready, with server-side sync fallback
 async function _initWithSync() {
+  try {
   // If no local theme, try loading from server (cross-device sync)
   if (!getSaved()) {
     const serverTheme = await _loadFromServer();
     if (serverTheme && serverTheme.colors) {
-      if (serverTheme.name === 'sakura') serverTheme.name = 'ume';
+      _migrateThemeName(serverTheme);
       Storage.setJSON(LS_KEY, serverTheme);
       applyColors(serverTheme.colors);
+    } else {
+      // Truly fresh install — seed the product default so FOUC + sync agree.
+      const colors = THEMES[DEFAULT_THEME];
+      const defaultPattern = THEME_DEFAULT_PATTERN[DEFAULT_THEME] || 'none';
+      try {
+        save(DEFAULT_THEME, colors, {
+          font: DEFAULT_FONT,
+          density: DEFAULT_DENSITY,
+          bgPattern: defaultPattern,
+        });
+      } catch (e) { console.warn('Default theme persist failed:', e); }
+      applyColors(colors);
     }
   }
   // Also sync custom themes from server
@@ -2123,7 +2705,14 @@ async function _initWithSync() {
       if (changed) _saveCustomThemes(local);
     }
   } catch (e) { console.warn('Custom theme server sync failed:', e); }
-  initThemeUI();
+  try {
+    initThemeUI();
+  } catch (e) {
+    console.error('[theme] initThemeUI failed:', e);
+  }
+  } catch (e) {
+    console.error('[theme] _initWithSync failed:', e);
+  }
 }
 
 if (document.readyState === 'loading') {

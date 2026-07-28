@@ -1781,7 +1781,7 @@ async function _showSkillSource(name) {
         <button class="close-btn" id="skill-md-close">✖</button>
       </div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:8px">
-        <textarea id="skill-md-textarea" spellcheck="false" style="flex:1;min-height:50vh;width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);box-sizing:border-box"></textarea>
+        <textarea id="skill-md-textarea" spellcheck="false" style="flex:1;min-height:50vh;width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:10px;border:1px solid var(--border);border-radius:2px;background:var(--bg);color:var(--fg);box-sizing:border-box"></textarea>
         <p class="memory-desc" style="margin:0">Edit the frontmatter and body directly. Save replaces the file via PUT /api/skills/{name}.</p>
       </div>
     </div>

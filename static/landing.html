@@ -5,8 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="Nobody — a self-hosted AI workspace: chat, agents, tools, model serving, email, research, and more. Your models, your hardware, your data.">
 <title>Nobody — A Self-Hosted AI Workspace</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4L16 22L6 22Z' fill='%23e06c75'/%3E%3Cpath d='M16 8L16 22L24 22Z' fill='%23e06c75' opacity='0.6'/%3E%3Cpath d='M4 24Q10 20 16 24Q22 28 28 24' stroke='%23e06c75' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2.5 16C7 7.5 12.5 4.5 16 4.5s9 3 13.5 11.5C25 24.5 19.5 27.5 16 27.5S7 24.5 2.5 16z' fill='none' stroke='%23e06c75' stroke-width='2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='16' r='6.2' fill='none' stroke='%23e06c75' stroke-width='1.4'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23e06c75'/%3E%3Cpath d='M16 13.15c1.65.04 2.95 1.2 2.95 2.4 0 1.55-1.4 2.2-2.65 2.2-1.15 0-2.05-.55-2.05-1.4 0-.8.7-1.2 1.4-1.2.55 0 1 .28 1 .72' fill='none' stroke='%2306060c' stroke-width='1.1' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='16' r='0.85' fill='%2306060c'/%3E%3C/svg%3E">
 <style>
+  @font-face { font-family: 'Iosevka'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Iosevka-Regular.woff2') format('woff2'); }
+  @font-face { font-family: 'Iosevka'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Iosevka-SemiBold.woff2') format('woff2'); }
+  @font-face { font-family: 'Roboto Mono'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/RobotoMono-Regular.woff2') format('woff2'); }
   :root {
     /* Nobody default theme — exact app tokens */
     --bg: #282c34;
@@ -22,7 +25,7 @@
     --green: #50fa7b;
     --gold: #f0ad4e;         /* app --warn */
     --red: #e06c75;
-    --radius: 8px;
+    --radius: 2px;
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; scroll-snap-type: y mandatory; scroll-padding-top: 60px; }
@@ -63,7 +66,7 @@
       radial-gradient(900px 520px at 0% 0%, rgba(53,90,102,0.30), transparent 55%),
       var(--bg);
     color: var(--fg);
-    font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: 'Iosevka', 'Fira Code', ui-monospace, monospace;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
@@ -79,13 +82,17 @@
   }
   nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
   .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; letter-spacing: 0.2px; color: var(--heading); }
-  .brand .boat { color: var(--accent); flex-shrink: 0; }
+  .brand .boat, .brand .brand-eye { color: var(--accent); flex-shrink: 0; }
+  .brand-eye .abyss-swirl { transform-origin: 16px 16px; animation: abyss-swirl 8s linear infinite; }
+  .hero-logo .brand-eye .abyss-swirl { animation-duration: 10s; }
+  @keyframes abyss-swirl { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .brand-eye .abyss-swirl { animation: none; } }
   .nav-links { display: flex; align-items: center; gap: 22px; }
   .nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; }
   .nav-links a:hover { color: var(--fg); }
   .btn {
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 9px 16px; border-radius: 10px; font-weight: 600; font-size: 14px;
+    padding: 9px 16px; border-radius:2px; font-weight: 600; text-transform:uppercase; letter-spacing:0.06em; font-size: 14px;
     border: 1px solid var(--border); color: var(--fg); background: var(--panel);
     transition: transform .12s ease, border-color .12s ease, background .12s ease;
   }
@@ -106,7 +113,7 @@
     width: 42px;
     height: 42px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius:2px;
     background: var(--panel);
     color: var(--fg);
     cursor: pointer;
@@ -124,14 +131,14 @@
     padding: 12px;
     background: rgba(17,17,17,0.98);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius:var(--radius);
     backdrop-filter: blur(10px);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);
   }
   .hamburger-menu a {
     color: var(--muted);
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius:2px;
   }
   .hamburger-menu a:hover {
     color: var(--fg);
@@ -142,12 +149,12 @@
 
   /* Hero */
   .hero { padding: 86px 0 40px; text-align: center; }
-  .badge {
+  .badge { text-transform:uppercase; letter-spacing:0.06em; font-family:'Roboto Mono', monospace;
     display: inline-flex; align-items: center; gap: 7px;
     font-size: 12.5px; color: var(--muted); border: 1px solid var(--border);
-    background: var(--panel); padding: 5px 12px; border-radius: 999px; margin-bottom: 22px;
+    background: var(--panel); padding: 5px 12px; border-radius:0; margin-bottom: 22px;
   }
-  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow:none; }
   .hero-logo { display: flex; align-items: center; justify-content: center; gap: 14px; color: var(--accent); margin-bottom: 4px; }
   .hero-logo svg { filter: drop-shadow(0 4px 18px rgba(224,108,117,0.35)); }
   .hero-logo .wordmark { font-size: clamp(30px, 6vw, 44px); font-weight: 700; color: var(--heading); letter-spacing: -0.01em; line-height: 1; }
@@ -167,29 +174,29 @@
   .term-intro { color: var(--fg); font-size: clamp(13px, 1.8vw, 15px); margin: 34px auto 0; max-width: 560px; }
   .term {
     max-width: 620px; margin: 12px auto 0; text-align: left;
-    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
-    overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+    background: var(--bg2); border: 1px solid var(--border); border-radius:var(--radius);
+    overflow: hidden; box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);
   }
   .term-bar { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--border); background: #20242c; }
-  .term-bar .ttl { color: var(--muted); font-size: 12px; font-family: 'Fira Code', ui-monospace, monospace; }
+  .term-bar .ttl { color: var(--muted); font-size: 12px; font-family: 'Iosevka', monospace; }
   .term-bar .winbtns { display: flex; gap: 1px; }
   .term-bar .winbtns span { cursor: pointer; }
   .term { transition: opacity .18s ease, transform .18s ease; }
   /* Minimized = a rounded "pill", like the app's tab-down dock chip. */
-  .term.term-min { max-width: max-content; border-radius: 999px; box-shadow: 0 6px 22px rgba(0,0,0,0.4); }
-  .term.term-min .term-bar { border-bottom: none; border-radius: 999px; padding: 7px 10px 7px 16px; gap: 12px; background: var(--panel); }
+  .term.term-min { max-width: max-content; border-radius:0; box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent); }
+  .term.term-min .term-bar { border-bottom: none; border-radius:0; padding: 7px 10px 7px 16px; gap: 12px; background: var(--panel); }
   .term.term-min pre { display: none; }
   .term.term-closed { opacity: 0; transform: scale(0.96); pointer-events: none; height: 0; margin: 0 auto; border: 0; overflow: hidden; }
   .term-reopen {
-    display: none; margin: 14px auto 0; font-family: 'Fira Code', monospace; font-size: 12px;
-    color: var(--muted); background: none; border: 1px dashed var(--border); border-radius: 6px;
+    display: none; margin: 14px auto 0; font-family: 'Iosevka', monospace; font-size: 12px;
+    color: var(--muted); background: none; border: 1px dashed var(--border); border-radius:2px;
     padding: 5px 12px; cursor: pointer;
   }
   .term-reopen:hover { color: var(--accent); border-color: var(--accent); }
   .term-reopen.show { display: inline-block; }
   .term-bar .winbtns span {
     width: 28px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
-    border-radius: 4px; color: var(--muted); font-size: 12px; line-height: 1;
+    border-radius:2px; color: var(--muted); font-size: 12px; line-height: 1;
   }
   .term-bar .winbtns span:hover { background: rgba(156,222,242,0.12); color: var(--fg); }
   .term-bar .winbtns span.x:hover { background: #c0392b; color: #fff; }
@@ -229,7 +236,7 @@
   .tgrid .tcard {
     display: none;
     flex-direction: row-reverse; align-items: center; gap: 24px; text-align: left;
-    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel); border: 1px solid var(--border); border-radius:var(--radius);
     padding: 28px;
   }
   .tgrid .tcard.active { display: flex; animation: tslide .25s ease both; }
@@ -263,12 +270,12 @@
 
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 36px; }
   .feature {
-    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel); border: 1px solid var(--border); border-radius:var(--radius);
     padding: 22px; transition: transform .14s ease, border-color .14s ease;
   }
   .feature:hover { transform: translateY(-3px); border-color: var(--accent); }
   .feature .ico {
-    width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; border-radius:2px; display: inline-flex; align-items: center; justify-content: center;
     background: linear-gradient(135deg, rgba(224,108,117,0.18), rgba(53,90,102,0.28));
     border: 1px solid var(--border); color: var(--accent); margin-bottom: 14px;
   }
@@ -278,7 +285,7 @@
   /* Screenshot strip */
   .shotrow { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-top: 8px; }
   .shot {
-    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+    border: 1px solid var(--border); border-radius:var(--radius); overflow: hidden;
     background: linear-gradient(180deg, var(--panel), var(--panel2));
     aspect-ratio: 16/10; display: flex; align-items: center; justify-content: center;
     color: var(--muted); font-size: 13px; position: relative;
@@ -291,7 +298,7 @@
   .previews { display: flex; align-items: center; gap: 12px; height: 480px; max-width: 1000px; margin: 36px auto 0; }
   .preview-panel {
     position: relative; flex: 1 1 0; min-width: 0; height: 360px; overflow: hidden;
-    border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer;
+    border: 1px solid var(--border); border-radius:var(--radius); cursor: pointer;
     background: linear-gradient(180deg, var(--panel), var(--panel2));
     transition: flex-grow .5s cubic-bezier(.2,.7,.2,1), height .5s cubic-bezier(.2,.7,.2,1), border-color .25s ease;
   }
@@ -323,16 +330,16 @@
   /* Get started */
   .start {
     background: linear-gradient(180deg, var(--panel), var(--bg2));
-    border: 1px solid var(--border); border-radius: 18px; padding: 40px; text-align: center;
+    border: 1px solid var(--border); border-radius:2px; padding: 40px; text-align: center;
   }
   .codeblock {
     display: inline-flex; align-items: center; gap: 14px; margin: 18px auto 8px;
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg2); border: 1px solid var(--border); border-radius:2px;
     padding: 12px 16px; font-family: ui-monospace, monospace; font-size: 14px; color: var(--fg);
   }
   .codeblock .prompt { color: var(--accent); }
   .pill-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
-  .pill { font-size: 12.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; background: var(--panel); }
+  .pill { text-transform:uppercase; letter-spacing:0.06em; font-family:'Roboto Mono', monospace; font-size: 12.5px; color: var(--muted); border: 1px solid var(--border); border-radius:0; padding: 5px 12px; background: var(--panel); }
 
   footer { border-top: 1px solid var(--border); padding: 30px 0; color: var(--muted); font-size: 13px; scroll-snap-align: end; }
   footer .wrap { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
@@ -356,7 +363,7 @@
   <nav>
     <div class="wrap">
       <div class="brand">
-        <svg class="boat" viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><path d="M16 4L16 22L6 22Z" fill="currentColor"/><path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6"/><path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>
+        <svg class="brand-eye boat" viewBox="0 0 32 32" width="24" height="24" aria-hidden="true"><path d="M2.5 16C7 7.5 12.5 4.5 16 4.5s9 3 13.5 11.5C25 24.5 19.5 27.5 16 27.5S7 24.5 2.5 16z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="16" cy="16" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="16" cy="16" r="4" fill="currentColor"/><g class="abyss-swirl"><path d="M16 13.15c1.65.04 2.95 1.2 2.95 2.4 0 1.55-1.4 2.2-2.65 2.2-1.15 0-2.05-.55-2.05-1.4 0-.8.7-1.2 1.4-1.2.55 0 1 .28 1 .72" fill="none" stroke="var(--bg,#06060c)" stroke-width="1.1" stroke-linecap="round"/><path d="M14.2 14.4c.35-.55 1.1-.9 1.9-.9" fill="none" stroke="var(--bg,#06060c)" stroke-width="0.85" stroke-linecap="round" opacity="0.7"/><circle cx="16" cy="16" r="0.85" fill="var(--bg,#06060c)"/></g></svg>
         Nobody
       </div>
       <div class="nav-links">
@@ -398,10 +405,10 @@
   <header class="hero">
     <div class="wrap">
       <div class="hero-logo">
-        <svg viewBox="0 0 32 32" width="48" height="48" aria-hidden="true"><path d="M16 4L16 22L6 22Z" fill="currentColor"/><path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6"/><path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>
+        <svg class="brand-eye" viewBox="0 0 32 32" width="48" height="48" aria-hidden="true"><path d="M2.5 16C7 7.5 12.5 4.5 16 4.5s9 3 13.5 11.5C25 24.5 19.5 27.5 16 27.5S7 24.5 2.5 16z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="16" cy="16" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="16" cy="16" r="4" fill="currentColor"/><g class="abyss-swirl"><path d="M16 13.15c1.65.04 2.95 1.2 2.95 2.4 0 1.55-1.4 2.2-2.65 2.2-1.15 0-2.05-.55-2.05-1.4 0-.8.7-1.2 1.4-1.2.55 0 1 .28 1 .72" fill="none" stroke="var(--bg,#06060c)" stroke-width="1.1" stroke-linecap="round"/><path d="M14.2 14.4c.35-.55 1.1-.9 1.9-.9" fill="none" stroke="var(--bg,#06060c)" stroke-width="0.85" stroke-linecap="round" opacity="0.7"/><circle cx="16" cy="16" r="0.85" fill="var(--bg,#06060c)"/></g></svg>
         <span class="wordmark">Nobody</span>
       </div>
-      <p class="slogan">Yours for the voyage.</p>
+      <p class="slogan" id="hero-slogan">Call me Nobody.</p>
       <h1>Your own <span class="grad">AI workspace</span>,<br>running on your hardware.</h1>
       <p class="lede">
         Nobody is a self-hosted interface for talking to language models &mdash; chat,
@@ -546,7 +553,7 @@
         </div>
         <div class="feature">
           <span class="ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg></span>
-          <h3>Skills <span style="font-size:10.5px;font-weight:700;color:var(--accent);border:1px solid var(--border);border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:middle;">self-evolving</span></h3>
+          <h3>Skills <span style="font-size:10.5px;font-weight:700;color:var(--accent);border:1px solid var(--border);border-radius:0;padding:1px 7px;margin-left:4px;vertical-align:middle;">self-evolving</span></h3>
           <p>The assistant writes, refines, and reuses its own skills &mdash; getting more capable over time.</p>
         </div>
         <div class="feature">
@@ -650,6 +657,65 @@
   </footer>
 
   <script>
+    // Hero slogan — same dry Nobody rotation as the empty-chat welcome sub.
+    (function () {
+      var el = document.getElementById('hero-slogan');
+      if (!el) return;
+      var slogans = [
+        'Depth optional.',
+        "The assistant who isn't anyone.",
+        'Ask Nobody.',
+        "Nobody else's.",
+        "Don't worry, Nobody will help.",
+        'Call me Nobody.',
+        'Better than talking to the hand.',
+        'Leave it to Nobody.',
+        'Just you and Nobody.',
+        'Just like the remote, Nobody can find it.',
+        'Famous for being unknown.',
+        'Self-hosted. Self-effacing.',
+        "Nobody's business but yours.",
+        'No cloud. No name. No problem.',
+        'Trust Nobody.',
+        'Nobody saw that coming.',
+        'Typing into the void, professionally.',
+        "Nobody knows what they're doing. Perfect.",
+        'I contain multitudes. Also nothing.',
+        "Ask Nobody — they'll pretend to understand.",
+        "Nobody's perfect. Close enough.",
+        'This chat never happened.',
+        "It's okay, I'll be your friend.",
+        'Nobody reads the docs. Nobody *is* the docs.',
+        'Guaranteed to confuse your IT department.',
+        'The model that ghosted you first.',
+        "Running on your GPU so OpenAI doesn't have to.",
+        'Nobody cares about your telemetry. Literally.',
+        'Finally, an assistant with commitment issues.',
+        'Outis mode: even Nobody forgets this one.',
+        'If a tree falls and Nobody hears it… still local.',
+        'Nobody asked, but here we are.',
+        'Professionally unidentifiable.',
+        "Nobody's home. Start typing anyway.",
+        'The void with autocomplete.',
+        'Hand-crafted by absolutely no one.',
+        'Not affiliated with anybody.',
+        'Not to be confused with Anybody.',
+        'Plot twist: Nobody is home.',
+        'Identity optional. Inference mandatory.',
+        'Sightings unconfirmed.',
+        "Nobody's watching. That's the point.",
+        'Helpdesk hours: whenever Nobody feels like it.',
+        'Existential dread, but helpful.',
+        'The assistant formerly known as nothing.',
+        'Cooler than being someone.',
+        "Nobody's gonna judge. Hard.",
+        'Currently pretending to be useful.',
+        'Your private void awaits.',
+        'Silence is golden. Nobody is platinum.'
+      ];
+      el.textContent = slogans[Math.floor(Math.random() * slogans.length)];
+    })();
+
     // Typewriter for the origin terminal: type line 1, pause 2s, line 2, pause
     // 2s, line 3, hold 4s, then reset and loop. Blinking "|" cursor throughout.
     (function () {

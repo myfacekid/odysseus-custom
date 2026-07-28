@@ -72,10 +72,16 @@ export function getJSON(key, fallback) {
 
 /**
  * Set a JSON-serialized value in localStorage.
+ * When writing a canonical key that has legacy aliases, drop the aliases so
+ * readers that still check old names (or a stale migrated copy) cannot
+ * override the fresh value.
  */
 export function setJSON(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    for (const legacy of LEGACY_KEY_MAP[key] || []) {
+      try { localStorage.removeItem(legacy); } catch (_) {}
+    }
   } catch (e) {
     console.warn('[Storage] Failed to set key "' + key + '":', e.message);
   }
@@ -105,11 +111,14 @@ export function set(key, value) {
 }
 
 /**
- * Remove a key from localStorage.
+ * Remove a key from localStorage (and any legacy aliases for that key).
  */
 export function remove(key) {
   try {
     localStorage.removeItem(key);
+    for (const legacy of LEGACY_KEY_MAP[key] || []) {
+      try { localStorage.removeItem(legacy); } catch (_) {}
+    }
   } catch (e) {
     // Ignore removal errors
   }

@@ -258,8 +258,21 @@ def test_list_projects_when_auth_disabled(graph_env, monkeypatch):
     assert "proj-visible" in ids
 
 
+def test_browse_dir_api_disabled_by_default(graph_env, monkeypatch):
+    monkeypatch.setattr("routes.project_routes.get_current_user", lambda request: graph_env["owner"])
+    monkeypatch.setattr("routes.project_routes.SERVER_DIR_BROWSE_ENABLED", False)
+    from routes import project_routes
+
+    app = FastAPI()
+    app.include_router(project_routes.setup_project_routes())
+    client = TestClient(app)
+    res = client.get("/api/projects/browse-dir", params={"path": str(graph_env["workspace"])})
+    assert res.status_code == 403
+
+
 def test_browse_dir_api(graph_env, monkeypatch):
     monkeypatch.setattr("routes.project_routes.get_current_user", lambda request: graph_env["owner"])
+    monkeypatch.setattr("routes.project_routes.SERVER_DIR_BROWSE_ENABLED", True)
     fake_home = str(graph_env["workspace"].parent)
     monkeypatch.setattr(
         "routes.project_routes.os.path.expanduser",

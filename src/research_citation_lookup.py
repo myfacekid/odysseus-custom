@@ -23,7 +23,7 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-_USER_AGENT = "Odysseus-DeepResearch/1.0 (mailto:support@example.com)"
+_USER_AGENT = "Nobody-DeepResearch/1.0 (mailto:support@example.com)"
 _OPENALEX_BASE = "https://api.openalex.org"
 
 # Verbs that signal the user wants derivative/citing work, not the paper itself.

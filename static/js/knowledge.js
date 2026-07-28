@@ -12,7 +12,8 @@ import {
 } from './connection_actions.js';
 import { mountEmptyState, showLoadingRow, showError, ZOTERO_SETUP_MSG } from './ui/feedback.js';
 import { isZoteroCatalogReady } from './setupStatus.js';
-import { isProjectsUiEnabled } from './projects/featureFlag.js';
+import { isProjectsUiEnabled, isProjectsContextLayerEnabled } from './projects/featureFlag.js';
+import { setActiveProjectFromId } from './projects/activeChip.js';
 
 export { openGraphMergeReview };
 
@@ -430,8 +431,8 @@ async function _showDetail(nodeId) {
     const researchOpenBtn = node.type === 'research'
       ? `<button type="button" class="admin-btn-sm kg-research-report-btn" data-session-id="${esc(meta.session_id || nodeId.replace(/^research:/i, ''))}">Open report</button>`
       : '';
-    const projectOpenBtn = (node.type === 'project' && isProjectsUiEnabled())
-      ? `<button type="button" class="admin-btn-sm kg-project-workspace-btn" data-project-id="${esc(meta.project_id || nodeId.replace(/^project:/i, ''))}">Open workspace</button>`
+    const projectOpenBtn = (node.type === 'project' && (isProjectsUiEnabled() || isProjectsContextLayerEnabled()))
+      ? `<button type="button" class="admin-btn-sm kg-project-workspace-btn" data-project-id="${esc(meta.project_id || nodeId.replace(/^project:/i, ''))}">${isProjectsContextLayerEnabled() && !isProjectsUiEnabled() ? 'Set active' : 'Open workspace'}</button>`
       : '';
     const snippet = _compactSnippet(node);
     detail.innerHTML = `
@@ -467,6 +468,10 @@ async function _showDetail(nodeId) {
       ev.stopPropagation();
       const pid = ev.currentTarget?.dataset?.projectId || nodeId.replace(/^project:/i, '');
       if (!pid) return;
+      if (isProjectsContextLayerEnabled() && !isProjectsUiEnabled()) {
+        await setActiveProjectFromId(pid);
+        return;
+      }
       const mod = await import('./projects/index.js');
       const open = mod.openProjectWorkspace || mod.default?.openProjectWorkspace;
       if (open) open(pid);
@@ -1164,10 +1169,14 @@ async function openKnowledgeNode(nodeId, opts = {}) {
     return;
   }
   if (effective === 'project') {
+    const pid = raw || nodeId.replace(/^project:/i, '');
+    if (isProjectsContextLayerEnabled() && !isProjectsUiEnabled()) {
+      if (pid) await setActiveProjectFromId(pid);
+      return;
+    }
     if (!isProjectsUiEnabled()) return;
     const mod = await import('./projects/index.js');
     const open = mod.openProjectWorkspace || mod.default?.openProjectWorkspace;
-    const pid = raw || nodeId.replace(/^project:/i, '');
     if (open && pid) open(pid);
     return;
   }

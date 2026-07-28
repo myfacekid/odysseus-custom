@@ -47,6 +47,8 @@ import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
 import { railToSidebarMap } from './js/nav/toolRegistry.js';
+import { getActiveProjectId, ACTIVE_PROJECT_EVENT } from './js/projects/activeState.js';
+import { getCachedActiveProject } from './js/projects/activeChip.js';
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -1006,6 +1008,29 @@ function initializeEventListeners() {
     });
   }
 
+  // Project files — Explore tool; only useful (and shown) with an active project.
+  const toolProjectFilesBtn = el('tool-project-files-btn');
+  if (toolProjectFilesBtn) {
+    toolProjectFilesBtn.addEventListener('click', async () => {
+      try {
+        const { openProjectFilePicker } = await import('./js/projects/filePicker.js');
+        const id = getActiveProjectId();
+        if (!id) {
+          uiModule.showToast('Set an active project first', 3000);
+          return;
+        }
+        const meta = getCachedActiveProject?.();
+        await openProjectFilePicker(id, {
+          title: meta?.title,
+          workingDir: meta?.working_dir,
+        });
+      } catch (err) {
+        console.error('Project files open failed:', err);
+        uiModule.showToast?.('Could not open project files', 3000);
+      }
+    });
+  }
+
   // "+" on the Library row → create a new blank document and open it in the
   // editor compose "+"). stopPropagation so it
   // doesn't also fire the row's open-library click.
@@ -1180,6 +1205,41 @@ function initializeEventListeners() {
     // Sync on dropdown open + initial load
     sortBtn.addEventListener('click', _syncSortChecks);
     _syncSortChecks();
+
+    // Project scope filter (All chats / This project)
+    sortDropdown.querySelectorAll('.session-scope-option').forEach((opt) => {
+      opt.addEventListener('click', async () => {
+        const scope = opt.dataset.scope === 'project' ? 'project' : 'all';
+        if (scope === 'project') {
+          try {
+            const { getActiveProjectId } = await import('./js/projects/activeState.js');
+            if (!getActiveProjectId?.()) {
+              uiModule.showToast('Set an active project first', 3000);
+              return;
+            }
+          } catch {
+            uiModule.showToast('Set an active project first', 3000);
+            return;
+          }
+        }
+        sessionModule.setSessionScope?.(scope);
+        sortDropdown.style.display = 'none';
+        uiModule.showToast(scope === 'project' ? 'Showing this project' : 'Showing all chats');
+        _syncScopeChecks();
+      });
+    });
+    function _syncScopeChecks() {
+      const current = sessionModule.getSessionScope?.() || 'all';
+      sortDropdown.querySelectorAll('.session-scope-option').forEach((o) => {
+        const check = o.querySelector('.scope-check') || document.createElement('span');
+        check.className = 'scope-check';
+        check.style.cssText = 'float:right;font-size:20px;line-height:1;position:relative;top:3px;color:var(--accent, var(--red));opacity:' + (o.dataset.scope === current ? '1' : '0');
+        check.textContent = '\u2022';
+        if (!o.querySelector('.scope-check')) o.appendChild(check);
+      });
+    }
+    sortBtn.addEventListener('click', _syncScopeChecks);
+    _syncScopeChecks();
 
     // AI auto-sort — spinner on the sort button itself. Used by both
     // the main "★ Tidy" button (AI) and the sub-row "Tidy" button
@@ -2299,13 +2359,13 @@ function initializeEventListeners() {
       chk.checked = !chk.checked;
       incognitoBtn.classList.toggle('active', chk.checked);
       const tipEl = el('welcome-tip');
-      incognitoBtn.title = chk.checked ? 'Disable Nobody mode' : 'Enable Nobody mode — no memory, no history saved';
+      incognitoBtn.title = chk.checked ? 'Disable Outis mode' : 'Enable Outis mode — no memory, no history saved';
       const welcomeName = document.querySelector('.welcome-name');
       if (chk.checked) {
-        incognitoBtn.innerHTML = INCOGNITO_EYE_CLOSED + '<span class="incognito-label">Nobody</span>';
+        incognitoBtn.innerHTML = INCOGNITO_EYE_CLOSED + '<span class="incognito-label">Outis</span>';
         if (welcomeName) {
           welcomeName.dataset.originalHtml = welcomeName.innerHTML;
-          welcomeName.innerHTML = '<svg class="welcome-boat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>Nobody';
+          welcomeName.innerHTML = '<svg class="brand-eye welcome-boat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>Outis';
           // Restart the L→R clip-wipe reveal on the new label
           welcomeName.style.animation = 'none';
           welcomeName.offsetHeight;
@@ -2321,7 +2381,7 @@ function initializeEventListeners() {
         if (tipEl) { tipEl.dataset.originalTip = tipEl.textContent; tipEl.textContent = 'Temporary session \u2014 won\u2019t be saved and no memory activation.'; tipEl.style.opacity = '0.5'; tipEl.style.marginTop = '8px'; }
         // Default to plain chat: disable tools visually, switch to chat mode.
         // IMPORTANT: don't overwrite the user's persisted per-mode tool prefs
-        // (`web_agent`, `bash_agent`, `web_chat`, `bash_chat`). Nobody mode is
+        // (`web_agent`, `bash_agent`, `web_chat`, `bash_chat`). Outis mode is
         // ephemeral — their agent-mode defaults must come back on toggle-off.
         const _offIds = ['web-toggle', 'bash-toggle', 'research-toggle'];
         _offIds.forEach(id => { const c = el(id); if (c) c.checked = false; });
@@ -2333,7 +2393,7 @@ function initializeEventListeners() {
         ts.research = false; ts.mode = 'chat';
         Storage.setJSON(Storage.KEYS.TOGGLES, ts);
       } else {
-        incognitoBtn.innerHTML = INCOGNITO_EYE_OPEN + '<span class="incognito-label">Nobody</span>';
+        incognitoBtn.innerHTML = INCOGNITO_EYE_OPEN + '<span class="incognito-label">Outis</span>';
         if (welcomeName && welcomeName.dataset.originalHtml) {
           welcomeName.innerHTML = welcomeName.dataset.originalHtml;
           // Restart the L→R clip-wipe reveal on the restored label
@@ -2351,7 +2411,7 @@ function initializeEventListeners() {
           welcomeSub2.style.display = '';
         }
         if (tipEl && tipEl.dataset.originalTip) { tipEl.textContent = tipEl.dataset.originalTip; tipEl.style.opacity = ''; tipEl.style.marginTop = ''; }
-        // Heal any previously-persisted false values from the old Nobody bug
+        // Heal any previously-persisted false values from the old Outis/Nobody bug
         // so agent-mode defaults (web/bash ON) come back.
         const _ts = Storage.getJSON(Storage.KEYS.TOGGLES, {});
         let _dirty = false;
@@ -2415,6 +2475,7 @@ function initializeEventListeners() {
     'tool-research':       '#tool-research-btn',
     'tool-gallery':        '#tool-gallery-btn',
     'tool-library':        '#tool-library-btn',
+    'tool-project-files':  '#tool-project-files-btn',
     'tool-memory':         '#tool-memory-btn',
     'tool-notes':          '#tool-notes-btn',
     'tool-tasks':          '#tool-tasks-btn',
@@ -2475,7 +2536,31 @@ function initializeEventListeners() {
     // Hide thinking sections toggle (show-thinking: checked=show, unchecked=hide)
     document.body.classList.toggle('hide-thinking', state['show-thinking'] === false);
     _applyObsidianVaultVisibility(state);
+    syncProjectFilesToolVisibility(state);
   }
+
+  /** Project files tool lives in Explore but only when a project is scoped. */
+  function syncProjectFilesToolVisibility(state = loadUIVis()) {
+    const hasProject = !!getActiveProjectId();
+    const prefVisible = 'tool-project-files' in state
+      ? state['tool-project-files'] !== false
+      : true;
+    const show = hasProject && prefVisible;
+    for (const id of ['tool-project-files-btn', 'rail-project-files']) {
+      const node = document.getElementById(id);
+      if (!node) continue;
+      node.style.display = show ? '' : 'none';
+      node.hidden = !show;
+    }
+    const lib = document.getElementById('tool-library-btn');
+    const pf = document.getElementById('tool-project-files-btn');
+    if (lib) lib.classList.toggle('tool-group-item-last', !show);
+    if (pf) pf.classList.toggle('tool-group-item-last', show);
+  }
+
+  window.addEventListener(ACTIVE_PROJECT_EVENT, () => {
+    syncProjectFilesToolVisibility();
+  });
 
   function _applyObsidianVaultVisibility(state) {
     const enabled = window._obsidianEnabled === true;
@@ -2732,26 +2817,44 @@ function initializeEventListeners() {
       })
       .catch(() => applyUIVis(loadUIVis()));
 
-    // Generic draggable for all .modal elements
-    const _sharedDragModalIds = new Set(['settings-modal']);
+    // Open-reset for static .modal shells: clear flex-center residue ONLY when
+    // transitioning hidden → visible. Do NOT clear on every class change
+    // (e.g. modal-dragging) — that wiped tile snaps after commit.
+    // Legacy header-drag is skipped for modals that own makeWindowDraggable
+    // (memory / cookbook / theme / settings) so two drag paths don't fight.
+    const _sharedDragModalIds = new Set([
+      'settings-modal',
+      'memory-modal',
+      'cookbook-modal',
+      'theme-modal',
+    ]);
     try { document.querySelectorAll('.modal').forEach(m => {
-      if (_sharedDragModalIds.has(m.id)) return;
       const content = m.querySelector('.modal-content');
       const header = m.querySelector('.modal-header');
       if (!content || !header) return;
-      let dragX, dragY, startLeft, startTop, dragging = false;
 
-      // Reset to flex-centered position each time modal opens
+      let _wasHidden = m.classList.contains('hidden');
       new MutationObserver(() => {
-        if (!m.classList.contains('hidden')) {
-          content.style.position = '';
-          content.style.left = '';
-          content.style.top = '';
-          content.style.right = '';
-          content.style.bottom = '';
-          content.style.margin = '';
+        const nowHidden = m.classList.contains('hidden');
+        if (_wasHidden && !nowHidden) {
+          // Fresh open — reset to CSS centering unless already tiled/docked.
+          if (!content.dataset._tileZone
+              && !m.classList.contains('modal-left-docked')
+              && !m.classList.contains('modal-right-docked')) {
+            content.style.position = '';
+            content.style.left = '';
+            content.style.top = '';
+            content.style.right = '';
+            content.style.bottom = '';
+            content.style.margin = '';
+          }
         }
+        _wasHidden = nowHidden;
       }).observe(m, { attributes: true, attributeFilter: ['class'] });
+
+      if (_sharedDragModalIds.has(m.id)) return;
+
+      let dragX, dragY, startLeft, startTop, dragging = false;
 
       function startDrag(clientX, clientY) {
         dragging = true;
@@ -3440,6 +3543,21 @@ function initializeEventListeners() {
 function startNobodyApp() {
   if (window.__nobodyAppStarted) return;
   window.__nobodyAppStarted = true;
+
+  const _dismissAppLoader = () => {
+    const loader = document.getElementById('app-loader');
+    if (!loader || loader.dataset.dismissed === '1') return;
+    loader.dataset.dismissed = '1';
+    loader.style.opacity = '0';
+    setTimeout(() => { try { loader.remove(); } catch (_) {} }, 300);
+  };
+  // Belt-and-suspenders with the HTML inline failsafe — clear early if we can.
+  const _loaderFailsafe = setTimeout(() => {
+    console.warn('[boot] startNobodyApp failsafe — dismissing loader');
+    _dismissAppLoader();
+  }, 12000);
+
+  try {
   // Set CSS variables
   document.documentElement.style.setProperty('--line-height', '20px');
 
@@ -3629,7 +3747,7 @@ function startNobodyApp() {
     return originalSubmit.call(chatModule, e);
   }
 
-  chatForm.onsubmit = handleSubmit;
+  if (chatForm) chatForm.onsubmit = handleSubmit;
 
   // ── Dual-purpose send/mic button ──
   const sendBtn = document.querySelector('.send-btn');
@@ -3849,8 +3967,9 @@ function startNobodyApp() {
   const chatContainer = el('chat-container');
 
   // Prevent default to allow drop
-  const chatInputBar = chatContainer.querySelector('.chat-input-bar');
+  const chatInputBar = chatContainer && chatContainer.querySelector('.chat-input-bar');
   function _showDropHighlight() {
+    if (!chatContainer) return;
     chatContainer.style.backgroundColor = 'rgba(0, 170, 255, 0.1)';
     chatContainer.style.transition = 'background-color 0.2s ease';
     if (chatInputBar) {
@@ -3861,6 +3980,7 @@ function startNobodyApp() {
     }
   }
   function _hideDropHighlight() {
+    if (!chatContainer) return;
     chatContainer.style.backgroundColor = '';
     if (chatInputBar) {
       chatInputBar.style.outline = '';
@@ -3869,6 +3989,7 @@ function startNobodyApp() {
     }
   }
 
+  if (chatContainer) {
   chatContainer.addEventListener('dragover', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -3890,9 +4011,11 @@ function startNobodyApp() {
     e.preventDefault();
     _hideDropHighlight();
   });
+  }
   
   // Make the attachment strip also a drop target
   const attachStrip = el('attach-strip');
+  if (attachStrip) {
   attachStrip.addEventListener('dragover', (e) => {
     e.preventDefault();
     attachStrip.style.backgroundColor = 'rgba(0, 170, 255, 0.1)';
@@ -3914,7 +4037,7 @@ function startNobodyApp() {
     e.preventDefault();
     attachStrip.style.backgroundColor = '';
   });
-
+  }
   // ── Compare-mode file drop shield ──────────────────────────────────────────
   // Compare reuses #chat-container, but each pane renders into a sandboxed
   // <iframe>. Iframes swallow drag-and-drop events: a file dropped on a pane is
@@ -3948,7 +4071,7 @@ function startNobodyApp() {
         'backdrop-filter:blur(2px);';
       const _box = document.createElement('div');
       _box.style.cssText = 'pointer-events:none;border:2px dashed rgba(255,255,255,0.9);' +
-        'border-radius:14px;padding:20px 28px;background:rgba(0,0,0,0.4);' +
+        'border-radius:2px;padding:20px 28px;background:rgba(0,0,0,0.4);' +
         'font:600 16px/1.4 system-ui,sans-serif;color:#fff;';
       _box.textContent = 'Drop files to attach';
       _cmpDropShield.appendChild(_box);
@@ -3997,33 +4120,46 @@ function startNobodyApp() {
       scrollHistory: uiModule.scrollHistoryInstant
     });
 
-    // Load sessions first (critical path) — remove loader when done
+    // Load sessions first (critical path) — remove loader when done.
+    // Do NOT await project restore before dismissing the splash: a hung
+    // workspace open would leave users stuck on the loading screen forever.
     const _loaderSlowTimer = setTimeout(() => {
       const slow = document.getElementById('app-loader-slow');
       if (slow) slow.hidden = false;
     }, 8000);
-    sessionModule.loadSessions()
-      .then(async () => {
-        if (window._pendingProjectRestore && window.openProjectWorkspace) {
-          const projectId = window._pendingProjectRestore;
-          window._pendingProjectRestore = null;
-          await window.openProjectWorkspace(projectId);
-        }
-      })
+    // Race loadSessions against a timeout so a hung /api/sessions or
+    // selectSession cannot pin the splash indefinitely.
+    const _sessionsBoot = Promise.race([
+      sessionModule.loadSessions(),
+      new Promise((resolve) => setTimeout(() => {
+        console.warn('[boot] loadSessions timed out — continuing without it');
+        resolve();
+      }, 10000)),
+    ]);
+    _sessionsBoot
       .catch(e => console.warn('loadSessions error:', e))
       .finally(() => {
         clearTimeout(_loaderSlowTimer);
-        const loader = document.getElementById('app-loader');
-        if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 300); }
+        clearTimeout(_loaderFailsafe);
+        _dismissAppLoader();
         // Fire any URL route opener now that sessions + module wiring are
         // ready. Deferred from up top of init for exactly this reason.
         if (window._nobodyRouteOpener) {
           try { window._nobodyRouteOpener(); } catch (_) {}
           window._nobodyRouteOpener = null;
         }
+        // Project restore is best-effort and must not gate the splash.
+        if (window._pendingProjectRestore && window.openProjectWorkspace) {
+          const projectId = window._pendingProjectRestore;
+          window._pendingProjectRestore = null;
+          Promise.resolve(window.openProjectWorkspace(projectId))
+            .catch(e => console.warn('project restore failed:', e));
+        }
       });
   } else {
     console.error('Session module not loaded!');
+    clearTimeout(_loaderFailsafe);
+    _dismissAppLoader();
   }
 
   // Non-critical: load in parallel, resolve silently
@@ -4175,6 +4311,11 @@ function startNobodyApp() {
     document.querySelectorAll('pre code:not(.hljs)').forEach(block => {
       window.hljs.highlightElement(block);
     });
+  }
+  } catch (e) {
+    console.error('[boot] startNobodyApp failed:', e);
+    clearTimeout(_loaderFailsafe);
+    _dismissAppLoader();
   }
 }
 

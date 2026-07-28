@@ -253,7 +253,7 @@ function _bindRowInteractions(row, project) {
     }
   }, { passive: true });
 
-  row.addEventListener('click', (e) => {
+  const activate = (e) => {
     if (e.target.closest('.project-menu-btn') || e.target.closest('.project-dropdown') || e.target.closest('.project-select-cb')) return;
     if (touchMoved || longPressed) {
       touchMoved = false;
@@ -266,14 +266,25 @@ function _bindRowInteractions(row, project) {
       return;
     }
     _handlers?.onOpen?.(project.id);
+  };
+
+  row.addEventListener('click', activate);
+  row.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.target !== row) return;
+    e.preventDefault();
+    activate(e);
   });
 }
 
 function _createListRow(project, openId) {
-  const row = document.createElement('button');
-  row.type = 'button';
+  // Use a div (like session rows) so the overflow menu can be a real <button>
+  // without nested-button HTML, which browsers rewrite and break layout.
+  const row = document.createElement('div');
   row.className = `list-item project-list-item${project.id === openId ? ' active' : ''}`;
   row.dataset.projectId = project.id;
+  row.setAttribute('role', 'option');
+  row.tabIndex = 0;
 
   if (_selectMode) {
     const dot = document.createElement('span');

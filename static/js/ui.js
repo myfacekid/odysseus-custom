@@ -4,7 +4,6 @@
  * UI utilities for toasts, modals, scrolling, and user feedback
  */
 
-import themeModule from './theme.js';
 import * as Modals from './modalManager.js';
 import spinnerModule from './spinner.js';
 import { registerMenuDismiss, dismissTopMenu, dismissOrRemove } from './escMenuStack.js';
@@ -345,7 +344,7 @@ export function showToast(msg, durationOrOpts) {
     const btnRow = document.createElement('span');
     btnRow.style.cssText = 'display:inline-flex;align-items:center;gap:6px;';
 
-    const btnStyle = 'padding:2px 10px;border:1px solid var(--fg);border-radius:4px;background:none;color:var(--fg);cursor:pointer;font-size:12px;pointer-events:auto;display:inline-flex;align-items:center;';
+    const btnStyle = 'padding:2px 10px;border:1px solid var(--fg);border-radius:2px;background:none;color:var(--fg);cursor:pointer;font-size:12px;pointer-events:auto;display:inline-flex;align-items:center;';
 
     const finishToast = () => {
       clearTimeout(toastEl._hideTimer);

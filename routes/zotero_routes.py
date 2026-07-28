@@ -15,7 +15,12 @@ from src.zotero_client import (
     mask_api_key,
     resolve_zotero_credentials,
 )
-from src.zotero_catalog import catalog_stats, clear_zotero_catalog, sync_zotero_catalog
+from src.zotero_catalog import (
+    catalog_stats,
+    clear_zotero_catalog,
+    load_collections,
+    sync_zotero_catalog,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +204,67 @@ def setup_zotero_routes() -> APIRouter:
                 "DOI": data.get("DOI"),
             })
         return {"items": simplified, "count": len(simplified)}
+
+    @router.get("/collections")
+    async def list_collections(request: Request):
+        """List Zotero collections for destination pickers (catalog-first)."""
+        owner = _owner(request)
+        creds = resolve_zotero_credentials(owner)
+        if not creds:
+            raise HTTPException(400, "Zotero not configured")
+        cols = load_collections(owner)
+        source = "catalog"
+        if not cols:
+            client = ZoteroClient(creds["api_key"], creds["user_id"])
+            cols = client.list_collections()
+            source = "live"
+
+        by_key = { (c.get("key") or "").strip(): c for c in cols if (c.get("key") or "").strip() }
+
+        def _display_path(col: dict) -> str:
+            """Prefer catalog path; else rebuild Parent/Child from parent links."""
+            existing = (col.get("path") or "").strip()
+            # Catalog paths use " / "; normalize to dir/subdir for the picker.
+            if existing and " / " in existing:
+                return "/".join(part.strip() for part in existing.split("/") if part.strip())
+            if existing and "/" in existing and existing != (col.get("name") or "").strip():
+                return "/".join(part.strip() for part in existing.split("/") if part.strip())
+            if existing and existing != (col.get("name") or "").strip():
+                return existing
+
+            parts = []
+            current = col
+            seen = set()
+            while current:
+                key = (current.get("key") or "").strip()
+                if not key or key in seen:
+                    break
+                seen.add(key)
+                parts.insert(0, (current.get("name") or "Untitled").strip())
+                parent = (current.get("parent") or "").strip()
+                current = by_key.get(parent) if parent else None
+            return "/".join(parts) if parts else (col.get("name") or "Untitled").strip()
+
+        simplified = []
+        for col in cols:
+            key = (col.get("key") or "").strip()
+            if not key:
+                continue
+            path = _display_path(col)
+            name = (col.get("name") or "Untitled").strip()
+            depth = path.count("/") if path else 0
+            simplified.append({
+                "key": key,
+                "name": name,
+                "path": path,
+                "depth": depth,
+            })
+        simplified.sort(key=lambda c: (c.get("path") or "").lower())
+        return {
+            "collections": simplified,
+            "count": len(simplified),
+            "source": source,
+        }
 
     @router.post("/export")
     async def export_research_sources(body: ZoteroExportRequest, request: Request):

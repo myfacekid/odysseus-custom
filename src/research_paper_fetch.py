@@ -11,7 +11,7 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-_USER_AGENT = "Odysseus-DeepResearch/1.0 (mailto:support@example.com)"
+_USER_AGENT = "Nobody-DeepResearch/1.0 (mailto:support@example.com)"
 _MIN_USEFUL_CHARS = 280
 _SHELL_MARKERS = (
     "redirecting",

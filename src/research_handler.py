@@ -789,9 +789,11 @@ class ResearchHandler:
         *,
         scope: str = "cited",
         citation_nums: list | None = None,
+        collection_key: str | None = None,
     ) -> dict:
         """Save selected research sources to the user's Zotero library."""
         from src.research_zotero_save import save_research_sources_to_zotero
+        from src.zotero_catalog import load_collections
         from src.zotero_client import ZoteroClient, resolve_zotero_credentials
 
         data = self._get_session_json(session_id)
@@ -802,11 +804,16 @@ class ResearchHandler:
         if not creds:
             raise ValueError("Zotero not configured")
         client = ZoteroClient(creds["api_key"], creds["user_id"])
+        collections = None
+        if (collection_key or "").strip():
+            collections = load_collections(owner) or client.list_collections()
         return save_research_sources_to_zotero(
             data,
             client,
             scope=scope,
             citation_nums=citation_nums,
+            collection_key=collection_key,
+            collections=collections,
         )
 
     def preview_save_to_zotero(self, session_id: str, *, scope: str = "cited") -> dict:

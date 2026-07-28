@@ -207,19 +207,22 @@ HOUSEKEEPING_DEFAULTS = {
     "tidy_documents":       {"name": "Documents Tidy",           "trigger_type": "event", "trigger_event": "document_created", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Documents"]},
     "consolidate_memory":   {"name": "Memory Tidy",              "trigger_type": "event", "trigger_event": "memory_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Memory"]},
     "tidy_research":        {"name": "Research Tidy",            "trigger_type": "event", "trigger_event": "research_completed", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Tidy Research"]},
-    "summarize_emails":     {"name": "Email (Summary)",          "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */2 * * *", "ship_paused": True, "legacy_names": ["Tidy Email (Summary)"]},
-    "draft_email_replies":  {"name": "Email AI Auto Reply",      "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */2 * * *", "ship_paused": True, "legacy_names": ["Tidy Email (Replies)", "AI Auto Reply"]},
-    "extract_email_events": {"name": "Email Calendar Events",    "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */1 * * *", "ship_paused": True, "legacy_names": ["Email → Calendar Events"]},
     "classify_events":      {"name": "Calendar Classify Events", "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 6,18 * * *", "ship_paused": True, "legacy_names": ["Classify Calendar Events"]},
-    "mark_email_boundaries": {"name": "Email Mark Boundaries",   "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */2 * * *", "ship_paused": True, "legacy_names": ["Mark Email Boundaries"]},
-    "check_email_urgency":   {"name": "Email Tags",               "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 * * * *", "ship_paused": True, "old_cron_expressions": ["*/15 * * * *"], "legacy_names": ["Email Triage", "Urgent Email"]},
     "audit_skills":          {"name": "Skills Audit",             "trigger_type": "event", "trigger_event": "skill_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Audit Skills"]},
     "audit_links":           {"name": "Link Audit",               "trigger_type": "event", "trigger_event": "link_proposed", "trigger_count": 10, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Audit Links", "Audit Learned Links"]},
 }
 
+# Deleted on reconcile (ensure_default_tasks). Email built-ins are retired
+# because the Email/IMAP/SMTP stack no longer ships.
 RETIRED_HOUSEKEEPING_ACTIONS = frozenset({
     "tidy_calendar",
     "tidy_email_inbox",
+    "summarize_emails",
+    "draft_email_replies",
+    "extract_email_events",
+    "mark_email_boundaries",
+    "check_email_urgency",
+    "learn_sender_signatures",
 })
 
 
@@ -944,12 +947,6 @@ class TaskScheduler:
     # content) — don't pollute the assistant chat session with their summaries.
     # Activity log + reminder email already carry everything the user needs.
     _SILENT_ACTIONS = frozenset({
-        "check_email_urgency",
-        "mark_email_boundaries",
-        "learn_sender_signatures",
-        "summarize_emails",
-        "draft_email_replies",
-        "extract_email_events",
         "classify_events",
         "tidy_sessions",
         "tidy_documents",
@@ -961,13 +958,7 @@ class TaskScheduler:
     })
 
     _MODEL_BACKED_ACTIONS = frozenset({
-        "summarize_emails",
-        "draft_email_replies",
-        "extract_email_events",
         "classify_events",
-        "mark_email_boundaries",
-        "learn_sender_signatures",
-        "check_email_urgency",
         "test_skills",
         "audit_skills",
         "consolidate_memory",
@@ -1953,16 +1944,6 @@ class TaskScheduler:
                     renamed.append(task.action)
                 normalized = False
                 desired_trigger = defs.get("trigger_type", "schedule")
-                if task.action == "check_email_urgency":
-                    old_crons = set(defs.get("old_cron_expressions") or [])
-                    if task.schedule == "cron" and (task.cron_expression or "") in old_crons:
-                        task.cron_expression = defs["cron_expression"]
-                        task.next_run = compute_next_run(
-                            defs["schedule"], defs["scheduled_time"], None, None,
-                            after=_utcnow(), cron_expression=defs["cron_expression"],
-                            tz_name=_resolve_task_timezone(db, task),
-                        )
-                        normalized = True
                 if desired_trigger == "event" and (
                     (task.trigger_type or "schedule") != "event"
                     or task.trigger_event != defs.get("trigger_event")
@@ -2026,8 +2007,8 @@ class TaskScheduler:
                     scheduled_time=defs["scheduled_time"],
                     cron_expression=defs["cron_expression"],
                     next_run=next_run,
-                    # Most built-ins are active by default. The invasive
-                    # AI/email/calendar tasks opt into a paused starting state
+                    # Most built-ins are active by default. Invasive
+                    # AI/calendar tasks opt into a paused starting state
                     # via ship_paused so users can enable them deliberately.
                     status="paused" if ships_paused else "active",
                     output_target="session",

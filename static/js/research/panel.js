@@ -3,7 +3,9 @@
  */
 import * as jobs from './jobs.js';
 import * as projectLink from './projectLink.js';
-import themeModule from '../theme.js';
+import { openZoteroSaveSheet } from './zoteroSaveSheet.js';
+import { makeWindowDraggable } from '../windowDrag.js';
+import { snapModalToZone } from '../tileManager.js';
 import createResearchSynapse from '../researchSynapse.js';
 import spinnerModule from '../spinner.js';
 import { sortModelIds } from '../modelSort.js';
@@ -1003,7 +1005,7 @@ export function openPanel(focusJobId) {
   // Mobile: full-screen so the content has room and the jobs list can scroll
   // inside it. Desktop: centered ~640px / 85vh modal like the rest.
   pane.style.cssText = (window.innerWidth <= 768)
-    ? 'width:100vw;max-width:100vw;height:90dvh;max-height:90dvh;border-radius:14px 14px 0 0;background:var(--bg);'
+    ? 'width:100vw;max-width:100vw;height:90dvh;max-height:90dvh;border-radius:2px 2px 0 0;background:var(--bg);'
     : 'width:min(640px, 92vw);max-height:85vh;background:var(--bg);';
   pane.innerHTML = _buildPanelHTML();
 
@@ -1024,10 +1026,30 @@ export function openPanel(focusJobId) {
   };
   document.addEventListener('keydown', _onDocKeydown);
 
-  // Make the pane draggable by its header — same pattern as Library/Calendar.
+  // Desktop: shared window drag + edge dock + tile snap (parity with notes/docs).
   const paneHeader = pane.querySelector('.research-pane-header');
-  if (themeModule && themeModule.makeDraggable && paneHeader) {
-    themeModule.makeDraggable(pane, paneHeader);
+  if (paneHeader && window.innerWidth > 768) {
+    overlay.setAttribute('data-tile-window', '1');
+    makeWindowDraggable(overlay, {
+      content: pane,
+      header: paneHeader,
+      enableDock: true,
+      enableLeftDock: true,
+      onEnterFullscreen: () => snapModalToZone(overlay, { name: 'fullscreen' }),
+      onExitFullscreen: (cx, cy) => {
+        const w = pane.offsetWidth || 640;
+        const h = pane.offsetHeight || 480;
+        pane.style.position = 'fixed';
+        pane.style.left = `${Math.max(0, (cx || window.innerWidth / 2) - w / 2)}px`;
+        pane.style.top = `${Math.max(0, (cy || 80) - 24)}px`;
+        pane.style.width = `${w}px`;
+        pane.style.height = `${h}px`;
+        pane.style.right = 'auto';
+        pane.style.bottom = 'auto';
+        pane.style.maxWidth = 'none';
+        pane.style.transform = 'none';
+      },
+    });
   }
 
   _wireEvents(pane);
@@ -1185,7 +1207,8 @@ function _buildPanelHTML() {
           <div class="research-plan-grid">
             <label class="research-plan-field research-plan-field--wide">
               <span>Search keywords</span>
-              <textarea id="research-plan-keywords" rows="2" placeholder="Foldseek, 3Di alphabet, structure search…"></textarea>
+              <textarea id="research-plan-keywords" rows="2" placeholder="foldseek, esm3, structure representation…"></textarea>
+              <span class="research-plan-field-hint">Query phrases sent to academic search APIs. Mix named methods with topical wording.</span>
             </label>
             <label class="research-plan-field">
               <span>Scope</span>
@@ -1199,26 +1222,34 @@ function _buildPanelHTML() {
           </div>
           <details class="research-disclosure research-plan-advanced">
             <summary>Refine plan (optional)</summary>
+            <p class="research-plan-field-hint research-plan-advanced-lead">
+              Anchors fence relevance; topics set coverage goals — keep them different.
+            </p>
             <div class="research-plan-grid">
               <label class="research-plan-field">
                 <span>Anchor terms</span>
-                <textarea id="research-plan-anchors" rows="2" placeholder="Terms that must stay in scope…"></textarea>
+                <textarea id="research-plan-anchors" rows="2" placeholder="foldseek, esm3, 3di…"></textarea>
+                <span class="research-plan-field-hint">Named methods, models, or acronyms papers should stay close to. Hard on-topic filter.</span>
               </label>
               <label class="research-plan-field">
                 <span>Avoid topics</span>
-                <textarea id="research-plan-avoid" rows="2" placeholder="Unrelated subfields to reject…"></textarea>
+                <textarea id="research-plan-avoid" rows="2" placeholder="gene ontology, function prediction…"></textarea>
+                <span class="research-plan-field-hint">Nearby subfields that share vocabulary but are out of scope.</span>
               </label>
               <label class="research-plan-field research-plan-field--wide">
                 <span>Sub-questions</span>
-                <textarea id="research-plan-subq" rows="2"></textarea>
+                <textarea id="research-plan-subq" rows="2" placeholder="How does method A encode structure?…"></textarea>
+                <span class="research-plan-field-hint">Specific questions the literature review should answer.</span>
               </label>
               <label class="research-plan-field research-plan-field--wide">
                 <span>Key topics</span>
-                <textarea id="research-plan-topics" rows="2"></textarea>
+                <textarea id="research-plan-topics" rows="2" placeholder="structural alphabet, search space coverage…"></textarea>
+                <span class="research-plan-field-hint">Thematic coverage goals (concepts, populations, outcomes) — not a copy of anchor terms.</span>
               </label>
               <label class="research-plan-field research-plan-field--wide">
                 <span>Success criteria</span>
-                <textarea id="research-plan-success" rows="2"></textarea>
+                <textarea id="research-plan-success" rows="2" placeholder="A comparison grounded in the named methods with explicit limitations."></textarea>
+                <span class="research-plan-field-hint">What a complete answer looks like when research is done.</span>
               </label>
             </div>
           </details>
@@ -1920,7 +1951,7 @@ function _buildJobCard(job) {
         <button class="research-job-action" data-action="chat" title="Open follow-up chat with this research as context">${_chatIcon} Discuss</button>
         <button class="research-job-action" data-action="export" title="Download report">${_exportIcon} Export</button>
         <button class="research-job-action" data-action="copy" title="Copy report to clipboard">${_copyIcon} Copy</button>
-        <button class="research-job-action" data-action="zotero" title="Save cited web sources to your Zotero library">${_bookmarkIcon} Save to Zotero</button>
+        <button class="research-job-action" data-action="zotero" title="Choose sources and a Zotero folder">${_bookmarkIcon} Save to Zotero</button>
         <button class="research-job-action" data-action="project" title="Link this research to a project workspace">${_folderPlusIcon} Add to project</button>
         <button class="research-job-action research-job-action-dim" data-action="dismiss" title="Clear from list">${_cancelIcon} Clear</button>
         <button class="research-job-action research-job-action-dim" data-action="delete" title="Delete from disk">${_trashIcon} Delete</button>
@@ -1984,23 +2015,26 @@ function _buildJobCard(job) {
       e.stopPropagation();
       const btn = e.currentTarget;
       const orig = btn.textContent;
-      btn.textContent = 'Saving…';
       btn.disabled = true;
       try {
-        const res = await fetch(`${_apiBase}/api/research/${encodeURIComponent(job.id)}/save-to-zotero`, {
-          method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scope: 'cited' }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Save failed');
-        const skipped = data.skipped_in_library ? ` (${data.skipped_in_library} already in library)` : '';
-        btn.textContent = `Saved ${data.created || 0}${skipped}`;
-        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+        const result = await openZoteroSaveSheet({ sessionId: job.id, apiBase: _apiBase });
+        if (result?.cancelled) return;
+        if (result?.ok) {
+          const skipped = result.skipped_in_library
+            ? ` (${result.skipped_in_library} already in library)`
+            : '';
+          btn.textContent = `Saved ${result.created || 0}${skipped}`;
+          setTimeout(() => { btn.textContent = orig; }, 2500);
+        }
       } catch (err) {
         btn.textContent = 'Failed';
         btn.title = err.message || 'Save failed';
-        setTimeout(() => { btn.textContent = orig; btn.disabled = false; btn.title = 'Save cited web sources to your Zotero library'; }, 2500);
+        setTimeout(() => {
+          btn.textContent = orig;
+          btn.title = 'Choose sources and a Zotero folder';
+        }, 2500);
+      } finally {
+        btn.disabled = false;
       }
     });
     card.querySelector('[data-action="project"]')?.addEventListener('click', (e) => {

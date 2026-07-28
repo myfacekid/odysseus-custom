@@ -117,7 +117,7 @@ def test_apply_session_tool_policy_regular_session(routing_env):
 def test_project_session_tool_schema_filter(routing_env):
     disabled = apply_session_tool_policy(set(), routing_env["project_session_id"])
     names = _visible_tool_names(disabled)
-    assert {"read_project_file", "write_project_file", "run_project_script"}.issubset(names)
+    assert {"read_project_file", "write_project_file", "run_project_script", "promote_project_file"}.issubset(names)
     assert "search_knowledge" in names
     assert "create_document" in names
     assert "bash" not in names
@@ -131,6 +131,7 @@ def test_regular_session_hides_project_tools(routing_env):
     names = _visible_tool_names(disabled)
     assert "read_project_file" not in names
     assert "run_project_script" not in names
+    assert "promote_project_file" not in names
     assert "bash" in names
 
 

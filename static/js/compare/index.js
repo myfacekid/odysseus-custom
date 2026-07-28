@@ -318,7 +318,7 @@ async function _buildCompareUI() {
   const headerActions = document.createElement('div');
   headerActions.style.cssText = 'display:flex;align-items:center;gap:2px;';
 
-  const _btnCSS = 'background:none;border:1px solid var(--border);color:var(--fg);cursor:pointer;padding:3px 10px;font-size:11px;font-weight:600;opacity:0.7;transition:all 0.15s;line-height:1;border-radius:4px;display:inline-flex;align-items:center;font-family:inherit;';
+  const _btnCSS = 'background:none;border:1px solid var(--border);color:var(--fg);cursor:pointer;padding:3px 10px;font-size:11px;font-weight:600;opacity:0.7;transition:all 0.15s;line-height:1;border-radius:2px;display:inline-flex;align-items:center;font-family:inherit;';
 
   const checkBtn = document.createElement('button');
   checkBtn.id = 'compare-check-btn';
@@ -1020,7 +1020,7 @@ function _toggleExportMenu(btn) {
   const r = btn.getBoundingClientRect();
   const m = document.createElement('div');
   m.className = 'compare-export-menu';
-  m.style.cssText = 'position:fixed;z-index:10001;top:' + (r.bottom + 4) + 'px;left:' + r.left + 'px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);padding:4px;font-size:12px;display:flex;flex-direction:column;min-width:170px;';
+  m.style.cssText = 'position:fixed;z-index:10001;top:' + (r.bottom + 4) + 'px;left:' + r.left + 'px;background:var(--panel,var(--bg));border:1px solid var(--border);border-radius:2px;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);padding:4px;font-size:12px;display:flex;flex-direction:column;min-width:170px;';
   const opts = [
     { label: 'Copy as Markdown', fn: () => _exportCopyMarkdown(btn) },
     { label: 'Download .md',     fn: () => _exportDownloadMarkdown() },
@@ -1030,7 +1030,7 @@ function _toggleExportMenu(btn) {
     const item = document.createElement('button');
     item.type = 'button';
     item.textContent = o.label;
-    item.style.cssText = 'background:none;border:none;color:var(--fg);text-align:left;padding:8px 12px;border-radius:6px;cursor:pointer;font:inherit;font-size:12px;';
+    item.style.cssText = 'background:none;border:none;color:var(--fg);text-align:left;padding:8px 12px;border-radius:2px;cursor:pointer;font:inherit;font-size:12px;';
     item.addEventListener('mouseenter', () => { item.style.background = 'color-mix(in srgb, var(--fg) 8%, transparent)'; });
     item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
     item.addEventListener('click', () => { _closeExportMenu(); o.fn(); });
@@ -1091,7 +1091,7 @@ function _exportPrint() {
   const escape = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const html = '<!doctype html><meta charset="utf-8"><title>Compare export</title>' +
     '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:780px;margin:32px auto;padding:0 24px;line-height:1.55;color:#222}' +
-    'pre{background:#f5f5f5;border-radius:6px;padding:10px;white-space:pre-wrap}' +
+    'pre{background:#f5f5f5;border-radius:2px;padding:10px;white-space:pre-wrap}' +
     'h1{margin-top:0}h2{border-bottom:1px solid #ddd;padding-bottom:4px;margin-top:32px}' +
     'hr{border:none;border-top:1px solid #ccc;margin:24px 0}' +
     '</style><body><pre style="background:none;padding:0">' + escape(md) + '</pre>' +
@@ -1415,7 +1415,7 @@ async function showShufflePoolEditor() {
 
     items.forEach(m => {
       const row = document.createElement('label');
-      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;font-size:0.85em;color:var(--fg);border-radius:4px;';
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;font-size:0.85em;color:var(--fg);border-radius:2px;';
       row.addEventListener('mouseenter', () => { row.style.background = 'color-mix(in srgb, var(--fg) 4%, transparent)'; });
       row.addEventListener('mouseleave', () => { row.style.background = ''; });
       const chk = document.createElement('input');

@@ -244,6 +244,14 @@ export function makeWindowDraggable(modal, options = {}) {
     dragging = false;
     if (modal) modal.classList.remove('modal-dragging');
     _showSnapHint(false);
+    // Tile half/maximize wins over edge dock when tileManager just snapped
+    // this content (pointerup runs before mouseup). Don't let dock (~38%)
+    // overwrite a fresh half snap (~50%).
+    if (content.dataset._tileZone) {
+      if (rightDock) rightDock.release();
+      if (leftDock) leftDock.release();
+      return;
+    }
     // Top edge wins over side edges — fullscreen is the more common gesture.
     if (enableFullscreen && typeof cy === 'number' && cy <= SNAP_PX) {
       if (rightDock) rightDock.release();

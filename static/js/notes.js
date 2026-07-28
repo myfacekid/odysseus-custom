@@ -7,7 +7,7 @@ import { spawnConfetti } from './compare/vote.js';
 import * as Modals from './modalManager.js';
 import { attachColorPicker } from './colorPicker.js';
 import { makeWindowDraggable } from './windowDrag.js';
-import { snapModalToZone } from './tileManager.js';
+import { snapModalToZone, markTileWindow } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
 
 const API_BASE = window.location.origin;
@@ -259,6 +259,7 @@ function _wireNotesWindow(pane) {
   const header = pane.querySelector('.notes-pane-header');
   if (!header) return;
   pane.dataset.windowDragWired = '1';
+  markTileWindow(pane, { content: pane });
   makeWindowDraggable(pane, {
     content: pane,
     header,
@@ -1222,10 +1223,11 @@ export function openPanel() {
   // Create panel
   const pane = document.createElement('div');
   pane.id = 'notes-pane';
-  pane.className = 'notes-pane';
+  pane.className = 'notes-pane tile-window';
+  pane.setAttribute('data-tile-window', '1');
   pane.innerHTML = `
     <div class="notes-mobile-grabber" id="notes-mobile-grabber" aria-hidden="true"></div>
-    <div class="notes-pane-header">
+    <div class="notes-pane-header modal-header tile-window-header">
       <h4 class="notes-pane-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg>Todos</h4>
       <span style="flex:1"></span>
       <button id="notes-archive-toggle" class="doc-action-icon-btn notes-header-text-btn" title="View completed archive" style="opacity:0.8;gap:5px;">
@@ -4821,13 +4823,13 @@ function _wireCanvas(container, initialImageUrl) {
       `color:${color}`,
       'background:#ffffff',
       'border:2px solid var(--accent)',
-      'border-radius:4px',
+      'border-radius:2px',
       'outline:none',
-      'padding:2px 6px',
+      'padding:2px 2px',
       'min-width:120px',
       `max-width:${maxW}px`,
       'z-index:1000',
-      'box-shadow:0 2px 8px rgba(0,0,0,0.25)',
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent)',
       'pointer-events:auto',
     ].join(';');
     wrap.appendChild(input);

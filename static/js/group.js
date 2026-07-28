@@ -65,7 +65,7 @@ function _initGroupTab() {
     participantsEl.innerHTML = '';
     _groupParticipants.forEach((p, idx) => {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px;background:color-mix(in srgb, var(--fg) 3%, transparent);border-radius:6px;';
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 6px;background:color-mix(in srgb, var(--fg) 3%, transparent);border-radius:2px;';
       const label = p.character ? p.character.name : (p.model ? p.model.display : '?');
       const sublabel = p.model ? p.model.display : '';
       row.innerHTML = `
@@ -486,7 +486,7 @@ export async function showModelPicker() {
           <span style="flex:1;font-size:12px;font-weight:500;">${uiModule.esc(m.display)}</span>
         `;
         const sel = document.createElement('select');
-        sel.style.cssText = 'font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--fg);max-width:140px;';
+        sel.style.cssText = 'font-size:11px;padding:3px 6px;border-radius:2px;border:1px solid var(--border);background:var(--bg);color:var(--fg);max-width:140px;';
         let optsHtml = '<option value="">No character</option>';
         characters.forEach(c => {
           optsHtml += `<option value="${c.id}">${uiModule.esc(c.name)}</option>`;
@@ -862,7 +862,7 @@ async function _streamToHolder(modelIdx, sessionId, msg, holderEl, abortCtrl) {
           else if (json.type === 'generated_image' && json.url) {
             const img = document.createElement('img');
             img.src = json.url;
-            img.style.cssText = 'max-width:100%;border-radius:8px;margin:8px 0;';
+            img.style.cssText = 'max-width:100%;border-radius:2px;margin:8px 0;';
             img.loading = 'lazy';
             bodyEl.appendChild(img);
           }

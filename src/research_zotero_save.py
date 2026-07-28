@@ -60,7 +60,11 @@ def _abstract_note(src: EvidenceSource) -> str:
     return "\n\n".join(bits).strip()
 
 
-def source_to_zotero_item(src: EvidenceSource) -> dict:
+def source_to_zotero_item(
+    src: EvidenceSource,
+    *,
+    collection_key: Optional[str] = None,
+) -> dict:
     """Build one Zotero write API item payload from a registry source."""
     title = (src.title or src.url or "Untitled source").strip()
     item: Dict[str, Any] = {
@@ -86,7 +90,27 @@ def source_to_zotero_item(src: EvidenceSource) -> dict:
         item["abstractNote"] = abstract[:8000]
     if src.peer_review_status == "preprint":
         item["libraryCatalog"] = "arXiv"
+    key = (collection_key or "").strip()
+    if key:
+        item["collections"] = [key]
     return item
+
+
+def resolve_save_collection_key(
+    collection_key: Optional[str],
+    collections: Sequence[dict],
+) -> Optional[str]:
+    """Validate a destination collection key. Empty means library root.
+
+    Raises ValueError when the key is set but not found.
+    """
+    key = (collection_key or "").strip()
+    if not key:
+        return None
+    for col in collections or []:
+        if (col.get("key") or "").strip() == key:
+            return key
+    raise ValueError(f"Unknown Zotero collection: {key}")
 
 
 def select_save_sources(
@@ -107,19 +131,46 @@ def select_save_sources(
 
 def preview_save_sources(data: dict, *, scope: str = "cited") -> dict:
     """Summarize which registry sources can be saved vs skipped."""
+    from src.research_evidence import split_references_section
+    from src.research_sourcing import tier_badge_class, tier_display_label
+
     registry = _load_registry(data)
     report = (data.get("raw_report") or data.get("result") or "").strip()
-    cited = extract_citation_nums(report)
-    saveable: List[dict] = []
-    in_library: List[dict] = []
-    for src in registry.sources():
-        row = {
+    body, _refs = split_references_section(report)
+    cite_counts: Dict[int, int] = {}
+    for match in re.finditer(r"\[(\d+)\](?!\()", body or ""):
+        try:
+            num = int(match.group(1))
+        except ValueError:
+            continue
+        if num > 0:
+            cite_counts[num] = cite_counts.get(num, 0) + 1
+    cited = set(cite_counts) or extract_citation_nums(report)
+
+    def _row(src: EvidenceSource) -> dict:
+        tier = (src.sourcing_tier or "").strip().lower()
+        count = cite_counts.get(src.citation_num, 0)
+        return {
             "citation_num": src.citation_num,
             "title": src.title or src.url or "Untitled",
             "source_id": src.source_id,
             "in_library": is_in_library(src),
             "cited": src.citation_num in cited,
+            "cite_count": count,
+            "is_seed": bool(src.is_seed),
+            "sourcing_tier": tier,
+            "sourcing_tier_label": tier_display_label(tier),
+            "sourcing_tier_class": tier_badge_class(tier),
+            "peer_review_status": (src.peer_review_status or "").strip(),
+            "study_type": (src.study_type or "").strip(),
+            "year": (src.year or "").strip(),
+            "authors": (src.authors or "").strip(),
         }
+
+    saveable: List[dict] = []
+    in_library: List[dict] = []
+    for src in registry.sources():
+        row = _row(src)
         if is_in_library(src):
             in_library.append(row)
         elif is_saveable(src):
@@ -153,8 +204,23 @@ def save_research_sources_to_zotero(
     *,
     scope: str = "cited",
     citation_nums: Optional[Sequence[int]] = None,
+    collection_key: Optional[str] = None,
+    collections: Optional[Sequence[dict]] = None,
 ) -> dict:
-    """Create Zotero items for selected research sources."""
+    """Create Zotero items for selected research sources.
+
+    ``collection_key`` files new items into that Zotero collection. When set,
+    pass ``collections`` (from catalog or ``client.list_collections()``) so the
+    key can be validated; otherwise the client is queried.
+    """
+    dest_key = (collection_key or "").strip() or None
+    if dest_key:
+        cols = list(collections) if collections is not None else None
+        if cols is None:
+            list_fn = getattr(client, "list_collections", None)
+            cols = list_fn() if callable(list_fn) else []
+        dest_key = resolve_save_collection_key(dest_key, cols)
+
     registry = _load_registry(data)
     report = (data.get("raw_report") or data.get("result") or "").strip()
 
@@ -173,10 +239,16 @@ def save_research_sources_to_zotero(
                 or src.citation_num in {int(n) for n in citation_nums}
             )
         ])
-        payloads = [source_to_zotero_item(src) for src in selected]
+        payloads = [
+            source_to_zotero_item(src, collection_key=dest_key)
+            for src in selected
+        ]
     else:
         legacy = data.get("sources") or []
         payloads = sources_to_zotero_items(legacy)
+        if dest_key:
+            for item in payloads:
+                item["collections"] = [dest_key]
         selected = []
         skipped_in_library = 0
 
@@ -187,6 +259,7 @@ def save_research_sources_to_zotero(
             "attempted": 0,
             "skipped_in_library": skipped_in_library,
             "saved_citation_nums": [],
+            "collection_key": dest_key,
         }
 
     created, err = _create_items_batched(client, payloads)
@@ -197,6 +270,7 @@ def save_research_sources_to_zotero(
             "attempted": len(payloads),
             "skipped_in_library": skipped_in_library,
             "saved_citation_nums": [src.citation_num for src in selected[:created]],
+            "collection_key": dest_key,
             "error": err,
         }
 
@@ -206,4 +280,5 @@ def save_research_sources_to_zotero(
         "attempted": len(payloads),
         "skipped_in_library": skipped_in_library,
         "saved_citation_nums": [src.citation_num for src in selected],
+        "collection_key": dest_key,
     }

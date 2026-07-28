@@ -95,6 +95,17 @@ export const TOOLS = [
     railClass: 'rail-group-btn',
     icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/></svg>',
   },
+  {
+    key: 'project-files',
+    railId: 'rail-project-files',
+    sidebarId: 'tool-project-files-btn',
+    title: 'Project files — browse the active project folder',
+    group: 'explore',
+    railClass: 'rail-group-btn',
+    // Sidebar + rail are shown only while a project is active (app.js sync).
+    requiresActiveProject: true,
+    icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>',
+  },
   // ── Plan: time and task management ──
   {
     key: 'calendar',
@@ -151,7 +162,7 @@ export const TOOLS = [
 /** Group wrappers matched to the `group` key on adjacent tools. */
 const GROUP_WRAPPERS = {
   knowledge: { className: 'rail-group', role: 'group', ariaLabel: 'Knowledge — Memory and Links' },
-  explore: { className: 'rail-group', role: 'group', ariaLabel: 'Explore — Research, Compare, Gallery, and Library' },
+  explore: { className: 'rail-group', role: 'group', ariaLabel: 'Explore — Research, Compare, Gallery, Library, and Project files' },
   plan: { className: 'rail-group', role: 'group', ariaLabel: 'Plan — Calendar, Todos, and Tasks' },
   customize: { className: 'rail-group', role: 'group', ariaLabel: 'Customize — Cookbook and Theme' },
 };
@@ -162,7 +173,10 @@ function railButtonHTML(tool) {
   const badge = tool.badge
     ? `<span class="${tool.badge}" hidden aria-hidden="true"></span>`
     : '';
-  return `<button class="${cls}" id="${tool.railId}" title="${tool.title}">${badge}${tool.icon}</button>`;
+  // Project-scoped tools stay hidden until app.js syncs against active project.
+  const hiddenAttr = tool.requiresActiveProject ? ' hidden' : '';
+  const styleAttr = tool.requiresActiveProject ? ' style="display:none"' : '';
+  return `<button class="${cls}" id="${tool.railId}" title="${tool.title}"${hiddenAttr}${styleAttr}>${badge}${tool.icon}</button>`;
 }
 
 /**

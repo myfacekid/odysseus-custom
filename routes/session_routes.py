@@ -10,7 +10,7 @@ import logging
 from core.session_manager import SessionManager
 from core.models import ChatMessage
 from src.request_models import SessionResponse
-from core.database import Session as DbSession, SessionLocal, Document, GalleryImage, is_project_workspace_session
+from core.database import Session as DbSession, SessionLocal, Document, GalleryImage
 from src.auth_helpers import get_current_user, effective_user
 from src.text_helpers import _THINK
 
@@ -141,7 +141,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         # Lazy purge: incognito sessions are ephemeral by design — wipe leftovers
         # from the DB and session_manager so they vanish on the next page refresh.
         # BUT: skip sessions that were created within the last 10 minutes.
-        # Without that guard, the purge nukes the active "Nobody" session on the
+        # Without that guard, the purge nukes the active Outis session on the
         # very first /api/sessions call after creation, killing the in-flight
         # chat. The frontend's own _cleanupIncognitoSessions handler knows which
         # session is current and won't delete the live one — this server-side
@@ -154,7 +154,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             try:
                 from core.database import ChatMessage as _DbMsg
                 _ghosts = _purge_db.query(DbSession).filter(
-                    DbSession.name.in_(("Nobody", "Incognito")),
+                    DbSession.name.in_(("Outis", "Nobody", "Incognito")),
                     DbSession.created_at < _cutoff,
                 ).all()
                 for _g in _ghosts:
@@ -245,11 +245,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                      "message_count": msg_count_map.get(s.id, 0)}
                     for s in user_sessions.values()
                     if not s.archived
-                    and (s.name or "").strip() not in ("Nobody", "Incognito")
-                    and not is_project_workspace_session(
-                        mode_map.get(s.id),
-                        project_id_map.get(s.id) or getattr(s, "project_id", None),
-                    )]
+                    and (s.name or "").strip() not in ("Outis", "Nobody", "Incognito")]
 
         return sessions
     
@@ -263,6 +259,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         skip_validation: str = Form(None),
         api_key: str = Form(""),
         endpoint_id: str = Form(""),
+        project_id: str = Form(""),
     ):
         skip_val = str(skip_validation).lower() == "true"
         user = get_current_user(request)
@@ -341,6 +338,13 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         
         sid = str(uuid.uuid4())
         user = effective_user(request)
+        scoped_project_id = (project_id or "").strip() or None
+        if scoped_project_id:
+            try:
+                from src.project_workspace import assert_project_owner
+                assert_project_owner(user, scoped_project_id)
+            except Exception:
+                raise HTTPException(404, "Project not found")
         session = session_manager.create_session(
             session_id=sid,
             name=name or "",
@@ -348,6 +352,8 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             model=model_to_use,
             rag=str(rag).lower() == "true" if rag else False,
             owner=user,
+            project_id=scoped_project_id,
+            mode="project" if scoped_project_id else None,
         )
         # Set auth headers for custom API-key endpoints
         resolved_key = request_api_key
@@ -372,7 +378,8 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             name=session.name,
             model=model_to_use,
             rag=str(rag).lower() == "true" if rag else False,
-            archived=False
+            archived=False,
+            project_id=scoped_project_id,
         )    
     @router.patch("/session/{sid}")
     def rename_session(
@@ -964,8 +971,8 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                 # Never delete important sessions
                 if getattr(row, 'is_important', False):
                     continue
-                # Always delete incognito sessions during cleanup
-                if (row.name or "").strip() == "Incognito":
+                # Always delete Outis / legacy incognito sessions during cleanup
+                if (row.name or "").strip() in ("Outis", "Incognito", "Nobody"):
                     should_delete = True
                     deleted_throwaway += 1
                     db.delete(row)
@@ -1035,7 +1042,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         TIDY_BATCH_SIZE = 15
         all_candidates = []
         for s in user_sessions.values():
-            if s.archived or s.name == "Incognito":
+            if s.archived or s.name in ("Outis", "Incognito", "Nobody"):
                 continue
             if folder_map.get(s.id):
                 # Already in a folder — skip on this pass.

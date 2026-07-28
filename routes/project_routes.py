@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 _PROJECT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
+# Interactive home-directory browser for project cwd. Off by default —
+# path typing + native folder picker (resolve-dir) remain available.
+SERVER_DIR_BROWSE_ENABLED = os.environ.get("ODYSSEUS_PROJECT_SERVER_DIR_BROWSE", "0") == "1"
+
 
 class ProjectCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
@@ -89,6 +93,13 @@ class ProjectSessionCreateRequest(BaseModel):
 class ProjectLinkCreateRequest(BaseModel):
     to_id: str = Field(..., min_length=1)
     kind: str = Field(default="related", max_length=32)
+
+
+class ProjectPromoteRequest(BaseModel):
+    path: str = Field(..., min_length=1, max_length=4096)
+    library_type: str = Field(default="document", max_length=32)
+    title: Optional[str] = Field(default=None, max_length=200)
+    link: bool = True
 
 
 class ProjectValidateDirRequest(BaseModel):
@@ -175,6 +186,11 @@ def setup_project_routes(session_manager=None) -> APIRouter:
 
     @router.get("/browse-dir")
     async def browse_working_directory(request: Request, path: str = ""):
+        if not SERVER_DIR_BROWSE_ENABLED:
+            raise HTTPException(
+                403,
+                "Server folder browsing is disabled. Type a path or use the system folder picker.",
+            )
         _owner(request)
         resolved = _assert_browse_path(path or "~")
         home = _browse_home()
@@ -523,6 +539,34 @@ def setup_project_routes(session_manager=None) -> APIRouter:
             status, detail = map_run_exception(exc)
             if status >= 500:
                 logger.error("Project run error: %s", exc, exc_info=True)
+            raise HTTPException(status, detail)
+        return result
+
+    @router.post("/{project_id}/promote")
+    async def promote_project_file_route(
+        project_id: str,
+        body: ProjectPromoteRequest,
+        request: Request,
+    ):
+        """Copy a cwd text file into Library (document / note / ingest)."""
+        from src.project_promote import map_promote_exception, promote_project_file
+
+        owner = _owner(request)
+        _validate_project_id(project_id)
+        try:
+            result = await asyncio.to_thread(
+                promote_project_file,
+                owner,
+                project_id,
+                body.path,
+                library_type=body.library_type,
+                title=body.title,
+                link=body.link,
+            )
+        except Exception as exc:
+            status, detail = map_promote_exception(exc)
+            if status >= 500:
+                logger.error("Project promote error: %s", exc, exc_info=True)
             raise HTTPException(status, detail)
         return result
 

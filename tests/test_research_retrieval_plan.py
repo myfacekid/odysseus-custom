@@ -42,11 +42,23 @@ def test_parse_retrieval_plan_merges_planner_json():
     }
     plan = parse_retrieval_plan(raw, "Compare ESM3 and Foldseek", seeds, research_mode="compare")
     assert plan.sub_questions == ["How does ESM3 encode structure?"]
+    assert plan.key_topics == ["structure representation"]
     assert "gene ontology" in plan.avoid_topics
     assert plan.expansion_queries[0].startswith("ESM3")
     text = plan_to_display_text(plan)
     assert "Avoid topics" in text
     assert "narrow_compare" in text
+
+
+def test_parse_retrieval_plan_drops_key_topics_copied_from_anchors():
+    raw = {
+        "key_topics": ["Foldseek", "esm3", "search space coverage"],
+        "anchor_terms": ["foldseek", "esm3", "3di"],
+        "search_keywords": ["foldseek structure"],
+    }
+    plan = parse_retrieval_plan(raw, "Compare Foldseek and ESM3", [], research_mode="compare")
+    assert plan.key_topics == ["search space coverage"]
+    assert "foldseek" in {t.lower() for t in plan.anchor_terms}
 
 
 def test_plan_to_dict_roundtrip_fields():

@@ -72,6 +72,7 @@ def test_project_tools_disabled_outside_project_session():
     assert "read_project_file" in disabled
     assert "write_project_file" in disabled
     assert "run_project_script" in disabled
+    assert "promote_project_file" in disabled
 
 
 def test_project_tool_block_reason_rejects_outside_project(agent_tool_env):
@@ -115,6 +116,33 @@ async def test_write_project_file_creates_file(agent_tool_env):
     assert desc == "write_project_file: src/analysis.py"
     assert result["exit_code"] == 0
     assert (agent_tool_env["workspace"] / "src" / "analysis.py").read_text() == "x = 42\n"
+
+
+@pytest.mark.asyncio
+async def test_promote_project_file_to_document(agent_tool_env):
+    from src.tool_execution import execute_tool_block
+    from core.database import Document, SessionLocal
+
+    pid = agent_tool_env["project_session_id"]
+    write_text_file("alice", agent_tool_env["project_id"], "out.md", "# Result\n")
+    desc, result = await execute_tool_block(
+        SimpleNamespace(
+            tool_type="promote_project_file",
+            content='out.md\n{"library_type":"document","link":false}',
+        ),
+        session_id=pid,
+        owner="alice",
+    )
+    assert desc.startswith("promote_project_file:")
+    assert result["exit_code"] == 0
+    art = (result.get("result") or {}).get("artifact") or {}
+    assert art.get("library_type") == "document"
+    db = SessionLocal()
+    try:
+        doc = db.query(Document).filter(Document.id == art["id"]).one()
+        assert "# Result" in (doc.current_content or "")
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio

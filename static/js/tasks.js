@@ -178,33 +178,6 @@ async function _fetchActions() {
   return _builtinActions;
 }
 
-let _urgentEmailSettings = null;
-async function _fetchUrgentEmailSettings() {
-  if (_urgentEmailSettings) return _urgentEmailSettings;
-  try {
-    const res = await fetch('/api/auth/settings', { credentials: 'same-origin' });
-    _urgentEmailSettings = await res.json();
-  } catch (e) {
-    _urgentEmailSettings = { urgent_email_prompt: '' };
-  }
-  return _urgentEmailSettings;
-}
-
-async function _saveUrgentEmailSettings(prompt) {
-  _urgentEmailSettings = {
-    ...(_urgentEmailSettings || {}),
-    urgent_email_prompt: prompt || '',
-  };
-  await fetch('/api/auth/settings', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      urgent_email_prompt: prompt || '',
-    }),
-  });
-}
-
 let _triggerEvents = null;
 async function _fetchEvents() {
   if (_triggerEvents) return _triggerEvents;
@@ -308,7 +281,7 @@ function _absoluteTime(iso) {
 function _statusDot(status) {
   const colors = { active: '#4caf50', paused: '#ff9800', completed: '#888', error: '#f44336' };
   const c = colors[status] || '#888';
-  return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};box-shadow:0 0 6px ${c}, 0 0 3px ${c};flex-shrink:0;position:relative;top:4px;"></span>`;
+  return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};box-shadow:none;flex-shrink:0;position:relative;top:4px;"></span>`;
 }
 
 const _TASK_ICONS = {
@@ -867,10 +840,10 @@ function _showTaskDropdown(anchor, items) {
   document.querySelectorAll('.task-dropdown').forEach(d => d.remove());
   const dd = document.createElement('div');
   dd.className = 'task-dropdown';
-  dd.style.cssText = 'position:fixed;z-index:100000;background:var(--panel);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);padding:4px;min-width:120px;';
+  dd.style.cssText = 'position:fixed;z-index:100000;background:var(--panel);border:1px solid var(--border);border-radius:2px;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);padding:4px;min-width:120px;';
   items.forEach(item => {
     const btn = document.createElement('button');
-    btn.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 10px;border:none;background:none;color:var(--fg);font-size:11px;font-family:inherit;cursor:pointer;border-radius:4px;transition:background 0.1s;';
+    btn.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 10px;border:none;background:none;color:var(--fg);font-size:11px;font-family:inherit;cursor:pointer;border-radius:2px;transition:background 0.1s;';
     if (item.danger) btn.style.color = 'var(--color-error)';
     if (item.icon) {
       btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6;flex-shrink:0;">${item.icon}</svg><span>${item.label}</span>`;
@@ -1839,22 +1812,6 @@ let _activityEntries = [];
 function _stackActivityEntries(entries) {
   const out = [];
   const byKey = new Map();
-  const hourBucket = (ts) => {
-    const d = ts ? new Date(ts) : null;
-    if (!d || Number.isNaN(d.getTime())) return '';
-    d.setMinutes(0, 0, 0);
-    return d.toISOString();
-  };
-  const normalizeResult = (entry) => {
-    const text = (entry.result || '').trim();
-    if (/^Email\b/i.test(entry.taskName || '')) {
-      if (/^skipped\s*[—-]/i.test(text) || /\bNo recent emails\b/i.test(text)) {
-        return text.replace(/\d+/g, '#');
-      }
-      return '__email_run__';
-    }
-    return text;
-  };
   for (const entry of entries) {
     const key = [
       entry.taskId || '',
@@ -1862,8 +1819,7 @@ function _stackActivityEntries(entries) {
       entry.kind || '',
       entry.status || '',
       entry.output_target || '',
-      normalizeResult(entry),
-      /^Email\b/i.test(entry.taskName || '') ? hourBucket(entry.ts) : '',
+      (entry.result || '').trim(),
     ].join('\u0001');
     const existing = byKey.get(key);
     if (existing && entry.status !== 'running' && entry.status !== 'queued') {

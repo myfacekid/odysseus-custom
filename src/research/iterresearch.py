@@ -763,7 +763,11 @@ class DeepResearcher:
         if mode_ctx:
             prompt += f"\n\n{mode_ctx}"
         if seed_ctx and seed_ctx != "(none)":
-            prompt += f"\n\nSeed papers (use titles and abstracts for anchor_terms and avoid_topics):\n{seed_ctx}"
+            prompt += (
+                "\n\nSeed papers (pull named methods/acronyms into anchor_terms; "
+                "pull thematic gaps into key_topics; unrelated nearby fields into avoid_topics):\n"
+                f"{seed_ctx}"
+            )
         try:
             response = await self._llm(
                 [{"role": "user", "content": prompt}],

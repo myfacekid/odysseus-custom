@@ -3,12 +3,14 @@
 // ============================================
 
 import { IS_MAC, isAltGrEvent } from './platform.js';
+import { tileAllOpenWindows } from './tileManager.js';
 
 const _defaultKeybinds = {
   search: 'ctrl+k', toggle_sidebar: 'ctrl+alt+b', new_session: 'ctrl+alt+n',
   fav_session: 'ctrl+alt+f', delete_session: 'ctrl+alt+d',
   cancel: 'escape', tts: 'alt+shift+t',
   incognito: 'ctrl+alt+i', settings: 'ctrl+,', focus_input: 'ctrl+/',
+  tile_all: 'ctrl+shift+t',
   // Open-tool shortcuts (Calendar bound by default; rest unbound).
   open_calendar: 'ctrl+alt+c', open_compare: '', open_cookbook: '',
   open_research: '', open_gallery: '', open_library: '', open_memory: '',
@@ -257,6 +259,13 @@ export function initKeyboardShortcuts(modules) {
     if (_matchesCombo(e, kb.settings)) {
       e.preventDefault();
       _toggleActiveWindow();
+      return;
+    }
+    if (_matchesCombo(e, kb.tile_all)) {
+      if (window.innerWidth <= 768) return;
+      e.preventDefault();
+      const n = tileAllOpenWindows();
+      if (n && uiModule?.showToast) uiModule.showToast(`Tiled ${n} window${n === 1 ? '' : 's'}`);
       return;
     }
     // Open-tool shortcuts — click the sidebar tool button so each tool's

@@ -845,7 +845,7 @@ async def _startup_event():
         from core.database import SessionLocal as _SL, Session as _DbSess, ChatMessage as _DbMsg
         _db = _SL()
         try:
-            _ghosts = _db.query(_DbSess).filter(_DbSess.name.in_(("Nobody", "Incognito"))).all()
+            _ghosts = _db.query(_DbSess).filter(_DbSess.name.in_(("Outis", "Nobody", "Incognito"))).all()
             for _g in _ghosts:
                 _db.query(_DbMsg).filter(_DbMsg.session_id == _g.id).delete()
                 _db.delete(_g)

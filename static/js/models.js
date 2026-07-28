@@ -22,6 +22,64 @@ const FAVORITES_KEY = 'odysseus-model-favorites';
 const USAGE_KEY = 'odysseus-model-usage';
 const SORT_KEY = 'odysseus-model-sort';
 
+/** Empty-chat welcome subtext — dry Nobody puns; Outis keeps its own fixed line. */
+const WELCOME_SLOGANS = [
+  'Depth optional.',
+  "The assistant who isn't anyone.",
+  'Ask Nobody.',
+  "Nobody else's.",
+  "Don't worry, Nobody will help.",
+  'Call me Nobody.',
+  'Better than talking to the hand.',
+  'Leave it to Nobody.',
+  'Just you and Nobody.',
+  'Just like the remote, Nobody can find it.',
+  'Famous for being unknown.',
+  'Self-hosted. Self-effacing.',
+  "Nobody's business but yours.",
+  'No cloud. No name. No problem.',
+  'Trust Nobody.',
+  'Nobody saw that coming.',
+  'Typing into the void, professionally.',
+  "Nobody knows what they're doing. Perfect.",
+  'I contain multitudes. Also nothing.',
+  "Ask Nobody — they'll pretend to understand.",
+  "Nobody's perfect. Close enough.",
+  'This chat never happened.',
+  "It's okay, I'll be your friend.",
+  'Nobody reads the docs. Nobody *is* the docs.',
+  'Guaranteed to confuse your IT department.',
+  'The model that ghosted you first.',
+  "Running on your GPU so OpenAI doesn't have to.",
+  'Nobody cares about your telemetry. Literally.',
+  'Finally, an assistant with commitment issues.',
+  'Outis mode: even Nobody forgets this one.',
+  'If a tree falls and Nobody hears it… still local.',
+  'Nobody asked, but here we are.',
+  'Professionally unidentifiable.',
+  "Nobody's home. Start typing anyway.",
+  'The void with autocomplete.',
+  'Hand-crafted by absolutely no one.',
+  'Not affiliated with anybody.',
+  'Not to be confused with Anybody.',
+  'Plot twist: Nobody is home.',
+  'Identity optional. Inference mandatory.',
+  'Sightings unconfirmed.',
+  "Nobody's watching. That's the point.",
+  'Helpdesk hours: whenever Nobody feels like it.',
+  'Existential dread, but helpful.',
+  'The assistant formerly known as nothing.',
+  'Cooler than being someone.',
+  "Nobody's gonna judge. Hard.",
+  'Currently pretending to be useful.',
+  'Your private void awaits.',
+  'Silence is golden. Nobody is platinum.',
+];
+
+function _pickWelcomeSlogan() {
+  return WELCOME_SLOGANS[Math.floor(Math.random() * WELCOME_SLOGANS.length)];
+}
+
 export function init(apiBase) {
   API_BASE = apiBase;
 }
@@ -124,7 +182,7 @@ function _buildModelRow(mid, url, displayName, endpointId, offline, modelType) {
     badge.className = 'model-type-badge';
     badge.textContent = 'IMG';
     badge.title = 'Image generation model';
-    badge.style.cssText = 'font-size:0.65em;padding:1px 4px;border-radius:3px;background:var(--accent,#7c3aed);color:#fff;margin-left:6px;vertical-align:middle;';
+    badge.style.cssText = 'font-size:0.65em;padding:1px 4px;border-radius:2px;background:var(--accent,#7c3aed);color:#fff;margin-left:6px;vertical-align:middle;';
     span.appendChild(badge);
   }
 
@@ -560,13 +618,17 @@ export async function refreshModels(force = false) {
     } else {
       // Configured installs should feel ready, not stuck in onboarding.
       const welcomeSub = document.getElementById('welcome-sub');
-      if (welcomeSub) welcomeSub.textContent = 'Yours for the voyage.';
+      if (welcomeSub) {
+        // Outis mode owns its own fixed line; don't overwrite while active.
+        const outisOn = document.getElementById('incognito-toggle')?.checked;
+        if (!outisOn) welcomeSub.textContent = _pickWelcomeSlogan();
+      }
       const welcomeTip = document.getElementById('welcome-tip');
       if (welcomeTip) {
         const tips = window.innerWidth <= 768
           ? [
               'Tip: Long-press a session for rename, delete, and memory options.',
-              'Tip: Tap the eye icon for Incognito mode - no history saved.',
+              'Tip: Tap the eye icon for Outis mode - no history saved.',
               'Tip: Switch to Agent mode when you want tools.',
               'Tip: Attach images or files using the + button next to the input.',
             ]

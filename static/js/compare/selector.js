@@ -452,7 +452,7 @@ async function showModelSelector() {
       // both the modal's overflow clipping AND any transform on the modal-content
       // (a transformed ancestor makes position:fixed clip to it — which was why
       // the dropdown kept cropping under the next row). Coords set in _placeDropdown.
-      dropdown.style.cssText = 'display:none;position:fixed;max-height:200px;overflow-y:auto;background:var(--panel);border:1px solid var(--border);border-radius:6px;z-index:100000;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+      dropdown.style.cssText = 'display:none;position:fixed;max-height:200px;overflow-y:auto;background:var(--panel);border:1px solid var(--border);border-radius:2px;z-index:100000;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);';
       document.body.appendChild(dropdown);
 
       function renderItems(query) {
@@ -794,7 +794,7 @@ async function showModelSelector() {
 
     addBtn = document.createElement('button');
     addBtn.type = 'button';
-    addBtn.style.cssText = 'display:none;align-items:center;gap:6px;background:none;border:1px dashed var(--border);color:var(--fg);border-radius:6px;cursor:pointer;padding:6px 12px;font-size:0.82em;opacity:0.6;transition:all 0.15s;margin-bottom:16px;width:100%;justify-content:center;';
+    addBtn.style.cssText = 'display:none;align-items:center;gap:6px;background:none;border:1px dashed var(--border);color:var(--fg);border-radius:2px;cursor:pointer;padding:6px 12px;font-size:0.82em;opacity:0.6;transition:all 0.15s;margin-bottom:16px;width:100%;justify-content:center;';
     addBtn.textContent = '+ Add Model';
     addBtn.addEventListener('mouseenter', () => { addBtn.style.opacity = '1'; });
     addBtn.addEventListener('mouseleave', () => { addBtn.style.opacity = '0.6'; });
@@ -829,7 +829,7 @@ async function showModelSelector() {
     timeoutInput.min = '5';
     timeoutInput.max = '300';
     timeoutInput.value = String(state._timeout);
-    timeoutInput.style.cssText = 'width:60px;padding:4px 8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:4px;font-size:0.82em;text-align:center;-moz-appearance:textfield;';
+    timeoutInput.style.cssText = 'width:60px;padding:4px 8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:2px;font-size:0.82em;text-align:center;-moz-appearance:textfield;';
     const timeoutSuffix = document.createElement('span');
     timeoutSuffix.style.cssText = 'color:color-mix(in srgb, var(--fg) 55%, transparent);font-size:0.82em;';
     timeoutSuffix.textContent = 'seconds';
@@ -841,7 +841,7 @@ async function showModelSelector() {
     const scoreBtn = document.createElement('button');
     scoreBtn.type = 'button';
     scoreBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Scoreboard';
-    scoreBtn.style.cssText = 'margin-left:auto;padding:4px 10px;background:transparent;color:var(--fg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:0.82em;opacity:0.7;position:relative;top:-5px;';
+    scoreBtn.style.cssText = 'margin-left:auto;padding:4px 10px;background:transparent;color:var(--fg);border:1px solid var(--border);border-radius:2px;cursor:pointer;font-size:0.82em;opacity:0.7;position:relative;top:-5px;';
     scoreBtn.addEventListener('mouseenter', () => { scoreBtn.style.opacity = '1'; });
     scoreBtn.addEventListener('mouseleave', () => { scoreBtn.style.opacity = '0.7'; });
     scoreBtn.addEventListener('click', () => showScoreboard());
@@ -1051,7 +1051,7 @@ async function showModelSelector() {
           // Error + actions below the row
           const detail = document.createElement('div');
           detail.className = 'compare-probe-detail';
-          detail.style.cssText = 'grid-column:1/-1;display:flex;align-items:flex-start;gap:6px;padding:4px 10px 6px;font-size:10px;opacity:0.6;background:color-mix(in srgb, var(--color-error, #f44) 5%, transparent);border-radius:4px;margin-top:-2px;';
+          detail.style.cssText = 'grid-column:1/-1;display:flex;align-items:flex-start;gap:6px;padding:4px 10px 6px;font-size:10px;opacity:0.6;background:color-mix(in srgb, var(--color-error, #f44) 5%, transparent);border-radius:2px;margin-top:-2px;';
           const errSpan = document.createElement('span');
           // Truncate long error messages
           const errText = (result.error || 'Failed');

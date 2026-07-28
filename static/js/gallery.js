@@ -3,6 +3,7 @@
  */
 
 import uiModule from './ui.js';
+import { openEditor, closeEditor, isEditorOpen } from './galleryEditor.js';
 import spinnerModule from './spinner.js';
 import { makeWindowDraggable } from './windowDrag.js';
 
@@ -818,6 +819,320 @@ async function _bulkDeleteAlbums(ids) {
   _renderAlbums();
 }
 
+// Fetch the user's persisted editor drafts and render them as a thumbnail
+// grid under the new-canvas / browse buttons. Each card resumes the draft
+// in the editor on click; the × trashes it server-side.
+// Frosted whirlpool overlay over the drafts area while fetching the
+// list. Lives inside the drafts section so it sits above the grid.
+let _draftsSpinner = null;
+function _draftsShowLoading(section) {
+  if (!section) return;
+  let ov = section.querySelector('.gallery-editor-drafts-loading');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.className = 'gallery-editor-drafts-loading';
+    try {
+      _draftsSpinner = spinnerModule.createWhirlpool(28);
+      _draftsSpinner.element.style.cssText = 'width:28px;height:28px;margin:0;';
+      ov.appendChild(_draftsSpinner.element);
+    } catch (_) {
+      ov.textContent = 'Loading…';
+    }
+    section.appendChild(ov);
+  }
+  // Start the overlay exactly at the grid's top so it covers ONLY the projects
+  // list — not the header's search/select above it (the old fixed 30px offset
+  // assumed a short header and ended up covering half the search/select).
+  const _grid = section.querySelector('.gallery-editor-drafts-grid');
+  const _hdr = section.querySelector('.gallery-editor-drafts-header');
+  const _top = _grid ? _grid.offsetTop : (_hdr ? _hdr.offsetHeight : 30);
+  ov.style.top = _top + 'px';
+  ov.style.display = '';
+}
+function _draftsHideLoading(section) {
+  if (!section) return;
+  const ov = section.querySelector('.gallery-editor-drafts-loading');
+  if (ov) ov.style.display = 'none';
+}
+
+// Held between renders so search + select state survive a re-render.
+let _draftsCache = [];
+let _draftsSearch = '';
+let _draftsSelectMode = false;
+let _draftsSelected = new Set();
+
+async function _renderEditorDrafts() {
+  const section = document.getElementById('gallery-editor-drafts');
+  const grid = document.getElementById('gallery-editor-drafts-grid');
+  if (!section || !grid) return;
+  // Show a frosted whirlpool overlay over the drafts area while the
+  // list is fetching. The section becomes visible BEFORE the fetch so
+  // the user sees the loading indicator instead of a blank space.
+  section.hidden = false;
+  _draftsShowLoading(section);
+  try {
+    const res = await fetch(`${API_BASE}/api/editor-drafts`, { credentials: 'same-origin' });
+    if (res.ok) {
+      const out = await res.json();
+      _draftsCache = Array.isArray(out.drafts) ? out.drafts : [];
+    }
+  } catch (_) {
+    _draftsCache = [];
+  }
+  _draftsHideLoading(section);
+  if (!_draftsCache.length) {
+    section.hidden = true;
+    grid.innerHTML = '';
+    _draftsSelected.clear();
+    _draftsSelectMode = false;
+    _draftsSyncBulkBar();
+    return;
+  }
+  section.hidden = false;
+  // Drop selections for drafts that no longer exist.
+  const present = new Set(_draftsCache.map(d => d.id));
+  for (const id of [..._draftsSelected]) if (!present.has(id)) _draftsSelected.delete(id);
+  _draftsPaint();
+  _draftsWireOnce();
+}
+
+// Re-render only the grid (and bulk bar) from cached drafts + search +
+// selection state. Used by search/select-mode/checkbox updates.
+function _draftsPaint() {
+  const grid = document.getElementById('gallery-editor-drafts-grid');
+  if (!grid) return;
+  const q = _draftsSearch.trim().toLowerCase();
+  const filtered = _draftsCache.filter(d => {
+    if (!q) return true;
+    const name = String(d.name || '').toLowerCase();
+    return name.includes(q);
+  });
+  grid.innerHTML = filtered.map(d => {
+    const updated = d.updated_at ? _humanRelativeDate(new Date(d.updated_at)) : '';
+    const dims = (d.width && d.height) ? `${d.width}×${d.height}` : '';
+    const thumb = d.thumbnail
+      ? `<img class="gallery-editor-draft-thumb" src="${_esc(d.thumbnail)}" alt="" />`
+      : '<div class="gallery-editor-draft-thumb gallery-editor-draft-thumb-empty"></div>';
+    const checked = _draftsSelected.has(d.id);
+    const checkbox = _draftsSelectMode
+      ? `<span class="gallery-select-dot${checked ? ' selected' : ''}" data-draft-id="${_esc(d.id)}"></span>`
+      : '';
+    return `
+      <div class="gallery-editor-draft-card${checked ? ' selected' : ''}${_draftsSelectMode ? ' select-mode' : ''}" data-draft-id="${_esc(d.id)}" tabindex="0" title="Resume ${_esc(d.name || 'project')}">
+        ${checkbox}
+        ${thumb}
+        <div class="gallery-editor-draft-info">
+          <div class="gallery-editor-draft-name">${_esc(d.name || 'Untitled')}</div>
+          <div class="gallery-editor-draft-meta">${_esc([dims, updated].filter(Boolean).join(' · '))}</div>
+        </div>
+        <button class="gallery-editor-draft-delete" data-draft-id="${_esc(d.id)}" title="Delete project" aria-label="Delete project">×</button>
+      </div>`;
+  }).join('');
+  grid.querySelectorAll('.gallery-editor-draft-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.gallery-editor-draft-delete')) return;
+      const id = card.dataset.draftId;
+      if (!id) return;
+      if (_draftsSelectMode) {
+        if (_draftsSelected.has(id)) _draftsSelected.delete(id);
+        else _draftsSelected.add(id);
+        _draftsPaint();
+        _draftsSyncBulkBar();
+        return;
+      }
+      // Pass the cached dims as the preset size so the editor can show a
+      // correctly-proportioned placeholder while the draft loads.
+      const draft = _draftsCache.find(d => d.id === id);
+      const presetSize = (draft && draft.width && draft.height)
+        ? { w: draft.width, h: draft.height }
+        : null;
+      openEditor(null, null, presetSize, draft?.name || null, id);
+    });
+  });
+  grid.querySelectorAll('.gallery-editor-draft-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.draftId;
+      if (!id) return;
+      const ok = await uiModule.styledConfirm('Delete this project?', {
+        confirmText: 'Delete', cancelText: 'Cancel', danger: true,
+      });
+      if (!ok) return;
+      // Graceful exit: fade + shrink the card before the grid re-renders.
+      const card = btn.closest('.gallery-editor-draft-card');
+      if (card) card.classList.add('gallery-draft-removing');
+      try {
+        await fetch(`${API_BASE}/api/editor-drafts/${encodeURIComponent(id)}`, {
+          method: 'DELETE', credentials: 'same-origin',
+        });
+      } catch (_) { /* swallow — refresh below */ }
+      await new Promise(r => setTimeout(r, 240));   // let the animation finish
+      _draftsSelected.delete(id);
+      _renderEditorDrafts();
+    });
+  });
+  _draftsSyncBulkBar();
+}
+
+function _draftsSyncBulkBar() {
+  const bar = document.getElementById('gallery-editor-drafts-bulk');
+  const countEl = document.getElementById('gallery-editor-drafts-bulk-count');
+  const selectBtn = document.getElementById('gallery-editor-drafts-select');
+  if (bar) bar.classList.toggle('hidden', !_draftsSelectMode);
+  if (countEl) countEl.textContent = `${_draftsSelected.size} selected`;
+  if (selectBtn) {
+    selectBtn.textContent = _draftsSelectMode ? 'Cancel' : 'Select';
+    selectBtn.classList.toggle('active', _draftsSelectMode);
+  }
+  // "All" checkbox state — checked when all visible drafts are selected,
+  // indeterminate when only some (matches the Photos tab).
+  const all = document.getElementById('gallery-editor-drafts-select-all');
+  if (all) {
+    const q = _draftsSearch.trim().toLowerCase();
+    const visible = _draftsCache.filter(d => !q || String(d.name || '').toLowerCase().includes(q));
+    const selVis = visible.filter(d => _draftsSelected.has(d.id)).length;
+    all.checked = visible.length > 0 && selVis === visible.length;
+    all.indeterminate = selVis > 0 && selVis < visible.length;
+  }
+}
+
+let _draftsWired = false;
+function _draftsWireOnce() {
+  if (_draftsWired) return;
+  _draftsWired = true;
+  document.getElementById('gallery-editor-drafts-search')?.addEventListener('input', (e) => {
+    _draftsSearch = e.target.value || '';
+    _draftsPaint();
+  });
+  document.getElementById('gallery-editor-drafts-select')?.addEventListener('click', () => {
+    _draftsSelectMode = !_draftsSelectMode;
+    if (!_draftsSelectMode) _draftsSelected.clear();
+    _draftsPaint();
+  });
+  document.getElementById('gallery-editor-drafts-select-all')?.addEventListener('change', (e) => {
+    // Same "All" checkbox behavior as Photos: checked selects every visible
+    // draft, unchecked clears them (respects the search filter).
+    const q = _draftsSearch.trim().toLowerCase();
+    const visible = _draftsCache.filter(d => !q || String(d.name || '').toLowerCase().includes(q));
+    if (e.target.checked) for (const d of visible) _draftsSelected.add(d.id);
+    else for (const d of visible) _draftsSelected.delete(d.id);
+    _draftsPaint();
+  });
+  document.getElementById('gallery-editor-drafts-bulk-cancel')?.addEventListener('click', () => {
+    _draftsSelectMode = false;
+    _draftsSelected.clear();
+    _draftsPaint();
+  });
+  document.getElementById('gallery-editor-drafts-bulk-delete')?.addEventListener('click', async () => {
+    if (!_draftsSelected.size) return;
+    const n = _draftsSelected.size;
+    const ok = await uiModule.styledConfirm(`Delete ${n} project${n === 1 ? '' : 's'}?`, {
+      confirmText: 'Delete', cancelText: 'Cancel', danger: true,
+    });
+    if (!ok) return;
+    const ids = [..._draftsSelected];
+    // Graceful exit on the selected cards before they're removed.
+    const grid = document.getElementById('gallery-editor-drafts-grid');
+    if (grid) ids.forEach(id => grid.querySelector(`.gallery-editor-draft-card[data-draft-id="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`)?.classList.add('gallery-draft-removing'));
+    await new Promise(r => setTimeout(r, 240));
+    await Promise.allSettled(ids.map(id =>
+      fetch(`${API_BASE}/api/editor-drafts/${encodeURIComponent(id)}`, {
+        method: 'DELETE', credentials: 'same-origin',
+      })
+    ));
+    _draftsSelected.clear();
+    _draftsSelectMode = false;
+    _renderEditorDrafts();
+  });
+}
+
+// Human-readable "x minutes ago" / "y days ago" for the drafts list.
+function _humanRelativeDate(when) {
+  const diff = (Date.now() - when.getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  if (diff < 86400 * 30) return Math.floor(diff / 86400) + 'd ago';
+  return when.toLocaleDateString();
+}
+
+// Edit tab empty state — shown when the user clicks the tab without a photo
+// loaded. Lets them start a blank canvas or jump back to pick a photo.
+function _renderEditorLanding() {
+  const container = document.getElementById('gallery-editor-container');
+  if (!container) return;
+  // openEditor()/closeEditor() may have left the container hidden; the Edit
+  // tab is still active so make sure the landing is actually visible.
+  container.style.display = 'flex';
+  // Templates rendered as a native <select>. Browsers handle all the layout
+  // and styling natively — no custom flex grid, no clipping, no empty boxes.
+  // Picking an option fires `change` and goes straight into the editor.
+  const presets = [
+    { w: 1024, h: 1024, label: 'Square HD — 1024 × 1024' },
+    { w: 1920, h: 1080, label: 'Widescreen — 1920 × 1080' },
+    { w: 1080, h: 1920, label: 'Portrait — 1080 × 1920' },
+    { w: 1080, h: 1080, label: 'Instagram — 1080 × 1080' },
+    { w: 1500, h: 1050, label: 'Postcard — 1500 × 1050' },
+    { w: 2480, h: 3508, label: 'A4 (300dpi) — 2480 × 3508' },
+    { w: 2550, h: 3300, label: 'Letter (300dpi) — 2550 × 3300' },
+    { w: 3840, h: 2160, label: '4K — 3840 × 2160' },
+  ];
+  const optionsHtml = presets
+    .map((p, i) => `<option value="${i}">${p.label}</option>`)
+    .join('');
+  container.innerHTML = `
+    <div class="gallery-editor-landing">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.6"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+      <h3>Image Editor <span class="ge-alpha-tag">Alpha</span></h3>
+      <p>Start a blank canvas, or open a photo from your gallery to edit it.</p>
+      <div class="gallery-editor-landing-actions">
+        <button class="gallery-select-btn" id="gallery-editor-new">New canvas...</button>
+        <button class="gallery-select-btn" id="gallery-editor-pick">Browse photos</button>
+      </div>
+      <label class="gallery-editor-template-label">
+        Or pick a template
+        <select class="gallery-editor-template-select" id="gallery-editor-template">
+          <option value="">Select a size…</option>
+          ${optionsHtml}
+        </select>
+      </label>
+      <div class="gallery-editor-drafts" id="gallery-editor-drafts" hidden>
+        <div class="gallery-editor-drafts-header">
+          <h4 class="gallery-editor-drafts-title">Saved projects</h4>
+          <input type="search" class="gallery-editor-drafts-search" id="gallery-editor-drafts-search" placeholder="Search projects…" autocomplete="off" />
+          <button class="gallery-select-btn" id="gallery-editor-drafts-select" title="Toggle multi-select">Select</button>
+        </div>
+        <div class="gallery-bulk-bar hidden" id="gallery-editor-drafts-bulk">
+          <label class="memory-bulk-check-all"><input type="checkbox" id="gallery-editor-drafts-select-all"> All</label>
+          <span class="gallery-bulk-count" id="gallery-editor-drafts-bulk-count">0 selected</span>
+          <button class="gallery-bulk-delete" id="gallery-editor-drafts-bulk-delete"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>Delete selected</button>
+          <button class="memory-toolbar-btn" id="gallery-editor-drafts-bulk-cancel" title="Cancel (Esc)" style="margin-left:4px;padding:3px 6px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div class="gallery-editor-drafts-grid" id="gallery-editor-drafts-grid"></div>
+      </div>
+    </div>`;
+  // Each remount of the editor landing rebuilds the drafts header
+  // markup, so the cached event listener references are stale. Reset.
+  _draftsWired = false;
+  _renderEditorDrafts();
+  document.getElementById('gallery-editor-template')?.addEventListener('change', (e) => {
+    const idx = parseInt(e.target.value, 10);
+    if (Number.isNaN(idx)) return;
+    const p = presets[idx];
+    if (p) openEditor(null, null, { w: p.w, h: p.h }, `${p.w}×${p.h}`);
+  });
+  document.getElementById('gallery-editor-new')?.addEventListener('click', async () => {
+    // openEditor() now returns a Promise — it's async because the size
+    // prompt is a styled modal. Await it before checking whether the
+    // editor actually opened (the user may have cancelled).
+    await openEditor(null, null, null, 'New canvas');
+    if (!isEditorOpen()) _renderEditorLanding();
+  });
+  document.getElementById('gallery-editor-pick')?.addEventListener('click', () => {
+    document.querySelector('#gallery-modal .gallery-tab[data-tab="images"]')?.click();
+  });
+}
+
 // Wire the first-tile Upload affordance in the Photos grid. Opens the same
 // multi-file picker the old Import button used.
 function _wireUploadTile() {
@@ -1030,6 +1345,10 @@ function _openDetail(img) {
     <div class="gallery-detail-header">
       <button class="gallery-detail-back" id="gallery-detail-back">&larr; Back</button>
       <div style="flex:1"></div>
+      <button class="gallery-detail-back" id="gallery-edit-direct-btn" title="Edit (E)" aria-label="Edit photo" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+        Edit
+      </button>
       <button class="gallery-detail-back gallery-detail-fav-header${img.favorite ? ' active' : ''}" id="gallery-detail-fav-header" title="${img.favorite ? 'Unfavorite' : 'Favorite'}" aria-label="Favorite" aria-pressed="${img.favorite ? 'true' : 'false'}" style="display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="${img.favorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
       </button>
@@ -1063,6 +1382,12 @@ function _openDetail(img) {
     </div>
     <div class="gallery-detail-body">
       <div class="gallery-detail-image" id="gallery-detail-image-wrap" style="position:relative">
+        <button class="gallery-detail-rotate gallery-detail-rotate-ccw" id="gallery-rotate-ccw-btn" title="Rotate 90° counter-clockwise" aria-label="Rotate left">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        </button>
+        <button class="gallery-detail-rotate gallery-detail-rotate-cw" id="gallery-rotate-btn" title="Rotate 90° clockwise" aria-label="Rotate right">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
         <button class="gallery-detail-nav gallery-detail-nav-prev" id="gallery-detail-prev" title="Previous (←)" aria-label="Previous">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
@@ -1327,6 +1652,85 @@ function _openDetail(img) {
     }, { passive: true });
   }
 
+  const _openInEditor = () => {
+    try {
+      detail.style.display = 'none';
+      const modal = document.getElementById('gallery-modal');
+      if (modal) {
+        modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
+        modal.querySelector('.gallery-tab[data-tab="editor"]')?.classList.add('active');
+      }
+      const imagesContainer = document.getElementById('gallery-images-container');
+      const albumsContainer = document.getElementById('gallery-albums-container');
+      if (imagesContainer) imagesContainer.style.display = 'none';
+      if (albumsContainer) albumsContainer.style.display = 'none';
+      const editorContainer = document.getElementById('gallery-editor-container');
+      if (editorContainer) editorContainer.style.display = 'flex';
+      const baseFilename = (img.filename || '').replace(/\.[^.]+$/, '');
+      const label = img.prompt?.trim() || baseFilename || 'Photo';
+      openEditor(img.url, img.id, null, label);
+    } catch (e) {
+      console.error('[edit] failed:', e);
+      if (uiModule) uiModule.showError('Failed to open editor: ' + (e?.message || 'unknown'));
+    }
+  };
+  document.getElementById('gallery-edit-btn')?.addEventListener('click', _openInEditor);
+  document.getElementById('gallery-edit-direct-btn')?.addEventListener('click', _openInEditor);
+
+  // Rotate — server-side image rotation. Forces a fresh URL afterwards
+  // so the browser doesn't show the old cached version. Shows a
+  // whirlpool over the detail image while the request + reload are in
+  // flight so the user sees the action is processing.
+  const _rotate = async (angle) => {
+    const stage = document.querySelector('.gallery-detail-img-stage') || document.getElementById('gallery-detail-img')?.parentElement;
+    let overlay = null;
+    let spinner = null;
+    if (stage) {
+      overlay = document.createElement('div');
+      overlay.className = 'gallery-detail-rotate-loading';
+      overlay.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, var(--bg) 55%, transparent);z-index:5;pointer-events:none;';
+      try {
+        spinner = spinnerModule.createWhirlpool(36);
+        spinner.element.style.cssText = 'width:36px;height:36px;margin:0;';
+        overlay.appendChild(spinner.element);
+      } catch (_) { overlay.textContent = 'Rotating…'; }
+      if (getComputedStyle(stage).position === 'static') stage.style.position = 'relative';
+      stage.appendChild(overlay);
+    }
+    const cleanup = () => {
+      try { spinner?.destroy?.(); } catch {}
+      overlay?.remove();
+    };
+    try {
+      const r = await fetch(`${API_BASE}/api/gallery/${img.id}/rotate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ angle }),
+      });
+      if (!r.ok) { cleanup(); uiModule.showError('Rotate failed'); return; }
+      // Cache-bust the image in the detail view, then wait for the new
+      // image to actually load before clearing the spinner so the user
+      // doesn't see a flash of the old/blank image.
+      const imgEl = document.getElementById('gallery-detail-img');
+      if (imgEl) {
+        const newSrc = img.url + (img.url.includes('?') ? '&' : '?') + 't=' + Date.now();
+        await new Promise((resolve) => {
+          imgEl.onload = imgEl.onerror = () => { imgEl.onload = null; imgEl.onerror = null; resolve(); };
+          imgEl.src = newSrc;
+        });
+      }
+      cleanup();
+      uiModule.showToast('Rotated');
+      _fetchLibrary(false);
+    } catch (e) {
+      cleanup();
+      uiModule.showError('Rotate failed');
+    }
+  };
+  document.getElementById('gallery-rotate-btn')?.addEventListener('click', () => _rotate(90));
+  document.getElementById('gallery-rotate-ccw-btn')?.addEventListener('click', () => _rotate(-90));
+
   // Set as album cover — only present if the photo is currently in an album.
   document.getElementById('gallery-set-cover-btn')?.addEventListener('click', async () => {
     if (!img.album_id) return;
@@ -1518,6 +1922,11 @@ export function openGallery() {
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
           <span class="gallery-tab-label">Albums</span>
         </button>
+        <button class="gallery-tab" data-tab="editor" id="gallery-editor-tab">
+          <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span>
+          <span class="gallery-tab-label">Edit</span>
+          <span class="gallery-tab-close" id="gallery-editor-tab-close" title="Close edit" aria-label="Close edit">×</span>
+        </button>
         <button class="gallery-tab" data-tab="settings">
           <span class="gallery-tab-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           <span class="gallery-tab-label">Settings</span>
@@ -1562,6 +1971,7 @@ export function openGallery() {
         <div class="gallery-detail" id="gallery-detail" style="display:none"></div>
         </div>
         <div class="gallery-albums-container" id="gallery-albums-container" style="display:none;"></div>
+        <div class="gallery-editor-container" id="gallery-editor-container" style="display:none;"></div>
         <div class="gallery-settings-container" id="gallery-settings-container" style="display:none;">
           <div class="admin-card">
             <h2>AI Tagging <span id="gallery-tag-count" class="memory-count" style="font-size:0.6em;opacity:0.6;font-weight:normal;"></span></h2>
@@ -1601,7 +2011,76 @@ export function openGallery() {
   // so the two coexist.
   _makeGalleryDraggable(modal.querySelector('.modal-content'));
 
-  document.getElementById('gallery-close').addEventListener('click', () => closeGallery());
+  document.getElementById('gallery-close').addEventListener('click', async () => {
+    if (isEditorOpen()) {
+      const ok = await uiModule.styledConfirm(
+        'Close Gallery and the active edit?',
+        { confirmText: 'Close', danger: true },
+      );
+      if (!ok) return;
+      window.__galleryAllowCloseEditor = true;
+    }
+    closeGallery();
+  });
+
+  // Double-click the Edit tab to rename what's being edited. The label
+  // shows up everywhere it's referenced by id (#gallery-editor-tab), so a
+  // simple inline contenteditable swap is enough.
+  const editorTab = modal.querySelector('.gallery-tab[data-tab="editor"]');
+  // Close × on the Edit tab — appears on hover. Confirms if the editor
+  // has an open session (any in-progress edit), otherwise just closes.
+  const editorTabClose = modal.querySelector('#gallery-editor-tab-close');
+  if (editorTabClose) {
+    editorTabClose.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (isEditorOpen()) {
+        const ok = await uiModule.styledConfirm(
+          'Close the edit? Any unsaved changes will be lost.',
+          { confirmText: 'Close', danger: true },
+        );
+        if (!ok) return;
+      }
+      window.__galleryAllowCloseEditor = true;
+      closeEditor();
+      window.__galleryAllowCloseEditor = false;
+      // If user is currently on the Edit tab, swap back to Photos.
+      const activeTab = modal.querySelector('.gallery-tab.active');
+      if (activeTab?.dataset.tab === 'editor') {
+        modal.querySelector('.gallery-tab[data-tab="images"]')?.click();
+      }
+    });
+  }
+  if (editorTab) {
+    editorTab.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const labelEl = editorTab.querySelector('.gallery-tab-label') || editorTab;
+      const current = labelEl.textContent.replace(/^Edit:\s*/, '');
+      const oldText = labelEl.textContent;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = current === 'Edit' ? '' : current;
+      input.placeholder = 'Edit name';
+      input.className = 'gallery-tab-rename-input';
+      // Replace only the label span's contents so the icon SVG next to
+      // it stays visible during the rename.
+      labelEl.textContent = '';
+      labelEl.appendChild(input);
+      input.focus();
+      input.select();
+      const finish = (commit) => {
+        if (commit && input.value.trim()) {
+          labelEl.textContent = `Edit: ${input.value.trim().slice(0, 24)}`;
+        } else {
+          labelEl.textContent = oldText;
+        }
+      };
+      input.addEventListener('blur', () => finish(true));
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+        if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+      });
+    });
+  }
 
   // ── Tab switching ──
   modal.querySelectorAll('.gallery-tab').forEach(tab => {
@@ -1615,12 +2094,21 @@ export function openGallery() {
       if (_detail) _detail.style.display = 'none';
       const imagesContainer = document.getElementById('gallery-images-container');
       const albumsContainer = document.getElementById('gallery-albums-container');
+      const editorContainer = document.getElementById('gallery-editor-container');
       const settingsContainer = document.getElementById('gallery-settings-container');
       if (imagesContainer) imagesContainer.style.display = target === 'images' ? '' : 'none';
       if (albumsContainer) albumsContainer.style.display = target === 'albums' ? '' : 'none';
+      if (editorContainer) editorContainer.style.display = target === 'editor' ? 'flex' : 'none';
       if (settingsContainer) settingsContainer.style.display = target === 'settings' ? '' : 'none';
-      if (target === 'albums') {
+      if (target === 'images') {
+        // Keep active edits alive when leaving the Edit tab. The edit
+        // session is only torn down by the explicit Edit-tab close.
+      } else if (target === 'albums') {
         _renderAlbumsTab();
+      } else if (target === 'editor') {
+        // If the editor isn't already holding an image, render a chooser so the
+        // tab does something useful instead of opening an empty grey pane.
+        if (!isEditorOpen()) _renderEditorLanding();
       }
     });
   });
@@ -2027,7 +2515,7 @@ export function openGallery() {
   const _bulkActionsBtn = document.getElementById('gallery-bulk-actions');
   function _showGalleryBulkMenu(anchor) {
     document.querySelectorAll('.gallery-bulk-menu').forEach(d => d.remove());
-    // Standard dropdown (.dropdown + dropdown-item-compact) so it
+    // Standard Odysseus dropdown (.dropdown + dropdown-item-compact) so it
     // matches every other menu in the app. Positioned fixed at the button.
     const dropdown = document.createElement('div');
     dropdown.className = 'dropdown gallery-bulk-menu';
@@ -2199,6 +2687,22 @@ export function openGallery() {
 
   _escHandler = (e) => {
     if (e.key === 'Escape') {
+      // While the image editor is visible, Escape is reserved for the
+      // editor (cancel transform/lasso/crop, dismiss size prompt, etc.).
+      // Don't close the gallery — users would lose their in-progress edit.
+      // We check the editor container's visibility AND the isEditorOpen()
+      // flag so a crop popup, transform handles, etc. all keep Esc.
+      const editorContainer = document.getElementById('gallery-editor-container');
+      const editorVisible = !!(
+        editorContainer &&
+        getComputedStyle(editorContainer).display !== 'none' &&
+        editorContainer.querySelector('.gallery-editor')
+      );
+      if (editorVisible || isEditorOpen()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
       const detail = document.getElementById('gallery-detail');
       if (detail && detail.style.display !== 'none') {
         // Click Back so Esc and the visible button always do the same thing —
@@ -2253,6 +2757,11 @@ export function openGallery() {
 }
 
 function _doCloseGallery() {
+  const editorMounted = !!document.querySelector('#gallery-editor-container .gallery-editor');
+  if ((window.__galleryEditLive || isEditorOpen() || editorMounted) && !window.__galleryAllowCloseEditor) {
+    if (uiModule) uiModule.showToast('Close the edit tab first');
+    return;
+  }
   _open = false;
   clearTimeout(_searchDebounce);
   if (_galleryResizeHandler) {
@@ -2261,6 +2770,8 @@ function _doCloseGallery() {
   }
   // Detach the face-overlay resize listener so we don't leak a
   // handler past close (v2 review HIGH-9).
+  closeEditor();
+  window.__galleryAllowCloseEditor = false;
 
   const modal = document.getElementById('gallery-modal');
   if (modal) {

@@ -695,26 +695,7 @@ def setup_task_routes(task_scheduler) -> APIRouter:
                 # legacy rows for the admin, so the OR-NULL path is no longer
                 # needed for any sane deploy.
                 q = q.filter(ScheduledTask.owner == user)
-            # Pull a little extra before de-duping. When auth is bypassed on a
-            # local browser session, legacy/default tasks from multiple owners
-            # can be visible together; the built-in urgent-email scanner then
-            # produces several identical "no email accounts configured" rows in
-            # the same minute. Keep the task records intact, but collapse those
-            # duplicate Activity rows for display.
-            rows = q.order_by(TaskRun.started_at.desc()).limit(limit * 3).all()
-            deduped = []
-            seen_urgency_rows = set()
-            for r, t in rows:
-                if (t.action or "") == "check_email_urgency":
-                    ts = r.started_at.replace(second=0, microsecond=0) if r.started_at else None
-                    text = (r.result or r.error or "").strip()
-                    key = (ts, r.status or "", text)
-                    if key in seen_urgency_rows:
-                        continue
-                    seen_urgency_rows.add(key)
-                deduped.append((r, t))
-                if len(deduped) >= limit:
-                    break
+            rows = q.order_by(TaskRun.started_at.desc()).limit(limit).all()
             return {
                 "runs": [
                     {
@@ -732,7 +713,7 @@ def setup_task_routes(task_scheduler) -> APIRouter:
                         # uses this to filter notification rows in/out.
                         "output_target": t.output_target or "session",
                     }
-                    for r, t in deduped
+                    for r, t in rows
                 ]
             }
         finally:
@@ -763,13 +744,11 @@ def setup_task_routes(task_scheduler) -> APIRouter:
         targets = [
             {"value": "session", "label": "Session", "description": "Save result to a chat session"},
             {"value": "notification", "label": "Notification", "description": "Push a browser notification with the result (also saved to the session for history)"},
-            {"value": "email", "label": "Email me", "description": "Send result through your configured SMTP account"},
         ]
         # Only include tools whose NAME clearly indicates an outbound delivery
-        # action — match by verb in the tool name, not by any mention of "email"
-        # in the description (which falsely picked up search_email, list_email,
-        # etc.). Also exclude read/search/list tools whose names happen to start
-        # with a delivery verb.
+        # action — match by verb in the tool name, not by any mention of delivery
+        # in the description. Also exclude read/search/list tools whose names
+        # happen to start with a delivery verb.
         _DELIVERY_VERBS = ("send", "notify", "post", "publish", "draft", "dispatch", "deliver")
         _NON_DELIVERY = (
             "search", "list", "get", "find", "read", "fetch", "view",
@@ -815,8 +794,8 @@ def setup_task_routes(task_scheduler) -> APIRouter:
             {"name": "document_created", "description": "Fires when a document is created"},
             {"name": "memory_added", "description": "Fires when a memory is added"},
             {"name": "research_completed", "description": "Fires when a research report completes"},
-            {"name": "email_received", "description": "Fires when new inbox mail is observed"},
             {"name": "skill_added", "description": "Fires when a new skill is created"},
+            {"name": "link_proposed", "description": "Fires when a learned connection is proposed"},
         ]}
 
     @router.post("/{task_id}/webhook/{token}")
@@ -890,7 +869,7 @@ def setup_task_routes(task_scheduler) -> APIRouter:
             '  "scheduled_day": 0,               // weekly: 0=Mon..6=Sun; monthly: 1..31\n'
             '  "scheduled_date": "YYYY-MM-DDTHH:MM",  // only for "once"\n'
             '  "cron_expression": "m h dom mon dow",  // only if schedule is "cron"\n'
-            '  "output_target": "session" | "email" | "notification"  // use email when the user asks to email the result\n'
+            '  "output_target": "session" | "notification"\n'
             "}\n\n"
             "Rules: default schedule to 'daily' if a time is given without a frequency. "
             "Default scheduled_time to '09:00' if none is stated. For 'every weekday' "
@@ -936,7 +915,7 @@ def setup_task_routes(task_scheduler) -> APIRouter:
                 out["scheduled_time"] = st.strip()
             if isinstance(draft.get("scheduled_day"), int):
                 out["scheduled_day"] = draft["scheduled_day"]
-            if draft.get("output_target") in ("session", "email", "notification"):
+            if draft.get("output_target") in ("session", "notification"):
                 out["output_target"] = draft["output_target"]
             out["trigger_type"] = "schedule"
             if not out.get("prompt"):

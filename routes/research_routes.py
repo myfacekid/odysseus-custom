@@ -195,6 +195,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
     class SaveToZoteroRequest(BaseModel):
         citation_nums: Optional[List[int]] = None
         scope: str = "cited"
+        collection_key: Optional[str] = None
 
     @router.get("/api/research/{session_id}/save-to-zotero/preview")
     async def research_save_to_zotero_preview(
@@ -232,6 +233,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
                 session_id,
                 scope=body.scope or "cited",
                 citation_nums=body.citation_nums,
+                collection_key=body.collection_key,
             )
         except FileNotFoundError:
             raise HTTPException(404, "Research not found")

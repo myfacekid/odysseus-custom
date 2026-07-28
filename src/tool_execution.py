@@ -490,6 +490,75 @@ async def _execute_write_project_file(
     }
 
 
+async def _execute_promote_project_file(
+    content: str,
+    *,
+    session_id: Optional[str],
+    owner: Optional[str],
+) -> Dict:
+    import json as _json
+
+    from src.project_promote import ProjectPromoteError, promote_project_file
+    from src.project_paths import ProjectPathError
+    from src.project_files import ProjectFileError
+    from src.project_tool_policy import get_session_project_id
+    from src.project_workspace import ProjectAccessError, ProjectNotFoundError
+
+    lines = (content or "").split("\n", 1)
+    rel_path = (lines[0] or "").strip()
+    opts: Dict = {}
+    if len(lines) > 1 and lines[1].strip():
+        try:
+            parsed = _json.loads(lines[1].strip())
+            if isinstance(parsed, dict):
+                opts = parsed
+                if not rel_path and opts.get("path"):
+                    rel_path = str(opts.get("path") or "").strip()
+        except (_json.JSONDecodeError, TypeError, ValueError):
+            pass
+    if not rel_path:
+        return {"error": "promote_project_file: path is required", "exit_code": 1}
+    project_id = get_session_project_id(session_id)
+    if not project_id:
+        return {"error": "promote_project_file: no project linked to session", "exit_code": 1}
+    if not owner:
+        return {"error": "promote_project_file: owner required", "exit_code": 1}
+
+    library_type = str(opts.get("library_type") or "document")
+    title = opts.get("title")
+    link = True if "link" not in opts else bool(opts.get("link"))
+    try:
+        result = await asyncio.to_thread(
+            promote_project_file,
+            owner,
+            project_id,
+            rel_path,
+            library_type=library_type,
+            title=title,
+            link=link,
+        )
+    except ProjectPromoteError as e:
+        return {"error": f"promote_project_file: {e}", "exit_code": 1}
+    except (ProjectPathError, ProjectFileError) as e:
+        return {"error": f"promote_project_file: {e}", "exit_code": 1}
+    except (ProjectNotFoundError, ProjectAccessError):
+        return {"error": "promote_project_file: project not found", "exit_code": 1}
+    except Exception as e:
+        return {"error": f"promote_project_file: {e}", "exit_code": 1}
+
+    art = result.get("artifact") or {}
+    link_info = result.get("link")
+    msg = (
+        f"Promoted {result.get('path')} → Library {art.get('library_type')} "
+        f"“{art.get('title')}” ({art.get('id')})"
+    )
+    if link_info and link_info.get("error"):
+        msg += f" (link warning: {link_info['error']})"
+    elif link_info:
+        msg += " and linked to project"
+    return {"output": msg, "result": result, "exit_code": 0}
+
+
 async def _execute_run_project_script(
     content: str,
     *,
@@ -1143,6 +1212,12 @@ async def execute_tool_block(
         rel = content.split("\n", 1)[0].strip()[:120]
         desc = f"run_project_script: {rel}"
         result = await _execute_run_project_script(
+            content, session_id=session_id, owner=owner,
+        )
+    elif tool == "promote_project_file":
+        rel = content.split("\n", 1)[0].strip()[:120]
+        desc = f"promote_project_file: {rel}"
+        result = await _execute_promote_project_file(
             content, session_id=session_id, owner=owner,
         )
     elif tool == "vault_search":

@@ -46,6 +46,12 @@ def _clean_str_list(raw: Any, *, limit: int = 24) -> List[str]:
     return out
 
 
+def _topics_distinct_from_anchors(topics: List[str], anchors: List[str]) -> List[str]:
+    """Drop key_topics that are exact copies of anchor_terms (case-insensitive)."""
+    anchor_set = {a.lower() for a in anchors}
+    return [t for t in topics if t.lower() not in anchor_set]
+
+
 def default_scope_for_mode(research_mode: str) -> str:
     mode = (research_mode or "").strip().lower()
     return _MODE_DEFAULT_SCOPE.get(mode, "balanced")
@@ -130,7 +136,8 @@ def derive_retrieval_plan_fallback(
     keywords = _clean_str_list(keywords, limit=16)
     return ResearchRetrievalPlan(
         sub_questions=[],
-        key_topics=keywords[:8],
+        # Concepts come from the planner; do not mirror anchors here.
+        key_topics=[],
         success_criteria="",
         anchor_terms=anchors,
         search_keywords=keywords,
@@ -175,9 +182,16 @@ def parse_retrieval_plan(
     if foundational is None:
         foundational = scope == "field_overview"
 
+    raw_topics = _clean_str_list(raw.get("key_topics"))
+    key_topics = (
+        _topics_distinct_from_anchors(raw_topics, anchor_terms)
+        if raw_topics
+        else list(fallback.key_topics)
+    )
+
     return ResearchRetrievalPlan(
         sub_questions=_clean_str_list(raw.get("sub_questions"), limit=8) or fallback.sub_questions,
-        key_topics=_clean_str_list(raw.get("key_topics")) or fallback.key_topics,
+        key_topics=key_topics,
         success_criteria=(raw.get("success_criteria") or fallback.success_criteria or "").strip(),
         anchor_terms=anchor_terms,
         search_keywords=search_keywords,

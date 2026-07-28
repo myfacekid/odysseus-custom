@@ -163,14 +163,14 @@ function _showSetupEndpointChoices() {
       '<div>' +
         '<div>Quick start: add your first AI endpoint by pasting it in chat.</div>' +
       '</div>' +
-      '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:color-mix(in srgb,var(--bg) 88%,var(--fg) 12%);">' +
+      '<div style="border:1px solid var(--border);border-radius:2px;padding:10px 12px;background:color-mix(in srgb,var(--bg) 88%,var(--fg) 12%);">' +
         '<div style="font-weight:700;margin-bottom:6px;">' + SETUP_LOCAL_ICON + 'Local setup</div>' +
         '<div>Paste endpoint URL in chat (example):</div>' +
         '<pre style="margin:4px 0 0;"><code class="setup-clickable-code" style="cursor:pointer;text-decoration:underline;" title="Click to fill in chat">http://localhost:11434/v1</code></pre>' +
         '<div style="margin-top:4px;">or</div>' +
         '<pre style="margin:2px 0 0;"><code class="setup-clickable-code" style="cursor:pointer;text-decoration:underline;" title="Click to fill in chat">http://llm-host.local:8000/v1</code></pre>' +
       '</div>' +
-      '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:color-mix(in srgb,var(--bg) 88%,var(--fg) 12%);">' +
+      '<div style="border:1px solid var(--border);border-radius:2px;padding:10px 12px;background:color-mix(in srgb,var(--bg) 88%,var(--fg) 12%);">' +
         '<div style="font-weight:700;margin-bottom:6px;">' + SETUP_API_ICON + 'API setup</div>' +
         '<div>Paste provider name then API key (example):</div>' +
         '<pre style="margin:4px 0 0;"><code class="setup-clickable-code" style="cursor:pointer;text-decoration:underline;" title="Click to fill in chat">deepseek sk-...</code></pre>' +
@@ -1111,7 +1111,7 @@ async function _cmdToggleIncognito(args, ctx) {
   const sessions = sessionModule.getSessions();
   const sess = ctx.sid ? sessions.find(s => s.id === ctx.sid) : null;
   if (sess && sess.message_count > 0) {
-    slashReply(`Can't toggle Incognito mode mid-conversation — start a new session first`);
+    slashReply(`Can't toggle Outis mode mid-conversation — start a new session first`);
     return true;
   }
   const v = (args[0]||'').toLowerCase();
@@ -1870,9 +1870,9 @@ async function _cmdDemo(args, ctx) {
     s.id = 'tour-styles';
     s.textContent = `
       #tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);
-        border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;
+        border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;
         font-family:inherit;font-size:0.8rem;line-height:1.5;
-        box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;
+        box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;
         opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}
       #tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}
       #tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}
@@ -1880,7 +1880,7 @@ async function _cmdDemo(args, ctx) {
         border:1px solid var(--border);transform:rotate(45deg);pointer-events:none}
       .tour-nav{display:flex;align-items:center;justify-content:space-between}
       .tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);
-        cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}
+        cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}
       .tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}
       .tour-nav button:active{background:color-mix(in srgb,var(--fg) 16%,transparent);transform:scale(0.95)}
       .tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}
@@ -1891,8 +1891,8 @@ async function _cmdDemo(args, ctx) {
       .tour-btn-arrow-pulse{opacity:1;border-color:var(--accent,var(--red));color:var(--accent,var(--red));
         animation:tour-arrow-pulse 1.2s ease-in-out infinite}
       @keyframes tour-arrow-pulse{
-        0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent,var(--red)) 50%,transparent)}
-        50%    {box-shadow:0 0 0 6px color-mix(in srgb,var(--accent,var(--red)) 0%,transparent)}
+        0%,100%{box-shadow:none}
+        50%{box-shadow:none}
       }
     `;
     document.head.appendChild(s);
@@ -2240,7 +2240,7 @@ async function _cmdDemo(args, ctx) {
   }
 
   _clearTour();
-  await typewriterReply('Nobody is yours to explore, enjoy the voyage!');
+  await typewriterReply('Nobody is yours to explore — look into the abyss!');
   return true;
 }
 
@@ -2259,15 +2259,15 @@ async function _cmdTourCompare(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -2542,15 +2542,15 @@ async function _cmdTourCookbook(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -2768,15 +2768,15 @@ async function _cmdTourTheme(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -2971,7 +2971,7 @@ async function _cmdTourTheme(args, ctx) {
       before: () => _clickTab('theme-tab-customize'),
       interactive: true },
     { sel: '#theme-bg-pattern-select',
-      text: 'Add a <b>background animation</b> — rain, petals, constellations, sparkles, embers…',
+      text: 'Add a <b>background animation</b> — rain, fireflies, aurora, paper grain…',
       before: () => _clickTab('theme-tab-customize'),
       interactive: true },
     { sel: '#theme-opacity-wrap',
@@ -3014,15 +3014,15 @@ async function _cmdTourSettings(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -3247,15 +3247,15 @@ async function _cmdTourGallery(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -3457,15 +3457,15 @@ async function _cmdTourNotes(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -3659,15 +3659,15 @@ async function _cmdTourBrain(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -3877,15 +3877,15 @@ async function _runTaskTour(steps, doneText, opts) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -4103,15 +4103,15 @@ async function _cmdTourResearch(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -4317,15 +4317,15 @@ async function _cmdTourLibrary(args, ctx) {
     s.id = 'tour-styles';
     s.textContent =
       '#tour-tooltip{position:fixed;z-index:10001;background:var(--bg);color:var(--fg);' +
-      'border:1px solid var(--border);border-radius:8px;padding:12px 14px;max-width:280px;' +
+      'border:1px solid var(--border);border-radius:2px;padding:12px 14px;max-width:280px;' +
       'font-family:inherit;font-size:0.8rem;line-height:1.5;' +
-      'box-shadow:0 2px 12px rgba(0,0,0,0.3);pointer-events:auto;' +
+      'box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);pointer-events:auto;' +
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
       '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
       '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
+      'cursor:pointer;font-family:inherit;border-radius:2px;transition:all .1s}' +
       '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
       '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
       '.tour-btn-arrow:hover{opacity:1}' +
@@ -4615,14 +4615,13 @@ function _ensureSetupSpotlightStyles() {
   s.id = 'setup-spotlight-styles';
   s.textContent = `
     .setup-spotlight-halo{position:fixed;z-index:10000;pointer-events:none;border:2px solid var(--accent,var(--red));
-      border-radius:10px;box-shadow:0 0 0 4px color-mix(in srgb,var(--accent,var(--red)) 18%,transparent),
-      0 0 22px color-mix(in srgb,var(--accent,var(--red)) 42%,transparent);
+      border-radius:2px;box-shadow:none;
       opacity:0;transition:opacity .22s ease-out,transform .22s ease-out;transform:scale(.985)}
     .setup-spotlight-halo.visible{opacity:1;transform:scale(1)}
     .setup-spotlight-halo.breathing{animation:setupSpotlightBreathe 1.65s ease-in-out infinite}
     @keyframes setupSpotlightBreathe{
-      0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent,var(--red)) 14%,transparent),0 0 16px color-mix(in srgb,var(--accent,var(--red)) 30%,transparent);transform:scale(.992)}
-      50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--accent,var(--red)) 24%,transparent),0 0 30px color-mix(in srgb,var(--accent,var(--red)) 54%,transparent);transform:scale(1.006)}
+      0%,100%{box-shadow:none;transform:scale(.992)}
+      50%{box-shadow:none;transform:scale(1.006)}
     }
     .setup-inline-link{appearance:none;border:0;background:transparent;color:var(--accent,var(--red));font:inherit;font-weight:700;
       padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
@@ -4793,7 +4792,7 @@ async function _cmdSetup(args, ctx) {
         return true;
       }
 
-      const current = (Storage.getJSON(Storage.KEYS.THEME, {}).name) || 'dark';
+      const current = (Storage.getJSON(Storage.KEYS.THEME, {}).name) || 'modus';
       const customLabel = customKeys.length ? `\n\nCustom: ${customKeys.join(', ')}` : '';
       await typewriterReply(`Current theme: ${current}\n\nAvailable: ${presets.join(', ')}${customLabel}\n\nType a theme name to switch.`);
       setupMode = 'theme';
@@ -4998,7 +4997,7 @@ async function _cmdRoll(args, ctx) {
   const results = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
   const total = results.reduce((a, b) => a + b, 0);
   const dice = results.map((v, i) => {
-    return `<div style="min-width:42px;height:42px;border-radius:6px;border:2px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:var(--red);animation:egg-spin 0.5s ease-out ${i*0.08}s both;cursor:pointer" title="d${sides}" onclick="this.style.animation='none';this.offsetHeight;var r=Math.floor(Math.random()*${sides})+1;this.textContent=r;this.style.animation='egg-shake 0.3s ease'">${v}</div>`;
+    return `<div style="min-width:42px;height:42px;border-radius:2px;border:2px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:var(--red);animation:egg-spin 0.5s ease-out ${i*0.08}s both;cursor:pointer" title="d${sides}" onclick="this.style.animation='none';this.offsetHeight;var r=Math.floor(Math.random()*${sides})+1;this.textContent=r;this.style.animation='egg-shake 0.3s ease'">${v}</div>`;
   }).join('');
   const totalHtml = count > 1 ? `<div style="font-size:0.8em;opacity:0.5;margin-top:4px">${count}d${sides} = ${total}</div>` : '';
   _eggRender(`<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">${dice}</div>${totalHtml}</div>`);
@@ -5032,7 +5031,7 @@ async function _cmd8Ball(args, ctx) {
 
 async function _cmdFortune(args, ctx) {
   const f = _FORTUNES[Math.floor(Math.random() * _FORTUNES.length)];
-  _eggRender(`<div style="max-width:360px;border:1px dashed var(--border);border-radius:4px;padding:12px 16px;text-align:center;position:relative;animation:egg-fade 0.4s ease-out">
+  _eggRender(`<div style="max-width:360px;border:1px dashed var(--border);border-radius:2px;padding:12px 16px;text-align:center;position:relative;animation:egg-fade 0.4s ease-out">
     <div style="font-size:0.7em;text-transform:uppercase;letter-spacing:2px;opacity:0.35;margin-bottom:8px">Fortune Cookie</div>
     <div style="font-style:italic;line-height:1.5">${f}</div>
     <div style="margin-top:8px;font-size:0.75em;opacity:0.3">${String(Math.floor(Math.random()*90)+10)} ${String(Math.floor(Math.random()*90)+10)} ${String(Math.floor(Math.random()*90)+10)} ${String(Math.floor(Math.random()*90)+10)} ${String(Math.floor(Math.random()*90)+10)} ${String(Math.floor(Math.random()*90)+10)}</div>
@@ -5082,7 +5081,7 @@ async function _cmdMatrix(args, ctx) {
   wrap.style.cssText = 'padding:8px 0;display:flex;justify-content:center;';
   const canvas = document.createElement('canvas');
   canvas.width = 400; canvas.height = 180;
-  canvas.style.cssText = 'border-radius:4px;background:#000;max-width:100%;';
+  canvas.style.cssText = 'border-radius:2px;background:#000;max-width:100%;';
   wrap.appendChild(canvas);
   chatBox.appendChild(wrap);
   const c = canvas.getContext('2d');
@@ -5315,7 +5314,7 @@ async function _cmdColor(args, ctx) {
   const hex = args[0] || '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
   const c = hex.startsWith('#') ? hex : '#' + hex;
   _eggRender(`<div style="display:flex;align-items:center;gap:12px;animation:egg-fade 0.3s ease-out">
-    <div style="width:48px;height:48px;border-radius:4px;border:1px solid var(--border);background:${ctx.esc(c)};cursor:pointer" title="Click to copy" onclick="navigator.clipboard.writeText('${ctx.esc(c)}');this.style.transform='scale(0.9)';setTimeout(()=>this.style.transform='',150)"></div>
+    <div style="width:48px;height:48px;border-radius:2px;border:1px solid var(--border);background:${ctx.esc(c)};cursor:pointer" title="Click to copy" onclick="navigator.clipboard.writeText('${ctx.esc(c)}');this.style.transform='scale(0.9)';setTimeout(()=>this.style.transform='',150)"></div>
     <div style="display:flex;flex-direction:column;gap:2px"><code style="font-size:1.1em">${ctx.esc(c)}</code>
       <span style="font-size:0.75em;opacity:0.4">click swatch to copy</span>
     </div>

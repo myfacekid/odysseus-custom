@@ -1370,6 +1370,8 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
         # Also check user's custom themes stored in prefs.
         # Must match the THEMES keys in static/js/theme.js.
         known_presets = [
+            "modus", "modus-operandi", "modus-operandi-tinted",
+            "modus-vivendi", "modus-vivendi-tinted", "doom-one",
             "dark", "light", "midnight", "paper", "cyberpunk", "retrowave",
             "forest", "ocean", "ume", "copper", "terminal", "organs",
             "lavender", "gpt", "claude", "cute",

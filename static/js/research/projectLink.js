@@ -3,7 +3,8 @@
  * Optional picker for compare/gap; post-complete confirm (never auto-link).
  */
 import uiModule from '../ui.js';
-import { isProjectsUiEnabled } from '../projects/featureFlag.js';
+import { isProjectsUiEnabled, isProjectsContextLayerEnabled } from '../projects/featureFlag.js';
+import { getActiveProjectId } from '../projects/activeState.js';
 
 const SUGGEST_DISMISS_KEY = 'odysseus-research-project-suggest-dismissed';
 const PROJECT_MODES = new Set(['compare', 'gap_analysis']);
@@ -79,7 +80,9 @@ export async function populateProjectSelect(apiBase, selectEl) {
 export function updateProjectPickerVisibility() {
   const wrap = document.getElementById('research-project-setting-wrap');
   if (!wrap) return;
-  if (!isProjectsUiEnabled()) {
+  // Context layer: picker stays hidden — we inherit the active chip instead.
+  // Workspace UI path kept for when IDE shell is re-enabled.
+  if (!isProjectsUiEnabled() || isProjectsContextLayerEnabled()) {
     wrap.hidden = true;
     return;
   }
@@ -90,6 +93,10 @@ export function updateProjectPickerVisibility() {
 }
 
 export function readSelectedProjectId() {
+  if (isProjectsContextLayerEnabled()) {
+    const active = getActiveProjectId();
+    if (active) return active;
+  }
   return (document.getElementById('research-project-id')?.value || '').trim();
 }
 
@@ -144,7 +151,7 @@ async function _pickProject(apiBase, title = 'Add to project') {
  * Post-complete suggest for compare/gap jobs (confirm only — never silent link).
  */
 export async function suggestLinkAfterComplete(job, apiBase) {
-  if (!isProjectsUiEnabled()) return;
+  if (!isProjectsUiEnabled() && !isProjectsContextLayerEnabled()) return;
   if (!job || job.status !== 'done' || !job.id || job.id.startsWith('pending-')) return;
   const mode = (job.settings?.mode || '').trim().toLowerCase();
   if (!modeWantsProjectLink(mode)) return;
@@ -154,6 +161,9 @@ export async function suggestLinkAfterComplete(job, apiBase) {
   if (srcCount === 0) return;
 
   let projectId = (job.settings?.project_id || '').trim();
+  if (!projectId && isProjectsContextLayerEnabled()) {
+    projectId = (getActiveProjectId() || '').trim();
+  }
   let projects = [];
   try {
     projects = await fetchProjects(apiBase);
@@ -166,7 +176,7 @@ export async function suggestLinkAfterComplete(job, apiBase) {
     if (!project) return;
     const ok = uiModule.styledConfirm
       ? await uiModule.styledConfirm(
-          `Link this ${mode === 'compare' ? 'compare' : 'gap analysis'} research to "${project.title}"? It will show in that project's linked knowledge rail.`,
+          `Link this ${mode === 'compare' ? 'compare' : 'gap analysis'} research to "${project.title}"? It will show with that project's linked knowledge.`,
           { confirmText: 'Link to project', title: 'Add to project' },
         )
       : false;
@@ -199,7 +209,7 @@ export async function suggestLinkAfterComplete(job, apiBase) {
 
 /** Manual action from completed job card — any research mode. */
 export async function promptLinkResearchJob(job, apiBase) {
-  if (!isProjectsUiEnabled()) return;
+  if (!isProjectsUiEnabled() && !isProjectsContextLayerEnabled()) return;
   if (!job?.id || job.id.startsWith('pending-')) return;
   const projectId = await _pickProject(apiBase, 'Link research to project');
   if (!projectId) return;

@@ -580,7 +580,7 @@ async function streamToPane(paneIdx, sessionId, message, aiMsgEl, opts) {
         notice.appendChild(text);
         const retryBtn = document.createElement('button');
         retryBtn.textContent = 'Retry +' + effectiveTimeout + 's';
-        retryBtn.style.cssText = 'background:rgba(255,152,0,0.15);border:1px solid #ff9800;color:#ff9800;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:0.9em;white-space:nowrap;transition:all 0.15s;';
+        retryBtn.style.cssText = 'background:rgba(255,152,0,0.15);border:1px solid #ff9800;color:#ff9800;border-radius:2px;cursor:pointer;padding:2px 8px;font-size:0.9em;white-space:nowrap;transition:all 0.15s;';
         retryBtn.addEventListener('mouseenter', () => { retryBtn.style.background = 'rgba(255,152,0,0.3)'; });
         retryBtn.addEventListener('mouseleave', () => { retryBtn.style.background = 'rgba(255,152,0,0.15)'; });
         retryBtn.addEventListener('click', () => { if (_rerollPane) _rerollPane(paneIdx, effectiveTimeout * 2); });

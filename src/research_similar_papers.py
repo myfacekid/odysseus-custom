@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
-_USER_AGENT = "Odysseus-DeepResearch/1.0 (mailto:support@example.com)"
+_USER_AGENT = "Nobody-DeepResearch/1.0 (mailto:support@example.com)"
 _OPENALEX_BASE = "https://api.openalex.org"
 _S2_BASE = "https://api.semanticscholar.org"
 

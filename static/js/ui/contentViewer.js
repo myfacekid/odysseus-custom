@@ -33,7 +33,7 @@ export function createPdf({ url, height = '60vh', className = 'content-view-pdf'
   if (className) frame.className = className;
   frame.src = url;
   frame.style.cssText =
-    `width:100%;height:${height};border:1px solid var(--border);border-radius:6px;background:var(--bg);`;
+    `width:100%;height:${height};border:1px solid var(--border);border-radius:2px;background:var(--bg);`;
   return frame;
 }
 

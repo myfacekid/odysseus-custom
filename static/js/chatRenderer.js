@@ -106,7 +106,7 @@ function buildAttachCards(attachments) {
         // full-resolution photo. Click still opens the full image.
         img.alt = att.name || 'Image';
         img.loading = 'lazy';
-        img.style.cssText = 'max-width:300px;max-height:200px;border-radius:6px;display:' + (att.previewUrl ? 'block' : 'none') + ';';
+        img.style.cssText = 'max-width:300px;max-height:200px;border-radius:2px;display:' + (att.previewUrl ? 'block' : 'none') + ';';
         let _revealed = false;
         let _revealTimer = null;
         const _reveal = () => {
@@ -1984,7 +1984,7 @@ export function addMessage(role, content, modelName, metadata) {
               outHtml = `<details class="agent-tool-output"><summary>Output</summary><pre>${esc(ev.output)}</pre></details>`;
             }
             if (ev.screenshot) {
-              outHtml += `<details class="agent-tool-output"><summary>Screenshot</summary><img src="${esc(ev.screenshot)}" style="max-width:100%;border-radius:6px;margin-top:6px;border:1px solid var(--border)" /></details>`;
+              outHtml += `<details class="agent-tool-output"><summary>Screenshot</summary><img src="${esc(ev.screenshot)}" style="max-width:100%;border-radius:2px;margin-top:6px;border:1px solid var(--border)" /></details>`;
             }
             const node = document.createElement('div');
             node.className = 'agent-thread-node' + (ok ? '' : ' error');

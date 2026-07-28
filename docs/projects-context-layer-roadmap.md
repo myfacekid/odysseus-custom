@@ -4,9 +4,9 @@ Living plan for **repositioning Projects** from an IDE-style workspace shell int
 
 Use this doc when starting future chats: *"Follow docs/projects-context-layer-roadmap.md Phase L1"*.
 
-**Last updated:** 2026-07-13
+**Last updated:** 2026-07-22
 
-**Status:** Product direction agreed. Workspace UI **hidden** behind `PROJECTS_UI_ENABLED` (`static/js/projects/featureFlag.js`). Backend APIs kept. Implementation of the layer model not started.
+**Status:** L0–L6 shipped. **F1–F5 project files pop-out** replaces the broken flat picker with a tree | reader sheet (read-only + promote).
 
 **Supersedes (for product direction):** the “Projects is a workspace mode” guiding rule in `docs/projects-suite-roadmap.md`. That suite work (P1–P9) remains useful chrome reference if a thin file viewer returns later; it is **not** the target product shape.
 
@@ -36,167 +36,82 @@ The harness stays the product. A project is a **layer above** it: turn it on, an
 
 ---
 
-## Interim: hide Projects UI
+## Flags
 
-**Done (2026-07-13):**
+- `PROJECTS_UI_ENABLED = false` — IDE workspace shell stays hidden.
+- `PROJECTS_CONTEXT_LAYER_ENABLED = true` — chip, scope, promote.
 
-- Flag: `PROJECTS_UI_ENABLED = false` in `static/js/projects/featureFlag.js`.
-- `initProjects()` hides chrome and skips restore; `openProjectWorkspace` no-ops.
-- Hidden: New Project, sidebar Projects section, workspace panel, overflow/mode pill, Appearance toggle, research “Add to project” / link picker, Knowledge “Open workspace”.
-- Backend `/api/projects*` left intact for the rebuild.
-
-**Re-enable for local work:** set `PROJECTS_UI_ENABLED = true` and reload.
+File: `static/js/projects/featureFlag.js`
 
 ---
 
-## Target UX (sketch)
+## Target UX (shipped)
 
 ```
 ┌─ Top / chrome ─────────────────────────────────────────┐
 │  [ Project: Atlas ▾ ]  or  [ No project ]               │  ← global chip
 └────────────────────────────────────────────────────────┘
   When active:
-  • Chats created in this scope (or filterable by project)
-  • Research can inherit / suggest link to active project
-  • Agent tool policy: no free bash; cwd-bound tools only
-  • Optional: slim “Project files” picker (not full IDE)
-  • Links hub / Knowledge: project node + linked neighbors
+  • New chats tagged with project_id (tool policy + preamble)
+  • Research inherits active project for link prompts
+  • Agent: no free bash; cwd tools + promote_project_file
+  • Browse project files → tree | reader pop-out → Add to Library
+  • Knowledge: “Set active” on project nodes
 ```
-
-No dedicated main-area workspace that replaces Chats/Documents. Optional later: a **lightweight** file browser / promote sheet, not a tabbed IDE shell.
 
 ---
 
 ## Phases
 
-### L0 — Pause & park (done)
+| Phase | Status | Notes |
+|-------|--------|-------|
+| L0 Pause & park | **done** | Workspace UI hidden |
+| L1 Active project chip | **done** | `activeChip.js` / `activeState.js` |
+| L2 Scope inheritance | **done** | Session `project_id`, chat filter, research/knowledge |
+| L3 Tool policy | **done** | Pre-existing + `promote_project_file` |
+| L4 Promote cwd → Library | **done** | API + agent tool |
+| L5 Demote shell | **done** | Shell behind flag |
+| L6 Polish & tests | **done** | Migration, animations, pytest + UI smokes |
+| F1–F5 Files pop-out | **done** | Tree + read-only reader + promote ([`filePicker.js`](../static/js/projects/filePicker.js)) |
 
-- Hide user-facing Projects UI; clear last-open restore.
-- Document direction (this file).
-- Stop investing in workspace chrome unless L5 explicitly revives a thin viewer.
+### Project files browser (F1–F5)
 
-### L1 — Active project chip (harness chrome)
+Dedicated modal (not Documents pane, not IDE workspace):
 
-**Goal:** Pick / clear / create a project without opening a workspace.
-
-- Global control in top bar (or sidebar header): active project title + switcher.
-- Create project = title + working directory (reuse existing create API).
-- Persist `active_project_id` (session or user preference).
-- Empty state: “No project — chats and tools are unscoped.”
-
-**Out of scope for L1:** file tree, editor, Run panel.
-
-### L2 — Scope inheritance
-
-**Goal:** Active project flows into the surfaces that matter.
-
-- **Chat:** new sessions tagged with `project_id`; list filter “This project” / “All”.
-- **Research:** inherit active project for compare/gap link prompts (replace old workspace-centric CTAs).
-- **Knowledge / Links:** project node remains; “open workspace” becomes “set active” or “view links”.
-- **Activity strip:** optional “Project: …” when scoped.
-
-### L3 — Tool policy & cwd execution
-
-**Goal:** When a project is active, the agent stays inside the computational boundary.
-
-Already largely present: `project_tool_policy`, `read_project_file` / `write_project_file` / `run_project_script`.
-
-Ship / tighten:
-
-- No free `bash` while project active (or only via allowlisted `run_project_command` with path jail).
-- Clear UX copy: “Tools run in project folder.”
-- Off-project = existing harness tool policy.
-
-### L4 — Promote cwd → Library
-
-**Goal:** Explicit bridge from computational depth to app corpus.
-
-User stories:
-
-1. From a project file picker (or agent suggestion): **Add to Library**.
-2. Choose Library destination (document / note / ingest path — match existing Library APIs).
-3. Optional: create a graph link `project ↔ document` after promote.
-4. Never auto-promote run outputs or entire trees.
-
-API sketch:
-
-- `POST /api/projects/{id}/promote`  
-  body: `{ path, library_type?, title?, link?: true }`  
-  reads file under cwd jail → creates Library artifact → optional link edge.
-
-UI:
-
-- Action on file row / overflow: “Add to Library…”
-- Confirm dialog with destination + “also link to this project”.
-- Toast with “Open in Library”.
-
-### L5 — Retire or demote the workspace shell
-
-**Goal:** Remove the IDE framing from the default product.
-
-Options (pick one in implementation):
-
-- **A (preferred):** Delete or archive `#project-workspace-panel` entry points; keep modules only as needed for a **modal/sheet** file browser used by promote + rare “peek file”.
-- **B:** Keep a power-user “Open folder view” behind an advanced flag.
-
-Chat|Run companion, tab host, layout presets become non-goals unless they serve L4’s thin picker.
-
-### L6 — Polish & migration
-
-- Migrate users who had “last open project” → active chip only.
-- Appearance toggle for Projects section → remove or replace with “Show project chip”.
-- Update onboarding copy; archive suite/UI roadmaps as historical.
-- Tests: flag off by default; L1–L4 coverage for chip, scope, promote.
+- **Left:** lazy read-only folder tree (depth accent)
+- **Right:** `contentViewer` preview + **Project file** badge; **Add to Library…**
+- Edit only after promote (Library Documents / Notes)
+- Shell uses `.modal-content` so pointer-events work (fixes dead picker)
 
 ---
 
-## Non-goals
+## Decisions (resolved)
 
-- Mirroring project directory trees into Library folders.
-- Making Library the project file browser.
-- Free-form shell as the primary project execution path.
-- Rebuilding VS Code inside Odysseus.
-
----
-
-## Suggested implementation order
-
-| Order | Phase | Why |
-|-------|-------|-----|
-| 1 | L0 | Already done — users don’t see stale IDE UI |
-| 2 | L1 | Smallest visible “projects exist again” surface |
-| 3 | L3 | Safety before encouraging agent use of cwd |
-| 4 | L2 | Makes the chip meaningful across chats/research |
-| 5 | L4 | Promote cwd → Library (requested bridge) |
-| 6 | L5–L6 | Remove dead shell; migrate prefs |
+1. **Chat model:** Always create under active project.
+2. **Promote targets:** Documents, Notes, and raw Library ingest.
+3. **Agent promote:** Tool + UI.
+4. **Multi-project:** One active project at a time.
+5. **Files browser:** Pop-out tree | reader; read-only peek + promote (not Documents pane edit).
 
 ---
 
-## Open decisions (resolve in L1 kickoff)
+## File map
 
-1. **Chat model:** Always create under active project vs opt-in “Attach to project”?
-2. **Promote targets:** Documents only, or also Notes / raw Library ingest?
-3. **Agent promote:** Tool `promote_project_file` with confirm, or UI-only first?
-4. **Multi-project:** One active project only (recommended) vs pinned set?
-
----
-
-## File map (expected)
-
-| Area | Likely touch |
-|------|----------------|
-| Flag / hide | `static/js/projects/featureFlag.js` |
-| Chip UI | `static/index.html`, top-bar JS, new `static/js/projects/activeChip.js` |
-| Scope | session create APIs, research `projectLink.js`, chat list filters |
-| Tools | `src/project_tool_policy.py`, `src/project_files.py` |
-| Promote | new API + Library create path + thin file picker |
-| Cleanup | `#project-workspace-panel` and `static/js/projects/{editor,tabHost,workspace*}` |
+| Area | Files |
+|------|-------|
+| Flags | `static/js/projects/featureFlag.js` |
+| Chip | `static/js/projects/activeChip.js`, `activeState.js` |
+| Files sheet | `static/js/projects/filePicker.js` |
+| Promote API | `src/project_promote.py`, `routes/project_routes.py` |
+| Sessions | `routes/session_routes.py`, `static/js/sessions.js` |
+| Tools | `src/project_tool_policy.py`, `src/tool_schemas.py`, `src/tool_execution.py` |
+| Tests | `tests/test_project_promote.py`, `tests/ui/projects-context-layer.test.mjs`, `tests/ui/project-files-sheet.test.mjs` |
 
 ---
 
 ## Success criteria
 
-- User can run Odysseus with **no project** and never see Projects chrome.
+- User can run Odysseus with **no project** and never see the IDE workspace shell.
 - User can set an active project and have chat/research/tools inherit it without opening an IDE shell.
-- User can **promote** a cwd file into Library in one explicit action, optionally linked.
-- cwd and Library remain clearly separate in UI copy and data model.
+- User can browse cwd files in a working pop-out, preview them, and **promote** into Library.
+- cwd and Library remain clearly separate in UI copy and data model (depth badge vs Library docs).

@@ -100,7 +100,11 @@ async def build_retrieval_plan(
     if mode_ctx:
         prompt += f"\n\n{mode_ctx}"
     if seed_ctx and seed_ctx != "(none)":
-        prompt += f"\n\nSeed papers (use titles and abstracts for anchor_terms and avoid_topics):\n{seed_ctx}"
+        prompt += (
+            "\n\nSeed papers (pull named methods/acronyms into anchor_terms; "
+            "pull thematic gaps into key_topics; unrelated nearby fields into avoid_topics):\n"
+            f"{seed_ctx}"
+        )
 
     from src.llm_core import llm_call_async
 
@@ -147,7 +151,7 @@ def build_agent_context_prompt(
 ) -> str:
     """Prefix injected into the LangGraph agent user message."""
     parts = [
-        "You are gathering scholarly sources for an Odysseus Deep Research report.",
+        "You are gathering scholarly sources for a Nobody Deep Research report.",
         "Search thoroughly using academic engines (PubMed, Semantic Scholar, OpenAlex, Scholar).",
         "Do not answer from memory — collect citable sources with titles, URLs, and snippets.",
         f"Research mode: {research_mode}.",

@@ -10,6 +10,8 @@
   // static/js/theme.js so login picks the same default pattern as the
   // main app for users who never explicitly chose one.
   var THEME_DEFAULT_PATTERN = {
+    modus:'dots', 'modus-operandi':'dots', 'modus-operandi-tinted':'dots',
+    'modus-vivendi':'none', 'modus-vivendi-tinted':'none', 'doom-one':'none',
     dark:'none', light:'dots', midnight:'rain', paper:'dots',
     cyberpunk:'synapse', retrowave:'embers', forest:'petals',
     ocean:'constellations', terminal:'perlin-flow', organs:'rain',
@@ -20,7 +22,10 @@
   };
   var THEME_DEFAULT_INTENSITY = { midnight:0.5, terminal:0.8, organs:0.65 };
   try {
-    var t = JSON.parse(localStorage.getItem('odysseus-theme'));
+    var raw = localStorage.getItem('nobody-theme')
+      || localStorage.getItem('odysseus-theme')
+      || localStorage.getItem('oculus-theme');
+    var t = raw ? JSON.parse(raw) : null;
     var s = document.documentElement.style;
     if (t && t.colors) {
       var c = t.colors;
@@ -53,15 +58,16 @@
       };
       for (var k in ADV) { if (a[k]) s.setProperty(ADV[k], a[k]); }
     }
-    // Background effect — pick ONE at random from the main app's 8
+    // Background effect — pick ONE at random from the main app's
     // patterns each load (matches the old login behavior, but uses the
     // same effect implementations the main theme system exposes so the
     // login feels consistent with the rest of the app). Per-theme
     // bgEffectColor/Intensity defaults still apply so the random
     // pattern picks up theme-appropriate tinting.
     var name = (t && t.name) || '';
-    // perlin-flow excluded — too visually intense for a login screen.
-    var PATTERNS = ['dots','synapse','rain','constellations','petals','sparkles','embers'];
+    // perlin-flow / fog excluded — too intense or heavy for a login screen.
+    var PATTERNS = ['dots','synapse','rain','constellations','petals','sparkles','embers',
+      'fireflies','aurora','paper-grain','ripple','drift-grid','orbit-rings'];
     var pattern = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
     var effColor = (t && t.bgEffectColor) || THEME_DEFAULT_EFFECT_COLOR[name] || '';
     var effInt = (t && t.bgEffectIntensity !== undefined)
@@ -82,6 +88,9 @@
 })();
 </script>
 <style>
+  @font-face { font-family: 'Iosevka'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Iosevka-Regular.woff2') format('woff2'); }
+  @font-face { font-family: 'Iosevka'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Iosevka-SemiBold.woff2') format('woff2'); }
+  @font-face { font-family: 'Roboto Mono'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/RobotoMono-Regular.woff2') format('woff2'); }
   @font-face { font-family: 'Fira Code'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/FiraCode-Regular.woff2') format('woff2'); }
   @font-face { font-family: 'Fira Code'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/FiraCode-SemiBold.woff2') format('woff2'); }
   /* Mirror the main app's :root defaults (static/style.css ~line 18) so an
@@ -89,9 +98,15 @@
      localStorage — renders the login page in the same palette as the rest
      of the app instead of a different greys+offwhite scheme. */
   :root {
-    --bg: #282c34; --fg: #9cdef2; --panel: #111; --border: #355a66;
-    --red: #e06c75; --green: #50fa7b;
+    --bg: #fbf7f0; --fg: #000000; --panel: #efe9dd; --border: #9f9690;
+    --red: #0031a9; --green: #006300;
+    --accent-primary: #0031a9; --accent-error: #a60000;
+    --brand-color: #0031a9; --send-btn-bg: #0031a9; --send-btn-hover: #3546c2;
+    --input-bg: #fbf7f0;
     --bg-effect-intensity: 1;
+    --bg-effect-size: 1;
+    --font-ui: 'Iosevka', 'Fira Code', monospace;
+    --radius-tech: 2px;
   }
   /* Background patterns — mirrors static/style.css "Background Patterns"
      block so the theme's chosen bgPattern renders on login too. The
@@ -100,10 +115,15 @@
      the static gradient ones (dots, synapse) need these CSS rules. */
   #synapse-canvas, #rain-canvas, #constellations-canvas,
   #perlin-flow-canvas, #petals-canvas, #sparkles-canvas,
-  #embers-canvas { opacity: var(--bg-effect-intensity, 1); }
+  #embers-canvas,
+  #fireflies-canvas, #aurora-canvas, #paper-grain-canvas,
+  #ripple-canvas, #drift-grid-canvas, #orbit-rings-canvas,
+  #fog-canvas,
+  canvas[data-bg-effect] { opacity: var(--bg-effect-intensity, 1); }
   body.bg-pattern-dots {
-    background-image: radial-gradient(color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(5% * var(--bg-effect-intensity, 1)), transparent) 1px, transparent 1px);
-    background-size: 20px 20px; background-attachment: fixed;
+    background-image: radial-gradient(color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(10% * var(--bg-effect-intensity, 1)), transparent) 1px, transparent 1px);
+    background-size: calc(20px * var(--bg-effect-size, 1)) calc(20px * var(--bg-effect-size, 1));
+    background-attachment: fixed;
   }
   body.bg-pattern-synapse {
     background-image: linear-gradient(color-mix(in srgb, var(--bg-effect-color, var(--fg)) calc(3.5% * var(--bg-effect-intensity, 1)), transparent) 1px, transparent 1px),
@@ -112,7 +132,7 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: 'Fira Code', monospace;
+    font-family: var(--font-ui, 'Iosevka', monospace);
     background: var(--bg); color: var(--fg);
     display: flex; justify-content: center; align-items: flex-start;
     min-height: 100vh; min-height: 100dvh;
@@ -120,8 +140,9 @@
     transition: padding-top 0.2s ease;
   }
   .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-tech, 2px);
     padding: 2rem; width: 360px; max-width: 90vw;
+    box-shadow: 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);
     /* Sit above the bg-effect canvases (which spawn at z-index:0) so the
        falling rain / drifting petals / etc. don't streak across the
        login form. */
@@ -131,7 +152,7 @@
     text-align: center; margin-bottom: 1.5rem;
   }
   .logo span {
-    font-family: 'Fira Code', monospace;
+    font-family: var(--font-ui, 'Iosevka', monospace);
     font-size: 2rem; font-weight: 600;
     letter-spacing: 0.04em;
     /* Same gradient as the main app's welcome-screen "Nobody" title
@@ -143,11 +164,11 @@
     background-clip: text;
   }
   .setup-note { color: color-mix(in srgb, var(--fg) 60%, transparent); font-size: 0.8rem; margin-bottom: 1rem; text-align: center; }
-  label { display: block; font-size: 0.85rem; margin-bottom: 0.3rem; color: color-mix(in srgb, var(--fg) 65%, transparent); }
+  label { display: block; font-size: 0.85rem; margin-bottom: 0.3rem; color: color-mix(in srgb, var(--fg) 65%, transparent); text-transform: uppercase; letter-spacing: 0.06em; }
   input:not(.remember-check) {
     width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 1rem;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-    color: var(--fg); font-size: 0.95rem; font-family: 'Fira Code', monospace;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-tech, 2px);
+    color: var(--fg); font-size: 0.95rem; font-family: 'Roboto Mono', var(--font-ui, monospace);
   }
   input:focus { outline: none; border-color: var(--red); }
   /* On touch devices keep inputs at >=16px so iOS Safari doesn't zoom the whole
@@ -160,7 +181,7 @@
   }
   /* Clear, visible focus ring for keyboard users on every focusable control. */
   input:focus-visible, a:focus-visible, button:focus-visible {
-    outline: 2px solid var(--red);
+    outline: 2px dotted var(--red);
     outline-offset: 2px;
   }
   button {
@@ -168,11 +189,12 @@
     /* Asymmetric vertical padding nudges the label 1px down while keeping
        the button's total height the same as 0.7rem all-around. */
     padding: calc(0.7rem + 1px) 0.7rem calc(0.7rem - 1px);
-    border: none; border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--red) 78%, #000); border-radius: var(--radius-tech, 2px);
     /* Darken the brand red slightly so #fff label text clears the WCAG AA
        4.5:1 contrast threshold (plain --red #e06c75 only reaches ~3.2:1). */
     background: color-mix(in srgb, var(--red) 78%, #000); color: #fff; font-size: 1rem; cursor: pointer;
-    font-weight: 600; font-family: 'Fira Code', monospace;
+    font-weight: 600; font-family: var(--font-ui, 'Iosevka', monospace);
+    letter-spacing: 0.06em; text-transform: uppercase;
   }
   button:hover { background: color-mix(in srgb, var(--red) 66%, black); }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -225,11 +247,14 @@
   .remember-toggle:hover .remember-dot {
     border-color: color-mix(in srgb, var(--fg) 40%, transparent);
   }
-  .logo-boat { width: 1.6rem; height: 1.6rem; margin-right: 0.4rem; vertical-align: -0.15em; color: var(--red); }
+  .logo-boat, .brand-eye { width: 1.6rem; height: 1.6rem; margin-right: 0.4rem; vertical-align: -0.15em; color: var(--red); overflow: visible; }
+  .brand-eye .abyss-swirl { transform-origin: 16px 16px; animation: abyss-swirl 8s linear infinite; }
+  @keyframes abyss-swirl { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .brand-eye .abyss-swirl { animation: none; } }
   .version-label {
     position: fixed; bottom: 12px; right: 16px;
     font-size: 0.7rem; opacity: 0.25;
-    font-family: 'Fira Code', monospace;
+    font-family: 'Roboto Mono', var(--font-ui, monospace);
     pointer-events: none; user-select: none;
   }
   /* Whirlpool-style spinner shown in the submit button while login /
@@ -250,7 +275,7 @@
 <body>
 <main class="card">
   <h1 class="logo">
-    <svg class="logo-boat" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M16 4L16 22L6 22Z" fill="currentColor"/><path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6"/><path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg><span>Nobody</span>
+    <svg class="brand-eye logo-boat" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M2.5 16C7 7.5 12.5 4.5 16 4.5s9 3 13.5 11.5C25 24.5 19.5 27.5 16 27.5S7 24.5 2.5 16z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="16" cy="16" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="16" cy="16" r="4" fill="currentColor"/><g class="abyss-swirl"><path d="M16 13.15c1.65.04 2.95 1.2 2.95 2.4 0 1.55-1.4 2.2-2.65 2.2-1.15 0-2.05-.55-2.05-1.4 0-.8.7-1.2 1.4-1.2.55 0 1 .28 1 .72" fill="none" stroke="var(--bg,#06060c)" stroke-width="1.1" stroke-linecap="round"/><path d="M14.2 14.4c.35-.55 1.1-.9 1.9-.9" fill="none" stroke="var(--bg,#06060c)" stroke-width="0.85" stroke-linecap="round" opacity="0.7"/><circle cx="16" cy="16" r="0.85" fill="var(--bg,#06060c)"/></g></svg><span>Nobody</span>
   </h1>
   <p class="setup-note" id="setupNote" style="display:none"></p>
 
@@ -493,7 +518,7 @@
         form._totpMode = true;
         const totpWrap = document.createElement('div');
         totpWrap.style.cssText = 'margin-top:12px;';
-        totpWrap.innerHTML = '<label for="totp-input" style="font-size:0.85em;opacity:0.7;display:block;margin-bottom:4px;">2FA Code</label><input type="text" id="totp-input" placeholder="Enter 6-digit code" aria-label="Two-factor authentication code" autocomplete="one-time-code" inputmode="numeric" maxlength="8" style="width:100%;padding:10px 12px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box;text-align:center;letter-spacing:4px;">';
+        totpWrap.innerHTML = '<label for="totp-input" style="font-size:0.85em;opacity:0.7;display:block;margin-bottom:4px;">2FA Code</label><input type="text" id="totp-input" placeholder="Enter 6-digit code" aria-label="Two-factor authentication code" autocomplete="one-time-code" inputmode="numeric" maxlength="8" style="width:100%;padding:10px 12px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:2px;font-size:14px;box-sizing:border-box;text-align:center;letter-spacing:4px;">';
         const formEl = submitBtn.parentElement;
         formEl.insertBefore(totpWrap, submitBtn);
         const totpInput = document.getElementById('totp-input');

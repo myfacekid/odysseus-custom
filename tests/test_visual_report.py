@@ -49,8 +49,9 @@ def test_visual_report_omits_scraped_images():
         stats={},
         session_id="img-off",
     )
-    assert "hero-image" not in html
-    assert "section-image" not in html
+    soup = BeautifulSoup(html, "html.parser")
+    assert soup.select_one(".hero-image") is None
+    assert soup.select_one(".section-image") is None
     assert "https://ex.com/photo.jpg" not in html
     assert 'property="og:image"' not in html
 
@@ -302,3 +303,82 @@ def test_build_sources_sidebar_html_includes_zotero_and_excerpt():
     assert "Methods and results excerpt." in html
     assert 'data-filter="seed"' in html
     assert "Seed</span>" in html
+
+
+def test_visual_report_uses_modus_blueprint_theme():
+    """Standalone report embeds Modus Operandi Tinted + Blueprint tokens."""
+    html = generate_visual_report(
+        "theme check",
+        "## Findings\n\nClaim.",
+        sources=[],
+        stats={},
+        session_id="theme-test",
+        category="academic",
+    )
+    # Modus Operandi Tinted
+    assert "--bg: #fbf7f0" in html
+    assert "--accent: #0031a9" in html
+    assert 'theme-color" content="#0031a9"' in html
+    # Modus Vivendi Tinted (dark)
+    assert "--bg: #0d0e1c" in html
+    assert "--accent: #2fafff" in html
+    # Blueprint fonts + chrome
+    assert "font-family: 'Iosevka'" in html or "Iosevka-Regular.woff2" in html
+    assert "RobotoMono-Regular.woff2" in html
+    assert "--radius: 2px" in html
+    assert "--tracking-label: 0.06em" in html
+    assert "--font-ui: 'Iosevka'" in html
+    # No legacy terracotta / editorial-only Charter pairing
+    assert "#b8543a" not in html
+    assert "Charter" not in html
+    assert "Playfair Display" not in html
+    # Syncs with user-selected app theme when localStorage is available
+    assert "nobody-theme" in html
+    assert "data-user-theme" in html
+    # Syncs user-selected font (FONT_MAP keys + --font-ui/--font-body)
+    assert "data-user-font" in html
+    assert "'Literata', Georgia, serif" in html
+    assert "'JetBrains Mono', monospace" in html
+    assert "FiraCode-Regular.woff2" in html
+    assert "Literata-Regular.woff2" in html
+
+
+def test_visual_report_hides_verification_badge():
+    html = generate_visual_report(
+        "verify hide",
+        "## Key Findings\n\nClaim.",
+        sources=[],
+        stats={},
+        session_id="verify-hide",
+        verification={
+            "checked": 3,
+            "supported": 2,
+            "partial": 1,
+            "unsupported": 0,
+            "confidence": 0.8,
+            "flagged": [],
+        },
+    )
+    assert "verify-badge" not in html or 'class="verify-badge' not in html
+    soup = BeautifulSoup(html, "html.parser")
+    assert soup.select_one(".verify-badge") is None
+
+
+def test_toc_group_arrow_aligned_with_title():
+    """Disclosure arrow sits in a left gutter so Key Findings aligns with siblings."""
+    html = generate_visual_report(
+        "toc align",
+        "## Key Findings\n\n### Point A\n\nDetail.\n\n## Background\n\nMore.",
+        sources=[],
+        stats={},
+        session_id="toc-align",
+    )
+    assert "toc-group" in html
+    assert "Key Findings" in html
+    # Arrow uses absolute positioning in the gutter (not inline indent)
+    assert "position: absolute" in html
+    assert "left: 0.3rem" in html
+    soup = BeautifulSoup(html, "html.parser")
+    group = soup.select_one("details.toc-group")
+    assert group is not None
+    assert "Key Findings" in group.get_text()

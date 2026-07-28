@@ -73,6 +73,24 @@ def test_source_to_zotero_item_maps_metadata():
     assert item["date"] == "2024"
     assert item["abstractNote"]
     assert "RCT" in item["abstractNote"]
+    assert "collections" not in item
+
+    filed = source_to_zotero_item(src, collection_key="COLLKEY1")
+    assert filed["collections"] == ["COLLKEY1"]
+
+
+def test_resolve_save_collection_key():
+    from src.research_zotero_save import resolve_save_collection_key
+
+    cols = [
+        {"key": "AAAA1111", "name": "Papers", "path": "Research / Papers"},
+        {"key": "BBBB2222", "name": "Drafts", "path": "Drafts"},
+    ]
+    assert resolve_save_collection_key(None, cols) is None
+    assert resolve_save_collection_key("", cols) is None
+    assert resolve_save_collection_key("BBBB2222", cols) == "BBBB2222"
+    with pytest.raises(ValueError, match="Unknown Zotero collection"):
+        resolve_save_collection_key("MISSING", cols)
 
 
 def test_save_research_sources_to_zotero_batches_and_skips_library():
@@ -104,23 +122,112 @@ def test_save_research_sources_to_zotero_batches_and_skips_library():
     assert result["created"] == 2
     assert result["attempted"] == 2
     assert result["skipped_in_library"] == 1
+    assert result["collection_key"] is None
     assert len(client.calls) == 1
     assert client.calls[0][0]["title"] == "Save me A"
+    assert "collections" not in client.calls[0][0]
+
+
+def test_save_research_sources_to_zotero_with_collection():
+    data = {
+        "raw_report": "Finding [1].",
+        "evidence_registry": _registry_payload(
+            {"url": "https://ex.com/a", "title": "Save me A"},
+        ),
+    }
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        def create_items(self, items):
+            self.calls.append(items)
+            return len(items), None
+
+        def list_collections(self):
+            return [{"key": "FOLDER99", "name": "Deep Research", "path": "Deep Research"}]
+
+    client = FakeClient()
+    result = save_research_sources_to_zotero(
+        data,
+        client,
+        scope="cited",
+        citation_nums=[1],
+        collection_key="FOLDER99",
+    )
+    assert result["ok"] is True
+    assert result["created"] == 1
+    assert result["collection_key"] == "FOLDER99"
+    assert client.calls[0][0]["collections"] == ["FOLDER99"]
+
+
+def test_save_research_sources_to_zotero_rejects_unknown_collection():
+    data = {
+        "raw_report": "Finding [1].",
+        "evidence_registry": _registry_payload(
+            {"url": "https://ex.com/a", "title": "Save me A"},
+        ),
+    }
+
+    class FakeClient:
+        def create_items(self, items):
+            raise AssertionError("should not create")
+
+        def list_collections(self):
+            return [{"key": "REALKEY1", "name": "Real", "path": "Real"}]
+
+    with pytest.raises(ValueError, match="Unknown Zotero collection"):
+        save_research_sources_to_zotero(
+            {"raw_report": data["raw_report"], "evidence_registry": data["evidence_registry"]},
+            FakeClient(),
+            collection_key="NOPE0000",
+        )
 
 
 def test_preview_save_sources_defaults():
     data = {
-        "raw_report": "See [2].",
+        "raw_report": "See [2]. Also [2] again.",
         "evidence_registry": _registry_payload(
-            {"zotero_key": "SEED0001", "title": "Seed"},
-            {"url": "https://ex.com/cited", "title": "Cited web"},
+            {"zotero_key": "SEED0001", "title": "Seed", "is_seed": True},
+            {
+                "url": "https://ex.com/cited",
+                "title": "Cited web",
+                "peer_review_status": "preprint",
+                "study_type": "RCT",
+                "year": "2024",
+                "authors": "Doe, J.",
+                "content_excerpt": "A" * 300,
+            },
             {"url": "https://ex.com/other", "title": "Other web"},
         ),
     }
+    # Preserve explicit tiers the way session JSON does (to_dict / from_dict).
+    reg = EvidenceRegistry.from_dict(data["evidence_registry"])
+    for src in reg.sources():
+        if src.citation_num == 1:
+            src.sourcing_tier = "adequate"
+            src.is_seed = True
+        elif src.citation_num == 2:
+            src.sourcing_tier = "abstract_only"
+        else:
+            src.sourcing_tier = "metadata_only"
+    data["evidence_registry"] = reg.to_dict()
+
     preview = preview_save_sources(data, scope="cited")
     assert len(preview["in_library"]) == 1
     assert len(preview["saveable"]) == 2
     assert preview["default_citation_nums"] == [2]
+    cited = next(s for s in preview["saveable"] if s["citation_num"] == 2)
+    assert cited["cite_count"] == 2
+    assert cited["cited"] is True
+    assert cited["sourcing_tier"] == "abstract_only"
+    assert cited["sourcing_tier_label"] == "Abstract only"
+    assert cited["sourcing_tier_class"] == "abstract"
+    assert cited["peer_review_status"] == "preprint"
+    assert cited["study_type"] == "RCT"
+    seed = preview["in_library"][0]
+    assert seed["is_seed"] is True
+    assert seed["sourcing_tier_label"] == "Full text"
 
 
 def _request(user: str):
@@ -172,7 +279,7 @@ def test_research_save_to_zotero_route(tmp_path, monkeypatch):
 
     result = asyncio.run(save_route(
         "save-zotero-test",
-        SimpleNamespace(citation_nums=[1], scope="cited"),
+        SimpleNamespace(citation_nums=[1], scope="cited", collection_key="FOLDER99"),
         _request("alice"),
     ))
     assert result["created"] == 1
@@ -180,6 +287,7 @@ def test_research_save_to_zotero_route(tmp_path, monkeypatch):
         "save-zotero-test",
         scope="cited",
         citation_nums=[1],
+        collection_key="FOLDER99",
     )
 
 

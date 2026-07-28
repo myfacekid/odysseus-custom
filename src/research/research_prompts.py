@@ -25,16 +25,23 @@ Break this question down for rigorous academic investigation:
 2. What study types matter (systematic reviews, RCTs, meta-analyses, cohort studies)?
 3. What would a scientifically sound synthesis include — including gaps and limitations?
 
-Also derive retrieval parameters so search and relevance gating stay on-topic:
-- Distinctive method names, model names, and acronyms from the question and seeds
-- Topics to avoid (unrelated subfields that share broad vocabulary)
-- Scholarly search queries for PubMed/Google Scholar and OpenAlex
+Also derive retrieval parameters so search and relevance gating stay on-topic.
+Keep these three lists DISTINCT — do not copy the same phrases into each field:
+
+- **anchor_terms**: Short named entities that fence relevance (model names, tool names,
+  acronyms, method brands). Prefer 1–3 token proper nouns / acronyms from the question
+  and seeds. Used as a hard on-topic filter — papers should mention these.
+- **key_topics**: Broader thematic coverage goals for the synthesis (concepts, mechanisms,
+  study populations, outcome classes). Phrases, not product names. Should NOT be a copy
+  of anchor_terms. Ask: "what themes must the final review cover?"
+- **search_keywords**: Query strings for academic APIs. May mix anchors + topical phrases.
+- **avoid_topics**: Unrelated subfields that share broad vocabulary and should be rejected.
 
 Return a JSON object with:
 - "sub_questions": Array of 3-6 specific scholarly sub-questions
-- "key_topics": Array of key concepts, methods, or populations to cover
+- "key_topics": 3–6 thematic coverage phrases (concepts/populations — not the same as anchors)
 - "success_criteria": One sentence describing what a complete academic answer looks like
-- "anchor_terms": Distinctive terms for relevance gating (model names, acronyms, method names)
+- "anchor_terms": 3–8 distinctive named entities for relevance gating
 - "search_keywords": Keywords for academic search APIs (may overlap anchor_terms)
 - "scope": One of "narrow_compare", "field_overview", "gap_analysis", "balanced"
 - "must_stay_close_to_seeds": true when the question compares or builds on specific seed papers
@@ -43,10 +50,10 @@ Return a JSON object with:
 - "avoid_topics": Phrases for unrelated subfields to reject (e.g. "gene ontology" for a structure-compare question)
 - "openalex_search_queries": Optional OpenAlex keyword queries (defaults to search_keywords)
 
-Example:
+Example (note anchors ≠ topics):
 {{
   "sub_questions": ["How does method A represent structure?", "How does method B search structure space?"],
-  "key_topics": ["structural alphabet", "search space", "representation"],
+  "key_topics": ["structural alphabet", "search space coverage", "representation trade-offs"],
   "success_criteria": "A comparison grounded in the named methods with explicit limitations.",
   "anchor_terms": ["foldseek", "esm3", "3di"],
   "search_keywords": ["foldseek", "esm3", "3di", "structure representation", "structural alphabet"],

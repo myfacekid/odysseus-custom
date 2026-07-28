@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <title>Nobody Chat</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4L16 22L6 22Z' fill='%23e06c75'/%3E%3Cpath d='M16 8L16 22L24 22Z' fill='%23e06c75' opacity='0.6'/%3E%3Cpath d='M4 24Q10 20 16 24Q22 28 28 24' stroke='%23e06c75' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2.5 16C7 7.5 12.5 4.5 16 4.5s9 3 13.5 11.5C25 24.5 19.5 27.5 16 27.5S7 24.5 2.5 16z' fill='none' stroke='%23a60000' stroke-width='2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='16' r='6.2' fill='none' stroke='%23a60000' stroke-width='1.4'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23a60000'/%3E%3Cpath d='M16 13.15c1.65.04 2.95 1.2 2.95 2.4 0 1.55-1.4 2.2-2.65 2.2-1.15 0-2.05-.55-2.05-1.4 0-.8.7-1.2 1.4-1.2.55 0 1 .28 1 .72' fill='none' stroke='%2306060c' stroke-width='1.1' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='16' r='0.85' fill='%2306060c'/%3E%3C/svg%3E">
   <link rel="manifest" href="/static/manifest.json">
-  <meta name="theme-color" content="#282c34">
+  <meta name="theme-color" content="#fbf7f0">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <!-- Disable iOS / Android auto-linkifying of numbers (phone/date/address)
@@ -17,9 +17,13 @@
   window._odysseusLoadTime = Date.now();
   (function(){
     try {
-      var t = JSON.parse(localStorage.getItem('odysseus-theme'));
+      // Prefer canonical nobody-theme; fall back to legacy keys used by older builds.
+      var raw = localStorage.getItem('nobody-theme')
+        || localStorage.getItem('odysseus-theme')
+        || localStorage.getItem('oculus-theme');
+      var t = raw ? JSON.parse(raw) : null;
+      var s = document.documentElement.style;
       if (t && t.colors) {
-        var s = document.documentElement.style;
         var c = t.colors;
         s.setProperty('--bg', c.bg);
         s.setProperty('--fg', c.fg);
@@ -38,9 +42,9 @@
         var mtc = document.querySelector('meta[name="theme-color"]');
         if (mtc && c.bg) mtc.setAttribute('content', c.bg);
         // Update favicon to match accent color
-        var ac = c.red || '#e06c75';
+        var ac = c.red || '#0031a9';
         var fav = document.querySelector("link[rel='icon']");
-        if (fav) fav.href = 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 4L16 22L6 22Z' fill='" + ac + "'/><path d='M16 8L16 22L24 22Z' fill='" + ac + "' opacity='0.6'/><path d='M4 24Q10 20 16 24Q22 28 28 24' stroke='" + ac + "' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>");
+        if (fav) fav.href = 'data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M2.5 16C7 7.5 12.5 4.5 16 4.5s9 3 13.5 11.5C25 24.5 19.5 27.5 16 27.5S7 24.5 2.5 16z' fill='none' stroke='" + ac + "' stroke-width='2' stroke-linejoin='round'/><circle cx='16' cy='16' r='6.2' fill='none' stroke='" + ac + "' stroke-width='1.4'/><circle cx='16' cy='16' r='4' fill='" + ac + "'/><path d='M16 13.15c1.65.04 2.95 1.2 2.95 2.4 0 1.55-1.4 2.2-2.65 2.2-1.15 0-2.05-.55-2.05-1.4 0-.8.7-1.2 1.4-1.2.55 0 1 .28 1 .72' fill='none' stroke='#06060c' stroke-width='1.1' stroke-linecap='round'/><circle cx='16' cy='16' r='0.85' fill='#06060c'/></svg>");
         // Derive syntax highlighting colors from theme
         function h2hsl(hex) {
           hex = hex.replace('#','');
@@ -55,7 +59,7 @@
           function th(v){return Math.round(v*255).toString(16).padStart(2,'0')}
           return'#'+th(f(0))+th(f(8))+th(f(4));
         }
-        var fH=h2hsl(c.fg),bH=h2hsl(c.bg),rH=h2hsl(c.red||'#e06c75');
+        var fH=h2hsl(c.fg),bH=h2hsl(c.bg),rH=h2hsl(c.red||'#0031a9');
         var dk=bH[2]<50;
         s.setProperty('--hl-bg', hsl2h(bH[0],bH[1],dk?Math.max(bH[2]-4,0):Math.min(bH[2]+4,100)));
         s.setProperty('--hl-fg', c.fg);
@@ -69,7 +73,7 @@
         s.setProperty('--hl-params', hsl2h(fH[0],Math.max(fH[1]-5,10),dk?Math.min(fH[2]+8,85):Math.max(fH[2]-8,25)));
         // Shared accent tokens (Todos + Calendar chips, today highlights)
         var _adv = c.advanced || {};
-        var _primary = _adv.accentPrimary || c.red || '#e06c75';
+        var _primary = _adv.accentPrimary || c.red || '#0031a9';
         var _warm = _adv.accentWarm || s.getPropertyValue('--hl-string').trim() || s.getPropertyValue('--hl-number').trim() || _primary;
         s.setProperty('--accent-primary', _primary);
         s.setProperty('--accent', _primary);
@@ -78,24 +82,54 @@
         // Apply advanced overrides if present
         if (c.advanced) {
           var a = c.advanced;
-          var advMap = {userBubbleBg:'--user-bubble-bg',aiBubbleBg:'--ai-bubble-bg',bubbleBorder:'--bubble-border',sidebarBg:'--sidebar-bg',sectionAccent:'--section-accent',brandColor:'--brand-color',inputBg:'--input-bg',inputBorder:'--input-border',sendBtnBg:'--send-btn-bg',sendBtnHover:'--send-btn-hover',codeBg:'--code-bg',codeFg:'--code-fg',toggleBg:'--toggle-bg',toggleActive:'--toggle-active',accentPrimary:'--accent-primary',accentError:'--accent-error'};
+          var advMap = {userBubbleBg:'--user-bubble-bg',aiBubbleBg:'--ai-bubble-bg',bubbleBorder:'--bubble-border',sidebarBg:'--sidebar-bg',sectionAccent:'--section-accent',brandColor:'--brand-color',inputBg:'--input-bg',inputBorder:'--input-border',sendBtnBg:'--send-btn-bg',sendBtnHover:'--send-btn-hover',codeBg:'--code-bg',codeFg:'--code-fg',toggleBg:'--toggle-bg',toggleActive:'--toggle-active',accentPrimary:'--accent-primary',accentError:'--accent-error',accentWarm:'--accent-warm'};
           for (var k in advMap) { if (a[k]) s.setProperty(advMap[k], a[k]); }
         }
       }
-      // Apply font early
-      if (t && t.font) {
-        var fm = {mono:"'Fira Code', monospace",sans:"system-ui, -apple-system, 'Segoe UI', sans-serif",serif:"Georgia, 'Times New Roman', serif"};
-        if (fm[t.font]) { s.setProperty('--font-family', fm[t.font]); }
-        else { s.setProperty('--font-family', "'" + t.font.replace(/'/g,'') + "', sans-serif"); }
+      // Apply font early (default: Iosevka / blueprint UI)
+      var fm = {
+        mono:"'Iosevka', monospace",
+        fira:"'Fira Code', monospace",
+        jetbrains:"'JetBrains Mono', monospace",
+        'roboto-mono':"'Roboto Mono', monospace",
+        'ibm-plex':"'IBM Plex Sans', system-ui, sans-serif",
+        'source-sans':"'Source Sans 3', system-ui, sans-serif",
+        atkinson:"'Atkinson Hyperlegible', system-ui, sans-serif",
+        manrope:"'Manrope', system-ui, sans-serif",
+        'space-grotesk':"'Space Grotesk', system-ui, sans-serif",
+        outfit:"'Outfit', system-ui, sans-serif",
+        sans:"system-ui, -apple-system, 'Segoe UI', sans-serif",
+        literata:"'Literata', Georgia, serif",
+        'source-serif':"'Source Serif 4', Georgia, serif",
+        lora:"'Lora', Georgia, serif",
+        newsreader:"'Newsreader', Georgia, serif",
+        fraunces:"'Fraunces', Georgia, serif",
+        serif:"'Literata', Georgia, serif"
+      };
+      if (t && t.font && fm[t.font]) {
+        s.setProperty('--font-family', fm[t.font]);
+      } else if (t && t.font) {
+        s.setProperty('--font-family', "'" + String(t.font).replace(/'/g,'') + "', sans-serif");
+      } else {
+        s.setProperty('--font-family', fm.mono);
       }
       // Apply density class on html
       if (t && t.density && t.density !== 'comfortable') {
         document.documentElement.classList.add('density-' + t.density);
       }
-      // Apply background pattern on body once available
-      if (t && t.bgPattern && t.bgPattern !== 'none') {
+      // Apply background pattern on body once available (saved, or Modus default dots)
+      var _patDefaults = {modus:'dots','modus-operandi':'dots','modus-operandi-tinted':'dots','modus-vivendi':'none','modus-vivendi-tinted':'none','doom-one':'none',light:'dots',paper:'dots',midnight:'rain',cyberpunk:'synapse',retrowave:'embers',forest:'petals',ocean:'constellations',terminal:'perlin-flow',organs:'rain',ume:'petals',cute:'sparkles'};
+      var _pat = (t && t.bgPattern) || (t && t.name && _patDefaults[t.name]) || (!t && 'dots') || '';
+      if (_pat && _pat !== 'none') {
         document.addEventListener('DOMContentLoaded', function() {
-          document.body.classList.add('bg-pattern-' + t.bgPattern);
+          document.body.classList.add('bg-pattern-' + _pat);
+        }, {once:true});
+      }
+      // Opt-in surface treatments (glass is off by default — blur is expensive)
+      if (t && (t.frosted || t.glass)) {
+        document.addEventListener('DOMContentLoaded', function() {
+          if (t.frosted) document.body.classList.add('theme-frosted');
+          if (t.glass) document.body.classList.add('theme-glass');
         }, {once:true});
       }
     } catch(e){}
@@ -103,13 +137,20 @@
   </script>
   <!-- Per-route favicon. Bookmarking /calendar shows a calendar icon,
        /notes a notes icon, etc. Each shape is rendered in the current
-       theme accent color. Falls back to the boat logo on the root path. -->
+       theme accent color. Falls back to the brand eye on the root path. -->
   <script nonce="{{CSP_NONCE}}">
   (function(){
     try {
       var path = (window.location.pathname || '').toLowerCase();
-      var theme = (function(){ try { return JSON.parse(localStorage.getItem('odysseus-theme')); } catch(_) { return null; } })();
-      var ac = (theme && (theme.red || theme.colors && theme.colors.red)) || '#e06c75';
+      var theme = (function(){
+        try {
+          var raw = localStorage.getItem('nobody-theme')
+            || localStorage.getItem('odysseus-theme')
+            || localStorage.getItem('oculus-theme');
+          return raw ? JSON.parse(raw) : null;
+        } catch(_) { return null; }
+      })();
+      var ac = (theme && (theme.red || theme.colors && theme.colors.red)) || '#0031a9';
       // Shapes are line-stroke SVGs (no emoji glyphs). Each entry returns
       // the inner SVG markup rendered against currentColor=`ac`.
       var SHAPES = {
@@ -144,7 +185,7 @@
           "<rect x='21' y='8' width='6' height='19' rx='1' fill='none' stroke='" + ac + "' stroke-width='2.5' transform='rotate(8 24 17)'/>",
       };
       var inner = SHAPES[path];
-      if (!inner) return; // Root path keeps the default boat icon.
+      if (!inner) return; // Root path keeps the default brand eye.
       var svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>" + inner + "</svg>";
       var href = 'data:image/svg+xml,' + encodeURIComponent(svg);
       var fav = document.querySelector("link[rel='icon']");
@@ -168,7 +209,7 @@
       // Per-route Android home-screen icon. We swap the <link rel="manifest">
       // to a per-page Blob URL with this route's SVG icon — that way "Add to
       // Home Screen" picks up the route-specific glyph instead of the shared
-      // boat logo. Falls back silently on browsers without Blob URL support.
+      // brand eye. Falls back silently on browsers without Blob URL support.
       try {
         if (inner && typeof Blob !== 'undefined') {
           var pwa = {
@@ -195,8 +236,14 @@
   })();
   </script>
   <script defer src="/static/lib/highlight.min.js"></script>
-  <!-- Inter font — self-hosted, no Google dependencies -->
+  <!-- Blueprint fonts + Inter (legacy chrome fallback) — self-hosted -->
   <style>
+    @font-face { font-family: 'Iosevka'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Iosevka-Regular.woff2') format('woff2'); }
+    @font-face { font-family: 'Iosevka'; font-weight: 500; font-style: normal; font-display: swap; src: url('/static/fonts/Iosevka-Medium.woff2') format('woff2'); }
+    @font-face { font-family: 'Iosevka'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Iosevka-SemiBold.woff2') format('woff2'); }
+    @font-face { font-family: 'Roboto Mono'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/RobotoMono-Regular.woff2') format('woff2'); }
+    @font-face { font-family: 'Roboto Mono'; font-weight: 500; font-style: normal; font-display: swap; src: url('/static/fonts/RobotoMono-Medium.woff2') format('woff2'); }
+    @font-face { font-family: 'Roboto Mono'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/RobotoMono-SemiBold.woff2') format('woff2'); }
     @font-face { font-family: 'Inter'; font-weight: 400; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-Regular.woff2') format('woff2'); }
     @font-face { font-family: 'Inter'; font-weight: 500; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-Medium.woff2') format('woff2'); }
     @font-face { font-family: 'Inter'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Inter-SemiBold.woff2') format('woff2'); }
@@ -228,8 +275,8 @@
 </head>
 <body class="projects-ui-hidden">
   <!-- Loading overlay — hides all flashing until app is ready -->
-  <div id="app-loader" style="position:fixed;inset:0;z-index:99999;background:var(--bg,#282c34);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;transition:opacity .3s">
-    <div id="loader-wave" style="color:var(--brand-color,var(--red,#e06c75));font-family:monospace;font-size:11px;opacity:.5">▁▂▃</div>
+  <div id="app-loader" style="position:fixed;inset:0;z-index:99999;background:var(--bg,#fbf7f0);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;transition:opacity .3s">
+    <div id="loader-wave" style="color:var(--brand-color,var(--red,#0031a9));font-family:monospace;font-size:11px;opacity:.5">▁▂▃</div>
     <div id="app-loader-slow" hidden style="font-size:11px;opacity:0.45;margin-top:4px">Still loading…</div>
   </div>
   <script nonce="{{CSP_NONCE}}">
@@ -243,6 +290,19 @@
       el.textContent=frames[i%frames.length];
       i++;
     },150);
+    // Hard failsafe: never leave the user stuck on the splash if app.js
+    // throws before it can dismiss the loader (or never loads).
+    setTimeout(function(){
+      var slow=document.getElementById('app-loader-slow');
+      if(slow) slow.hidden=false;
+    }, 8000);
+    setTimeout(function(){
+      var loader=document.getElementById('app-loader');
+      if(!loader) return;
+      console.warn('[boot] app-loader failsafe — dismissing after timeout');
+      loader.style.opacity='0';
+      setTimeout(function(){ try{ loader.remove(); }catch(_){ } }, 300);
+    }, 15000);
   })();
   </script>
   <!-- Memory Management Modal -->
@@ -448,7 +508,7 @@
             <span class="admin-toggle-sub" style="display:block;margin-top:6px;opacity:0.6">Controls how many relevant published or approved skills are added to each agent request.</span>
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px">
               <span class="admin-toggle-sub" style="margin:0">Max skills per request</span>
-              <input type="number" id="skill-max-input" min="0" max="12" step="1" value="3" aria-label="Max skills to inject" style="flex-shrink:0;width:72px;background:var(--input-bg,var(--panel));color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 6px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums" />
+              <input type="number" id="skill-max-input" min="0" max="12" step="1" value="3" aria-label="Max skills to inject" style="flex-shrink:0;width:72px;background:var(--input-bg,var(--panel));color:var(--fg);border:1px solid var(--border);border-radius:2px;padding:4px 6px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums" />
             </div>
             <span class="admin-toggle-sub" style="display:block;margin-top:6px;opacity:0.5">Set to 0 to disable skill injection.</span>
           </div>
@@ -681,9 +741,28 @@
           <div class="theme-fd-group">
             <label class="theme-fd-label">Font</label>
             <select id="theme-font-select" class="theme-fd-select" aria-label="Font">
-              <option value="mono">Monospace</option>
-              <option value="sans">Sans-serif</option>
-              <option value="serif">Serif</option>
+              <optgroup label="Monospace">
+                <option value="mono">Iosevka (default)</option>
+                <option value="fira">Fira Code</option>
+                <option value="jetbrains">JetBrains Mono</option>
+                <option value="roboto-mono">Roboto Mono</option>
+              </optgroup>
+              <optgroup label="Sans-serif">
+                <option value="ibm-plex">IBM Plex Sans</option>
+                <option value="source-sans">Source Sans 3</option>
+                <option value="atkinson">Atkinson Hyperlegible</option>
+                <option value="manrope">Manrope</option>
+                <option value="space-grotesk">Space Grotesk</option>
+                <option value="outfit">Outfit</option>
+                <option value="sans">System UI</option>
+              </optgroup>
+              <optgroup label="Serif">
+                <option value="literata">Literata</option>
+                <option value="source-serif">Source Serif 4</option>
+                <option value="lora">Lora</option>
+                <option value="newsreader">Newsreader</option>
+                <option value="fraunces">Fraunces</option>
+              </optgroup>
             </select>
           </div>
           <div class="theme-fd-group">
@@ -701,6 +780,13 @@
               <span class="admin-slider"></span>
             </label>
           </div>
+          <div class="theme-fd-group" id="theme-glass-group">
+            <label class="theme-fd-label" for="theme-glass-toggle">Glass windows</label>
+            <label class="admin-switch" style="margin-top:4px;">
+              <input type="checkbox" id="theme-glass-toggle">
+              <span class="admin-slider"></span>
+            </label>
+          </div>
         </div>
         <div class="theme-fd-row">
           <div class="theme-fd-group" style="flex:1 1 0;">
@@ -715,6 +801,13 @@
               <option value="petals">Petals</option>
               <option value="sparkles">Sparkles</option>
               <option value="embers">Embers</option>
+              <option value="fireflies">Fireflies</option>
+              <option value="aurora">Aurora</option>
+              <option value="paper-grain">Paper Grain</option>
+              <option value="ripple">Ripple</option>
+              <option value="drift-grid">Drift Grid</option>
+              <option value="orbit-rings">Orbit Rings</option>
+              <option value="fog">Fog / Mist</option>
             </select>
           </div>
           <div class="theme-fd-group" style="flex:0 0 auto;align-items:center;">
@@ -788,6 +881,13 @@
       <div class="sidebar-brand" id="sidebar-brand-btn" style="cursor:pointer;" title="New chat">
         <span class="sidebar-brand-title">Nobody</span>
       </div>
+      <div class="project-active-chip" id="project-active-chip" hidden aria-hidden="true">
+        <button type="button" class="project-active-chip-btn" id="project-active-chip-btn" aria-haspopup="true" aria-expanded="false" aria-controls="project-active-chip-menu" title="No project — chats and tools are unscoped">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg>
+          <span id="project-active-chip-label">No project</span>
+        </button>
+        <div class="project-active-chip-menu" id="project-active-chip-menu" role="menu" aria-hidden="true"></div>
+      </div>
     </div>
     <div class="sidebar-inner">
       <div class="list-item" id="sidebar-new-chat-btn" title="New chat">
@@ -826,6 +926,8 @@
               <div class="dropdown-item sort-option sort-dropdown-item sort-dropdown-sep" data-sort="active">Last Active</div>
               <div class="dropdown-item sort-option sort-dropdown-item" data-sort="newest">Newest First</div>
               <div class="dropdown-item sort-option sort-dropdown-item" data-sort="group">By Folder</div>
+              <div class="dropdown-item sort-dropdown-item sort-dropdown-sep session-scope-option" data-scope="all" id="session-scope-all">All chats</div>
+              <div class="dropdown-item sort-dropdown-item session-scope-option" data-scope="project" id="session-scope-project">This project</div>
               <div class="dropdown-item sort-dropdown-item sort-dropdown-sep" id="auto-sort-sessions-row" style="display:flex;align-items:center;padding:0;">
                 <span id="auto-sort-sessions-btn" style="flex:1;padding:5px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
                   <span class="auto-sort-icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px;"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg> Tidy</span>
@@ -923,7 +1025,7 @@
         </div>
         <div id="models">
           <div class="models-row">
-            <select id="model-select" aria-label="Select model" style="flex: 1; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--fg);"></select>
+            <select id="model-select" aria-label="Select model" style="flex: 1; padding: 6px 8px; border-radius:2px; border: 1px solid var(--border); background: var(--bg); color: var(--fg);"></select>
             <button type="button" id="btn-model-chat" class="model-chat-btn" aria-label="Add model chat" style="transition: all 0.2s ease;"><span class="model-chat-btn-label">+ Chat</span></button>
           </div>
         </div>
@@ -983,6 +1085,12 @@
             <svg class="list-item-plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             <span class="list-item-plus-label">new</span>
           </button>
+        </div>
+        <div class="list-item tool-group-item" id="tool-project-files-btn" hidden style="display:none" title="Browse the active project folder">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
+            <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/>
+          </svg>
+          <span class="grow">Project files</span>
         </div>
         <div class="tool-subgroup-sep" aria-hidden="true"></div>
         <div class="tool-subgroup-label">Plan</div>
@@ -1067,7 +1175,7 @@
          mobile) so the page always exposes a single level-1 heading. -->
     <h1 class="a11y-visually-hidden">Nobody</h1>
     <div class="chat-top-bar">
-      <button type="button" class="incognito-indicator" id="incognito-indicator" title="Nobody mode active — click to deactivate" style="display:none;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg></button>
+      <button type="button" class="incognito-indicator" id="incognito-indicator" title="Outis mode active — click to deactivate" style="display:none;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg></button>
       <div class="chat-meta-overlay"><span id="current-meta">Nobody Chat</span><span id="current-meta-count" class="chat-meta-count" aria-hidden="true"></span><span id="session-cost-display" class="session-cost-display" style="display:none;"></span><span class="export-dropdown-wrap" id="export-dropdown-wrap"><button type="button" class="export-dl-btn" id="export-dl-btn" title="More"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button><div class="export-dropdown-menu" id="export-dropdown-menu"><div class="export-dropdown-item" id="export-rename-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span><span>Rename</span></div><div class="export-dropdown-item" id="export-copy-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span><span>Copy Chat</span></div><div class="export-dropdown-item" id="export-pdf-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15v-2h2a1.5 1.5 0 0 1 0 3H9z"/></svg></span><span>PDF</span></div><div class="export-dropdown-item" id="export-doc-btn"><span class="dropdown-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span><span>Save to Documents</span></div></div></span></div>
       <span class="export-dropdown-wrap hidden" id="project-overflow-wrap">
         <button type="button" class="export-dl-btn" id="project-overflow-btn" title="Project actions" aria-label="Project actions">
@@ -1092,17 +1200,17 @@
       </span>
     </div>
     <div id="welcome-screen">
-      <div class="welcome-name"><svg class="welcome-boat" viewBox="0 0 32 32"><path d="M16 4L16 22L6 22Z" fill="currentColor"/><path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6"/><path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>Nobody</div>
+      <div class="welcome-name"><svg class="brand-eye welcome-boat" viewBox="0 0 32 32" aria-hidden="true"><path d="M2.5 16C7 7.5 12.5 4.5 16 4.5s9 3 13.5 11.5C25 24.5 19.5 27.5 16 27.5S7 24.5 2.5 16z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="16" cy="16" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="16" cy="16" r="4" fill="currentColor"/><g class="abyss-swirl"><path d="M16 13.15c1.65.04 2.95 1.2 2.95 2.4 0 1.55-1.4 2.2-2.65 2.2-1.15 0-2.05-.55-2.05-1.4 0-.8.7-1.2 1.4-1.2.55 0 1 .28 1 .72" fill="none" stroke="var(--bg,#06060c)" stroke-width="1.1" stroke-linecap="round"/><path d="M14.2 14.4c.35-.55 1.1-.9 1.9-.9" fill="none" stroke="var(--bg,#06060c)" stroke-width="0.85" stroke-linecap="round" opacity="0.7"/><circle cx="16" cy="16" r="0.85" fill="var(--bg,#06060c)"/></g></svg>Nobody</div>
       <div class="welcome-sub" id="welcome-sub">Welcome, <span class="setup-trigger-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Click to launch setup">type /setup</span> to get started.</div>
       <div class="welcome-tip" id="welcome-tip"></div>
-      <button type="button" class="incognito-btn" id="incognito-btn" title="Enable Nobody mode — no memory, no history saved">
+      <button type="button" class="incognito-btn" id="incognito-btn" title="Enable Outis mode — no memory, no history saved">
         <svg class="eye-open" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
         </svg>
         <svg class="eye-blinded" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/>
         </svg>
-        <span class="incognito-label">Nobody</span>
+        <span class="incognito-label">Outis</span>
       </button>
       <div id="welcome-setup" style="display:none"></div>
     </div>
@@ -1118,7 +1226,7 @@
       ];
       var phone = [
         'Tip: Long-press a session for rename, delete, and memory options.',
-        'Tip: Tap the eye icon for Nobody mode — no history saved.',
+        'Tip: Tap the eye icon for Outis mode — no history saved.',
         'Tip: Switch to Agent mode for web search and code execution.',
         'Tip: Use Compare mode to test different models side by side.',
         'Tip: Attach images or files using the + button next to the input.',
@@ -1572,7 +1680,7 @@
             type="text"
             id="session-name-input"
             placeholder="Enter session name"
-            style="width: 100%; padding: 8px; border-radius: 4px;"
+            style="width: 100%; padding: 8px; border-radius:2px;"
           />
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 8px;">
@@ -2092,6 +2200,11 @@
                 <input type="checkbox" checked data-ui-key="tool-library"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"/></svg></span>
+                <span class="vis-label">Project files <span class="vis-hint">When a project is active</span></span>
+                <input type="checkbox" checked data-ui-key="tool-project-files"><span class="vis-switch"></span>
+              </label>
+              <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg></span>
                 <span class="vis-label">Todos</span>
                 <input type="checkbox" checked data-ui-key="tool-notes"><span class="vis-switch"></span>
@@ -2133,7 +2246,7 @@
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
-                <span class="vis-label">Incognito Mode <span class="vis-hint">No memory, no history saved</span></span>
+                <span class="vis-label">Outis Mode <span class="vis-hint">No memory, no history saved</span></span>
                 <input type="checkbox" checked data-ui-key="incognito-btn"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
@@ -2232,7 +2345,7 @@
             <h2 style="margin:0 0 2px;font-size:13px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Desktop-only features</h2>
             <p style="font-size:10px;opacity:0.4;margin:0 0 10px;">These need a mouse and a wider screen, so they're unavailable on phones.</p>
             <ul style="margin:0;padding-left:18px;font-size:11px;line-height:1.7;opacity:0.75;">
-              <li><b>Snap &amp; dock windows</b> — drag a tool window's title bar to a screen edge to dock it, or to the top for fullscreen.</li>
+              <li><b>Snap &amp; dock windows</b> — drag a tool window's title bar to a screen edge to dock it, or to the top for fullscreen. <b>Ctrl+Shift+T</b> tiles all open windows (left / right / stack).</li>
               <li><b>Drag to reorder</b> — reorder sidebar sections and list items by dragging their handles.</li>
               <li><b>Rearrange lists</b> — the <i>Rearrange</i> option in list menus (Chats, Models).</li>
               <li><b>Side-by-side Compare</b> — runs on mobile but is designed for a wide layout.</li>
@@ -2251,7 +2364,7 @@
                 <div id="settings-account-username" style="font-size:13px;font-weight:600;"></div>
                 <div id="settings-account-role" style="font-size:11px;opacity:0.5;"></div>
               </div>
-              <button id="settings-logout-btn" style="background:color-mix(in srgb, var(--color-error) 10%, transparent);border:1px solid var(--color-error);border-radius:6px;padding:6px 12px;color:var(--color-error);font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;transition:opacity 0.15s,background 0.15s;display:inline-flex;align-items:center;gap:6px;">
+              <button id="settings-logout-btn" style="background:color-mix(in srgb, var(--color-error) 10%, transparent);border:1px solid var(--color-error);border-radius:2px;padding:6px 12px;color:var(--color-error);font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;transition:opacity 0.15s,background 0.15s;display:inline-flex;align-items:center;gap:6px;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 Logout
               </button>
@@ -2260,9 +2373,9 @@
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Change Password</h2>
             <div class="settings-col">
-              <input id="settings-pw-current" type="password" placeholder="Current password" autocomplete="current-password" style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-family:inherit;font-size:12px;">
-              <input id="settings-pw-new" type="password" placeholder="New password (min 8)" autocomplete="new-password" style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-family:inherit;font-size:12px;">
-              <input id="settings-pw-confirm" type="password" placeholder="Confirm new password" autocomplete="new-password" style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-family:inherit;font-size:12px;">
+              <input id="settings-pw-current" type="password" placeholder="Current password" autocomplete="current-password" style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:2px;color:var(--fg);font-family:inherit;font-size:12px;">
+              <input id="settings-pw-new" type="password" placeholder="New password (min 8)" autocomplete="new-password" style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:2px;color:var(--fg);font-family:inherit;font-size:12px;">
+              <input id="settings-pw-confirm" type="password" placeholder="Confirm new password" autocomplete="new-password" style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:2px;color:var(--fg);font-family:inherit;font-size:12px;">
               <div class="settings-row" style="margin-top:2px;justify-content:flex-end;">
                 <span id="settings-pw-msg" style="font-size:11px;margin-right:auto;"></span>
                 <button class="admin-btn-add" id="settings-pw-save">Update Password</button>

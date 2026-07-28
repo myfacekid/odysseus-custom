@@ -1,11 +1,14 @@
 /**
- * Projects UI feature flag.
+ * Projects feature flags.
  *
- * The workspace shell is paused while Projects are redesigned as a
- * harness-level context layer (see docs/projects-context-layer-roadmap.md).
- * Backend APIs remain; this only gates user-facing Projects chrome.
+ * Context layer (chip, scope, promote) is on. The IDE-style workspace shell
+ * stays off — see docs/projects-context-layer-roadmap.md.
  */
 export const PROJECTS_UI_ENABLED = false;
+export const PROJECTS_CONTEXT_LAYER_ENABLED = true;
+/** Interactive home-dir browser for picking a project cwd on the server. Off —
+ *  type a path or use the system folder picker instead. */
+export const PROJECT_SERVER_DIR_BROWSE_ENABLED = false;
 
 const HIDE_SELECTORS = [
   '#sidebar-new-project-btn',
@@ -16,7 +19,7 @@ const HIDE_SELECTORS = [
   '.vis-row:has([data-ui-key="projects-section"])',
 ];
 
-/** Hide Projects chrome so users cannot enter the workspace shell. */
+/** Hide Projects workspace chrome so users cannot enter the IDE shell. */
 export function hideProjectsUi() {
   document.body.classList.add('projects-ui-hidden');
   for (const sel of HIDE_SELECTORS) {
@@ -25,7 +28,6 @@ export function hideProjectsUi() {
       el.setAttribute('aria-hidden', 'true');
     });
   }
-  // Force Appearance visibility off so a cached preference cannot re-show it.
   try {
     const raw = localStorage.getItem('ui-visibility');
     const prefs = raw ? JSON.parse(raw) : {};
@@ -40,4 +42,12 @@ export function hideProjectsUi() {
 
 export function isProjectsUiEnabled() {
   return PROJECTS_UI_ENABLED === true;
+}
+
+export function isProjectsContextLayerEnabled() {
+  return PROJECTS_CONTEXT_LAYER_ENABLED === true;
+}
+
+export function isProjectServerDirBrowseEnabled() {
+  return PROJECT_SERVER_DIR_BROWSE_ENABLED === true;
 }

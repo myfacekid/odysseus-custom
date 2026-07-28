@@ -160,7 +160,7 @@ export function initSectionDrag(Storage, loadUIVis) {
       height: ${rect.height}px;
       margin: 4px 0;
       border: 2px dashed rgba(0, 170, 255, 0.5);
-      border-radius: 8px;
+      border-radius:2px;
       background: rgba(0, 170, 255, 0.1);
     `;
     section.parentNode.insertBefore(placeholder, section);

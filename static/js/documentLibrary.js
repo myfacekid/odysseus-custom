@@ -752,7 +752,7 @@ function _librarySyncTypeFilters() {
     titleRow.appendChild(titleEl);
     if (!isPaper) {
       const verBadge = document.createElement('span');
-      verBadge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:8px;background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);flex-shrink:0;';
+      verBadge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:2px;background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);flex-shrink:0;';
       verBadge.textContent = 'v' + (doc.version_count || 1);
       titleRow.appendChild(verBadge);
     }
@@ -838,7 +838,7 @@ function _librarySyncTypeFilters() {
           const rect = menuBtn.getBoundingClientRect();
           document.body.appendChild(dropdown);
           dropdown.dataset.owner = doc.id;
-          dropdown.style.cssText = 'position:fixed;z-index:10000;min-width:0;width:max-content;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);backdrop-filter:blur(12px);font-size:12px;display:block;';
+          dropdown.style.cssText = 'position:fixed;z-index:10000;min-width:0;width:max-content;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:2px;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);backdrop-filter:blur(12px);font-size:12px;display:block;';
           dropdown.style.top = (rect.bottom + 4) + 'px';
           dropdown.style.left = 'auto';
           dropdown.style.right = (window.innerWidth - rect.right) + 'px';
@@ -862,7 +862,7 @@ function _librarySyncTypeFilters() {
     // Dropdown menu
     const dropdown = document.createElement('div');
     dropdown.className = 'doclib-card-dropdown';
-    dropdown.style.cssText = 'display:none;position:absolute;top:100%;right:0;z-index:1000;min-width:0;width:max-content;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);backdrop-filter:blur(12px);font-size:12px;';
+    dropdown.style.cssText = 'display:none;position:absolute;top:100%;right:0;z-index:1000;min-width:0;width:max-content;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:2px;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);backdrop-filter:blur(12px);font-size:12px;';
 
     // Single close path for the card action dropdown, shared by the toggle
     // button, the outside-click listener, every menu item, and the Escape
@@ -994,7 +994,7 @@ function _librarySyncTypeFilters() {
     if (!document.getElementById('doclib-card-styles')) {
       const s = document.createElement('style');
       s.id = 'doclib-card-styles';
-      s.textContent = `.doclib-card:hover .doclib-card-icon-btn{opacity:.4}.doclib-card-icon-btn:hover{opacity:1!important}.doclib-card-text-btn{background:none;border:1px solid var(--border);color:var(--fg-muted);font-size:10px;padding:3px 8px;border-radius:4px;cursor:pointer;transition:border-color .15s,color .15s}.doclib-card-text-btn:hover{border-color:var(--accent,var(--red));color:var(--accent,var(--red))}.doclib-card-text-btn-danger{border-color:var(--color-danger,#e06c75)!important;color:var(--color-danger,#e06c75)!important}.doclib-card-text-btn-danger:hover{border-color:#ff4d4d!important;color:#ff4d4d!important}.doclib-card-chevron{display:none;align-items:center;justify-content:center;align-self:center;opacity:0.6;transition:transform .15s ease;flex-shrink:0;height:14px;line-height:0}.doclib-card-expanded .doclib-card-chevron{display:inline-flex;transform:rotate(180deg)}.doclib-card-chevron svg{display:block}`;
+      s.textContent = `.doclib-card:hover .doclib-card-icon-btn{opacity:.4}.doclib-card-icon-btn:hover{opacity:1!important}.doclib-card-text-btn{background:none;border:1px solid var(--border);color:var(--fg-muted);font-size:10px;padding:3px 8px;border-radius:2px;cursor:pointer;transition:border-color .15s,color .15s}.doclib-card-text-btn:hover{border-color:var(--accent,var(--red));color:var(--accent,var(--red))}.doclib-card-text-btn-danger{border-color:var(--color-danger,#e06c75)!important;color:var(--color-danger,#e06c75)!important}.doclib-card-text-btn-danger:hover{border-color:#ff4d4d!important;color:#ff4d4d!important}.doclib-card-chevron{display:none;align-items:center;justify-content:center;align-self:center;opacity:0.6;transition:transform .15s ease;flex-shrink:0;height:14px;line-height:0}.doclib-card-expanded .doclib-card-chevron{display:inline-flex;transform:rotate(180deg)}.doclib-card-chevron svg{display:block}`;
       document.head.appendChild(s);
     }
 
@@ -3212,7 +3212,7 @@ function _librarySyncTypeFilters() {
       const citedNums = _researchCitedNumsFromText(summary);
       const registrySourcesHtml = registrySources.length
         ? _buildResearchRegistrySourcesHtml(registry, 'research-source', {
-          showSaveCheckboxes: true,
+          showSaveCheckboxes: false,
           citedNums,
         })
         : '';
@@ -3287,30 +3287,20 @@ function _librarySyncTypeFilters() {
         e.stopPropagation();
         const btn = e.currentTarget;
         const sid = detail.session_id || detail.id || item.id;
-        const nums = Array.from(preview.querySelectorAll('.doclib-research-save-cb:checked'))
-          .map((el) => parseInt(el.getAttribute('data-cite'), 10))
-          .filter((n) => n > 0);
-        if (!nums.length) {
-          if (uiModule) uiModule.showError('Select at least one source to save');
-          return;
-        }
         const orig = btn.textContent;
         btn.disabled = true;
-        btn.textContent = 'Saving…';
         try {
-          const res = await fetch(`${API_BASE}/api/research/${encodeURIComponent(sid)}/save-to-zotero`, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ citation_nums: nums, scope: 'cited' }),
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.detail || 'Save failed');
-          btn.textContent = `Saved ${data.created || 0}`;
-          setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+          const { openZoteroSaveSheet } = await import('./research/zoteroSaveSheet.js');
+          const result = await openZoteroSaveSheet({ sessionId: sid, apiBase: API_BASE });
+          if (result?.cancelled) return;
+          if (result?.ok) {
+            btn.textContent = `Saved ${result.created || 0}`;
+            setTimeout(() => { btn.textContent = orig; }, 2500);
+          }
         } catch (err) {
           if (uiModule) uiModule.showError(err.message || 'Save to Zotero failed');
           btn.textContent = orig;
+        } finally {
           btn.disabled = false;
         }
       });
