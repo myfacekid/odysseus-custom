@@ -1222,9 +1222,6 @@ function _buildPanelHTML() {
           </div>
           <details class="research-disclosure research-plan-advanced">
             <summary>Refine plan (optional)</summary>
-            <p class="research-plan-field-hint research-plan-advanced-lead">
-              Anchors fence relevance; topics set coverage goals — keep them different.
-            </p>
             <div class="research-plan-grid">
               <label class="research-plan-field">
                 <span>Anchor terms</span>
@@ -1244,7 +1241,7 @@ function _buildPanelHTML() {
               <label class="research-plan-field research-plan-field--wide">
                 <span>Key topics</span>
                 <textarea id="research-plan-topics" rows="2" placeholder="structural alphabet, search space coverage…"></textarea>
-                <span class="research-plan-field-hint">Thematic coverage goals (concepts, populations, outcomes) — not a copy of anchor terms.</span>
+                <span class="research-plan-field-hint">Thematic coverage goals (concepts, populations, outcomes).</span>
               </label>
               <label class="research-plan-field research-plan-field--wide">
                 <span>Success criteria</span>

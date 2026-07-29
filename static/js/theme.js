@@ -2009,7 +2009,7 @@ function _initPerlinFlow() {
   // Keep particle + trail buffers bounded — no canvas trail accumulation
   // (slow alpha-fade compositing left residual ink and growing GPU pressure).
   const MAX_PARTICLES = 100;
-  const TRAIL_LEN = 16;
+  const TRAIL_LEN = 24;
   const particles = [];
 
   function makeParticle() {
@@ -2072,7 +2072,7 @@ function _initPerlinFlow() {
       const speed = 1 + _bgSmoothNoise(p.x * 0.003, p.y * 0.003 + 50) * 1.5;
       p.x += Math.cos(angle) * speed;
       p.y += Math.sin(angle) * speed;
-      p.life -= 0.004;
+      p.life -= 0.0025;
       pushTrail(p);
 
       if (p.life <= 0 || p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) {

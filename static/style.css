@@ -36613,9 +36613,6 @@ body.research-panel-view #research-divider { display:none; }
   opacity: 0.72;
   color: var(--fg-muted);
 }
-.research-plan-advanced-lead {
-  margin: 0 0 8px;
-}
 .research-plan-field textarea,
 .research-plan-field select {
   width: 100%;
