@@ -6,13 +6,14 @@ nuking everything. The catch-all `chats` endpoint mirrors the
 existing /api/sessions/all so the Danger Zone speaks one URL pattern.
 
 URL shape: DELETE /api/admin/wipe/{kind}
-Kinds: chats, memory, skills, notes, tasks, documents, gallery, calendar.
+Kinds: chats, memory, skills, notes, todos, tasks, documents, gallery, calendar, links.
 """
 
 import json
 import logging
 import os
 import shutil
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 
 from core.middleware import require_admin
@@ -60,6 +61,69 @@ def _rmtree_quiet(path: str):
             shutil.rmtree(path)
         except OSError as e:
             logger.warning(f"Could not remove {path}: {e}")
+
+
+def _count_jsonl_rows(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    try:
+        return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    except OSError:
+        return 0
+
+
+def _count_one_thing_tasks(items_json) -> int:
+    """Count task rows stored on a Todos (one_thing) board note."""
+    if not items_json:
+        return 0
+    try:
+        raw = json.loads(items_json)
+    except (json.JSONDecodeError, TypeError):
+        return 0
+    return len(raw) if isinstance(raw, list) else 0
+
+
+def _wipe_all_links() -> int:
+    """Clear confirmed + pending + rejected graph links for every owner.
+
+    Nodes stay on disk. Confirmed edges live in ``manual_edges.jsonl``;
+    ``edges.jsonl`` is rewritten to inferred-only via ``_sync_edges_from_manual``.
+    """
+    from src.knowledge_graph import KNOWLEDGE_ROOT, _sync_edges_from_manual, save_manual_edges
+
+    users_root = Path(KNOWLEDGE_ROOT) / "users"
+    if not users_root.is_dir():
+        return 0
+
+    count = 0
+    link_files = ("manual_edges.jsonl", "pending_edges.jsonl", "rejected_edge_keys.jsonl")
+    for owner_dir in users_root.iterdir():
+        if not owner_dir.is_dir():
+            continue
+        owner = owner_dir.name
+        for name in link_files:
+            count += _count_jsonl_rows(owner_dir / name)
+        try:
+            save_manual_edges(owner, [])
+        except Exception as e:
+            logger.warning(f"Could not clear manual edges for {owner}: {e}")
+            # Fall back to deleting the file so a partial wipe still lands.
+            try:
+                (owner_dir / "manual_edges.jsonl").unlink(missing_ok=True)
+            except OSError:
+                pass
+        for name in ("pending_edges.jsonl", "rejected_edge_keys.jsonl"):
+            p = owner_dir / name
+            try:
+                if p.is_file():
+                    p.unlink()
+            except OSError as e:
+                logger.warning(f"Could not remove {p}: {e}")
+        try:
+            _sync_edges_from_manual(owner)
+        except Exception as e:
+            logger.warning(f"Could not sync edges after link wipe for {owner}: {e}")
+    return count
 
 
 def setup_admin_wipe_routes(session_manager):
@@ -124,8 +188,19 @@ def setup_admin_wipe_routes(session_manager):
                 return {"status": "deleted", "kind": kind, "count": count}
 
             if kind == "notes":
-                count = db.query(Note).count()
-                db.query(Note).delete()
+                # Todos live as note_type=one_thing boards — wiped separately.
+                q = db.query(Note).filter(Note.note_type != "one_thing")
+                count = q.count()
+                q.delete(synchronize_session=False)
+                db.commit()
+                return {"status": "deleted", "kind": kind, "count": count}
+
+            if kind == "todos":
+                boards = db.query(Note).filter(Note.note_type == "one_thing").all()
+                count = sum(_count_one_thing_tasks(b.items) for b in boards)
+                db.query(Note).filter(Note.note_type == "one_thing").delete(
+                    synchronize_session=False
+                )
                 db.commit()
                 return {"status": "deleted", "kind": kind, "count": count}
 
@@ -161,6 +236,12 @@ def setup_admin_wipe_routes(session_manager):
                 count = db.query(CalendarCal).count()
                 db.query(CalendarCal).delete()
                 db.commit()
+                return {"status": "deleted", "kind": kind, "count": count}
+
+            if kind == "links":
+                # Graph links live on disk under data/knowledge/users/*/ —
+                # no SQLite tables involved.
+                count = _wipe_all_links()
                 return {"status": "deleted", "kind": kind, "count": count}
 
             raise HTTPException(400, f"Unknown wipe kind: {kind!r}")

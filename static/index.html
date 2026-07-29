@@ -2647,9 +2647,17 @@
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
               <div>
                 <div class="admin-toggle-label">Wipe all notes</div>
-                <div class="admin-toggle-sub">Every note, todo, and checklist.</div>
+                <div class="admin-toggle-sub">Every note and checklist. Todos stay — use Wipe all todos for those.</div>
               </div>
               <button class="admin-btn-delete" data-wipe-kind="notes" style="white-space:nowrap;">Wipe</button>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+              <div>
+                <div class="admin-toggle-label">Wipe all todos</div>
+                <div class="admin-toggle-sub">Every Todos board item (Immediate, Intermediate, Long Horizon, Miscellaneous).</div>
+              </div>
+              <button class="admin-btn-delete" data-wipe-kind="todos" style="white-space:nowrap;">Wipe</button>
             </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
@@ -2682,6 +2690,14 @@
                 <div class="admin-toggle-sub">Every event and every calendar (incl. CalDAV-synced ones; resync to restore).</div>
               </div>
               <button class="admin-btn-delete" data-wipe-kind="calendar" style="white-space:nowrap;">Wipe</button>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+              <div>
+                <div class="admin-toggle-label">Wipe all links</div>
+                <div class="admin-toggle-sub">Every confirmed graph link, pending proposal, and rejected key. Nodes stay; Rebuild links to refresh inferred edges.</div>
+              </div>
+              <button class="admin-btn-delete" data-wipe-kind="links" style="white-space:nowrap;">Wipe</button>
             </div>
 
             <div id="adm-wipeMsg" style="margin-top:8px;"></div>

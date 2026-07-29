@@ -2012,8 +2012,9 @@ function initDangerZone() {
   // POSTs to /api/admin/wipe/{kind}, and writes the result.
   const _LABELS = {
     chats: 'chats', memory: 'memory entries', skills: 'skills',
-    notes: 'notes', tasks: 'tasks', documents: 'documents',
+    notes: 'notes', todos: 'todos', tasks: 'tasks', documents: 'documents',
     gallery: 'gallery images', calendar: 'calendar items',
+    links: 'graph links',
   };
   const _wipeMsg = el('adm-wipeMsg');
   modalEl.querySelectorAll('[data-wipe-kind]').forEach(btn => {
