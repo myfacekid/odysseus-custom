@@ -8,6 +8,9 @@ Security fixes are handled on the default branch until formal releases are cut.
 
 ## Deployment Guidance
 
+Longer deployment notes (proxies, ports, cookies) live in [docs/setup.md#security-notes](docs/setup.md#security-notes).
+
+
 - Keep `AUTH_ENABLED=true` for any network-accessible deployment.
 - Keep `LOCALHOST_BYPASS=false` outside local development.
 - Set `SECURE_COOKIES=true` when Nobody is served through HTTPS by a trusted reverse proxy or private access gateway.
@@ -29,7 +32,7 @@ Before pushing a public fork, run:
 
 ```bash
 git status --short
-git check-ignore -v .env data/auth.json data/app.db logs/compound.log odysseus.db
+git check-ignore -v .env data/auth.json data/app.db logs/compound.log nobody.db
 git grep -n -I -E "(sk-[A-Za-z0-9_-]{20,}|xox[baprs]-|AIza[0-9A-Za-z_-]{20,}|Bearer [A-Za-z0-9._~+/-]{20,})" -- . ':!static/lib/**' ':!package-lock.json'
 ```
 

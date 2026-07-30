@@ -18,6 +18,7 @@ import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone, markTileWindow } from './tileManager.js';
+import { clearDockSide } from './modalSnap.js';
 import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPalette.js';
 
   let API_BASE = '';
@@ -85,8 +86,8 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
   let _lastSessionId = '';          // session context for "+" button
   const docs = new Map();           // docId -> { id, title, language, content, version, sessionId }
 
-  const _docOpenKey = (sessionId) => 'odysseus-doc-open-' + sessionId;
-  const _docMinimizedKey = (sessionId) => 'odysseus-doc-minimized-' + sessionId;
+  const _docOpenKey = (sessionId) => 'nobody-doc-open-' + sessionId;
+  const _docMinimizedKey = (sessionId) => 'nobody-doc-minimized-' + sessionId;
 
   function _markDocVisibleState(sessionId, state) {
     if (!sessionId) return;
@@ -257,6 +258,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       const langChip = `<span class="doc-tab-lang">${lic}</span>`;
       html += `<div class="doc-tab${isActive ? ' active' : ''}" draggable="true" data-doc-id="${id}" title="${title}">
         ${verChip}${langChip}<span class="doc-tab-title">${shortTitle}</span>
+        ${menuBtn}
         <button class="doc-tab-close" data-doc-id="${id}" title="Unlink from chat (kept in the Library)">&times;</button>
       </div>`;
     }
@@ -1959,34 +1961,11 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     }
   }
 
-  // Hide the top header bar when nothing in it is visible. With Undo + the type
-  // picker moved to the footer, a plain doc on mobile would otherwise show an
-  // empty bar (the "second footer"). Reflow-free (reads inline display only) so
-  // it's safe to call from _syncHeaderActions on every stream patch. On desktop
-  // the bar always shows (it still hosts Fullscreen + the version badge); on
-  // mobile it shows only when a contextual control is active.
+  // Legacy header stays hidden — primary chrome is tabs + #doc-md-toolbar.
   function _syncHeaderBarVisibility() {
     const hdr = document.getElementById('doc-editor-actions');
     if (!hdr) return;
-    // Email docs hide the whole header (they use their own send footer) — never
-    // resurrect it here.
-    const vis = (id) => {
-      const e = document.getElementById(id);
-      if (!e || !e.parentElement) return false;
-      // Only count items still LIVING in the header itself — the runtime
-      // rearrangement (~line 3217) moves several buttons into the footer, and
-      // we don't want a button parked elsewhere to keep this top row alive.
-      if (!hdr.contains(e)) return false;
-      return e.style.display !== 'none';
-    };
-    // Hide the whole header when nothing visible lives here anymore. Without
-    // this every desktop view rendered an empty doc-editor-header above the
-    // real action footer — a duplicate row.
-    const visible = vis('doc-stream-indicator')
-      || vis('doc-version-badge')
-      || vis('doc-export-pdf-btn')
-      || vis('doc-pdf-view-btn');
-    hdr.style.display = visible ? '' : 'none';
+    hdr.style.display = 'none';
   }
 
   function _syncHeaderActions() {
@@ -2515,45 +2494,8 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     pane.innerHTML = `
       <input type="hidden" id="doc-title-input" value="" />
       <div class="doc-mobile-grabber" id="doc-mobile-grabber" aria-hidden="true"></div>
-      <div class="doc-editor-header modal-header" id="doc-editor-actions">
-        <button id="doc-undo-btn" class="doc-action-icon-btn" title="Undo (Ctrl+Z)" style="gap:4px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span style="font-size:11px;">Undo</span></button>
-        <button id="doc-header-preview-btn" class="doc-action-icon-btn" title="Run / Preview" style="display:none;opacity:0.85;gap:4px;"></button>
-        <span id="doc-stream-indicator" class="doc-stream-indicator" style="display:none"><span class="doc-stream-dot"></span> editing</span>
-        <span id="doc-version-badge" class="doc-version-badge" title="Version history" style="display:none">v1</span>
-        <span style="flex:1"></span>
-        <button id="doc-export-pdf-btn" class="doc-action-icon-btn" title="Export PDF" style="display:none;opacity:0.7;gap:4px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg> <span style="font-size:11px;">Export PDF</span></button>
-        <button id="doc-pdf-view-btn" class="doc-action-icon-btn" title="Toggle PDF view" style="display:none;opacity:0.7;gap:4px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> <span style="font-size:11px;">PDF</span></button>
-        <select id="doc-language-select" class="doc-language-select">
-          <option value="">type</option>
-          <option value="python">python</option>
-          <option value="javascript">javascript</option>
-          <option value="typescript">typescript</option>
-          <option value="html">html</option>
-          <option value="css">css</option>
-          <option value="markdown">markdown</option>
-          <option value="json">json</option>
-          <option value="yaml">yaml</option>
-          <option value="bash">bash</option>
-          <option value="sql">sql</option>
-          <option value="rust">rust</option>
-          <option value="go">go</option>
-          <option value="java">java</option>
-          <option value="c">c</option>
-          <option value="cpp">c++</option>
-          <option value="csharp">c#</option>
-          <option value="xml">xml</option>
-          <option value="svg">svg</option>
-          <option value="toml">toml</option>
-          <option value="ini">ini</option>
-          <option value="ruby">ruby</option>
-          <option value="php">php</option>
-          <option value="csv">csv</option>
-          <option value="pdf">pdf</option>
-        </select>
-        <!-- Close + Copy/Export moved to the bottom action footer (#doc-actions-footer)
-             so regular docs match the email footer layout. -->
-      </div>
-      <div class="doc-tab-bar" id="doc-tab-bar"></div>
+      <div class="doc-editor-header modal-header" id="doc-editor-actions" style="display:none"></div>
+      <div class="doc-tab-bar tile-window-header" id="doc-tab-bar"></div>
       <div class="doc-md-toolbar" id="doc-md-toolbar" style="display:none">
         <div class="md-toolbar-items" id="md-toolbar-items">
           <span class="md-view-toggle" id="doc-md-view-toggle" style="display:none" role="group" aria-label="Edit or preview">
@@ -2589,7 +2531,42 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
         </div>
         <button type="button" class="md-scroll-arrow md-scroll-left" id="md-scroll-left" title="Scroll left" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
         <button type="button" class="md-scroll-arrow md-scroll-right" id="md-scroll-right" title="Scroll right" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
-        <button type="button" class="md-toolbar-undock-btn doc-action-icon-btn" id="md-toolbar-undock-btn" title="Undock as palette window" aria-label="Undock format toolbar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 17h7M17.5 14v6"/></svg></button>
+        <div class="md-toolbar-right-cluster" id="md-toolbar-right-cluster">
+          <span id="doc-stream-indicator" class="doc-stream-indicator md-toolbar-doc-action" style="display:none"><span class="doc-stream-dot"></span> editing</span>
+          <button id="doc-undo-btn" class="doc-action-icon-btn md-toolbar-doc-action" title="Undo (Ctrl+Z)" style="gap:4px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span style="font-size:11px;">Undo</span></button>
+          <button id="doc-header-preview-btn" class="doc-action-icon-btn md-toolbar-doc-action" title="Run / Preview" style="display:none;opacity:0.85;gap:4px;"></button>
+          <select id="doc-language-select" class="doc-language-select md-toolbar-doc-action">
+            <option value="">type</option>
+            <option value="python">python</option>
+            <option value="javascript">javascript</option>
+            <option value="typescript">typescript</option>
+            <option value="html">html</option>
+            <option value="css">css</option>
+            <option value="markdown">markdown</option>
+            <option value="json">json</option>
+            <option value="yaml">yaml</option>
+            <option value="bash">bash</option>
+            <option value="sql">sql</option>
+            <option value="rust">rust</option>
+            <option value="go">go</option>
+            <option value="java">java</option>
+            <option value="c">c</option>
+            <option value="cpp">c++</option>
+            <option value="csharp">c#</option>
+            <option value="xml">xml</option>
+            <option value="svg">svg</option>
+            <option value="toml">toml</option>
+            <option value="ini">ini</option>
+            <option value="ruby">ruby</option>
+            <option value="php">php</option>
+            <option value="csv">csv</option>
+            <option value="pdf">pdf</option>
+          </select>
+          <span class="doc-split-btn-group md-toolbar-doc-action" id="doc-copy-export-split">
+            <button type="button" id="doc-footer-copy-btn" class="doc-split-btn doc-split-main" title="Copy document"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button>
+            <button type="button" id="doc-footer-export-btn" class="doc-split-btn doc-split-caret" title="Export as…" aria-label="Export options"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></button>
+          </span>
+        </div>
       </div>
       <div id="doc-find-bar" class="doc-find-bar" style="display:none">
         <input id="doc-find-input" class="doc-find-input" type="text" placeholder="Find..." />
@@ -2609,15 +2586,9 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       <div id="doc-pdf-view" style="display:none;width:100%;flex:1;min-height:0;overflow:auto;background:#525659;padding:20px 0;position:relative;">
         <div id="doc-pdf-save-pill" style="display:none;position:absolute;top:8px;right:14px;padding:4px 10px;border-radius:2px;font-size:11px;z-index:5;pointer-events:none;background:transparent;color:transparent;"></div>
       </div>
-      <!-- Action footer sits AFTER all the content/preview panes so it stays
-           pinned to the bottom no matter which pane (editor / md-preview /
-           csv / html / pdf) is the one growing to fill. -->
-      <div id="doc-actions-footer" class="doc-actions-footer">
-        <span class="doc-split-btn-group" id="doc-copy-export-split">
-          <button type="button" id="doc-footer-copy-btn" class="doc-split-btn doc-split-main" title="Copy document"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button>
-          <button type="button" id="doc-footer-export-btn" class="doc-split-btn doc-split-caret" title="Export as…" aria-label="Export options"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></button>
-        </span>
-      </div>
+      <!-- Reserved for email send chrome; empty for normal docs (actions live
+           on #doc-md-toolbar under the tabs). -->
+      <div id="doc-actions-footer" class="doc-actions-footer"></div>
       <div id="doc-version-panel" class="doc-version-panel tile-window hidden" data-tile-window="1">
         <div class="doc-version-header doc-version-panel-header modal-header tile-window-header">
           <span>Version History</span>
@@ -2632,51 +2603,19 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       </div>
     `;
 
-    // Consolidate into a SINGLE action bar: move Undo + the type picker out of
-    // the top header into the bottom footer (left side, next to Close) so a
-    // regular doc shows one bar, not two. The rest of the header (run/preview,
-    // fullscreen, version, PDF) stays put; the header hides itself when nothing
-    // in it is visible — see _syncHeaderBarVisibility().
-    // Note: `#doc-render-view-toggle` (code↔run for SVG/HTML) intentionally
-    // stays in the top header so it matches `#doc-md-view-toggle` (markdown
-    // edit↔preview) — both view toggles live in the same place.
+    // Doc actions (Undo / type / Copy) already live in #md-toolbar-right-cluster.
+    // Just show the toolbar and dismiss the soft keyboard on action taps.
     {
-      const _footer = pane.querySelector('#doc-actions-footer');
-      const _split = _footer && _footer.querySelector('#doc-copy-export-split');
-      const _undo = pane.querySelector('#doc-undo-btn');
-      const _lang = pane.querySelector('#doc-language-select');
-      const _preview = pane.querySelector('#doc-header-preview-btn');  // single Run ▶ for python/bash/js/csv
-      const _exportPdf = pane.querySelector('#doc-export-pdf-btn');
-      const _pdfView = pane.querySelector('#doc-pdf-view-btn');
-      if (_footer && _split) {
-        // Footer order (left → right): Undo, Run/Preview, Lang, …, Copy/Export.
-        // The X close was here too but is now redundant with the per-tab close
-        // button in the title strip — removed.
-        if (_undo) _footer.insertBefore(_undo, _footer.firstChild);
-        const _anchor = _undo;
-        if (_preview && _anchor) _anchor.after(_preview);
-        if (_lang) _split.before(_lang);
-        // Pull every remaining header-only control into the footer so we
-        // only ever render ONE bottom action row. The standalone top header
-        // was leaving a duplicate row above (with fullscreen + version badge
-        // + stream indicator). Each item keeps its own display: toggling.
-        const _streamInd = pane.querySelector('#doc-stream-indicator');
-        const _versionBadge = pane.querySelector('#doc-version-badge');
-        if (_split) {
-          if (_pdfView)      _split.before(_pdfView);
-          if (_exportPdf)    _split.before(_exportPdf);
-          if (_versionBadge) _split.before(_versionBadge);
-          if (_streamInd)    _split.before(_streamInd);
-        }
+      const _toolbar = pane.querySelector('#doc-md-toolbar');
+      if (_toolbar) {
+        _toolbar.style.display = '';
+        _toolbar.addEventListener('pointerdown', (e) => {
+          if (!e.target.closest('.md-toolbar-right-cluster button, .md-toolbar-right-cluster select')) return;
+          const _ta = document.getElementById('doc-editor-textarea');
+          if (_ta && document.activeElement === _ta) _ta.blur();
+        });
       }
-      // iOS keeps the soft keyboard up when you tap a <button> (it doesn't blur
-      // the focused textarea), so it lingers after you've typed. Dismiss it on
-      // any footer control tap.
-      if (_footer) _footer.addEventListener('pointerdown', (e) => {
-        if (!e.target.closest('button, select')) return;
-        const _ta = document.getElementById('doc-editor-textarea');
-        if (_ta && document.activeElement === _ta) _ta.blur();
-      });
+      _syncHeaderBarVisibility();
     }
 
     // Insert after chat-container (appears on right by default)
@@ -2824,7 +2763,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     document.getElementById('doc-mobile-close')?.addEventListener('click', () => { if (activeDocId) closeTab(activeDocId); });
     document.getElementById('doc-mobile-copy')?.addEventListener('click', () => copyDocument());
     // Save, copy, run, export, delete, preview toggles are now in per-tab context menu
-    document.getElementById('doc-version-badge').addEventListener('click', toggleVersionHistory);
+    document.getElementById('doc-version-badge')?.addEventListener('click', toggleVersionHistory);
     document.getElementById('doc-version-close').addEventListener('click', _closeVersionPanel);
     // Reflect the current language as a small icon left of the type select.
     const _syncLangIcon = () => {
@@ -3081,7 +3020,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     const editorWrap = document.getElementById('doc-editor-wrap');
     const _fontSizes = ['s', 'm', 'l'];
     const _iconSizes = [12, 14, 16];
-    let _fontIdx = parseInt(localStorage.getItem('odysseus-doc-fontsize') || '0', 10);
+    let _fontIdx = parseInt(localStorage.getItem('nobody-doc-fontsize') || '0', 10);
     if (!(_fontIdx >= 0 && _fontIdx < 3)) _fontIdx = 0;
     function _applyDocFont() {
       if (editorWrap) {
@@ -3100,7 +3039,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
           el.style.display = active ? '' : 'none';
         });
       }
-      localStorage.setItem('odysseus-doc-fontsize', _fontIdx);
+      localStorage.setItem('nobody-doc-fontsize', _fontIdx);
     }
     _applyDocFont();
     // Click cycles through the sizes (S → M → L → S).
@@ -3992,7 +3931,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
   }
 
   /** Collapse action buttons into overflow "..." menu (3 most-used visible) */
-  const _DOC_RECENTS_KEY = 'odysseus-doc-actions-recent';
+  const _DOC_RECENTS_KEY = 'nobody-doc-actions-recent';
   const _DOC_MAX_VISIBLE = 2;
 
   function _getDocRecent() {
@@ -5457,16 +5396,16 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     if (!activeDocId) return;
     const data = _activeSuggestions.map(s => ({ id: s.id, find: s.find, replace: s.replace, reason: s.reason }));
     if (data.length) {
-      localStorage.setItem('odysseus-suggestions-' + activeDocId, JSON.stringify(data));
+      localStorage.setItem('nobody-suggestions-' + activeDocId, JSON.stringify(data));
     } else {
-      localStorage.removeItem('odysseus-suggestions-' + activeDocId);
+      localStorage.removeItem('nobody-suggestions-' + activeDocId);
     }
   }
 
   /** Restore suggestions from localStorage for a doc */
   function _restoreSuggestionsFromStorage(docId) {
     try {
-      const raw = localStorage.getItem('odysseus-suggestions-' + docId);
+      const raw = localStorage.getItem('nobody-suggestions-' + docId);
       if (!raw) return;
       const data = JSON.parse(raw);
       if (!Array.isArray(data) || !data.length) return;
@@ -6443,6 +6382,10 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       items += `<div class="dropdown-item-compact doc-tab-action" data-action="signed-reply">${_di(_sendBackIco)}<span>Send signed reply</span></div>`;
     }
     const _closeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    const _undockIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 17h7M17.5 14v6"/></svg>';
+    if (window.innerWidth > 768) {
+      items += `<div class="dropdown-item-compact doc-tab-action" data-action="undock-format">${_di(_undockIco)}<span>Undock format toolbar</span></div>`;
+    }
     items += `<div class="dropdown-item-compact doc-tab-action" data-action="close">${_di(_closeIco)}<span>Close</span></div>`;
     items += `<div class="dropdown-divider"></div>`;
     items += `<div class="dropdown-item-compact doc-tab-action doc-tab-action-delete" data-action="delete">${_di(_deleteIco)}<span>Delete</span></div>`;
@@ -6495,6 +6438,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
             break;
           }
           case 'signed-reply': _sendSignedReply(docId); break;
+          case 'undock-format': _undockMdToolbarFromMenu(); break;
           case 'close': closeTab(docId); break;
           case 'delete': deleteActiveDocument(); break;
         }
@@ -6924,24 +6868,91 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     }
   }
 
+  /** Hide the chat|doc divider while the pane is floated so chat can reclaim space. */
+  function _setDocDividerVisible(visible) {
+    const divider = document.getElementById('doc-divider');
+    if (!divider) return;
+    divider.style.display = visible ? '' : 'none';
+  }
+
+  /** Clear fixed/tile/dock styles and return the pane to the chat|divider|doc flex split. */
+  function _restoreDocFlexSplit(pane) {
+    if (!pane || window.innerWidth <= 768) return;
+    const hadLeft = pane.classList.contains('modal-left-docked');
+    const hadRight = pane.classList.contains('modal-right-docked');
+    pane.classList.remove('doc-fullscreen', 'modal-left-docked', 'modal-right-docked');
+    if (hadLeft) clearDockSide('left', pane);
+    if (hadRight) clearDockSide('right', pane);
+    ['position', 'left', 'top', 'right', 'bottom', 'width', 'max-width', 'height',
+      'max-height', 'margin', 'transform', 'border-radius', 'z-index']
+      .forEach((prop) => pane.style.removeProperty(prop));
+    delete pane.dataset._tilePreSnap;
+    delete pane.dataset._tileZone;
+    delete pane._preDockSnapshot;
+    delete pane._dockSide;
+    delete pane._dockSuspended;
+    const container = document.getElementById('chat-container');
+    if (container) container.style.display = '';
+    _setDocDividerVisible(true);
+    // Re-assert flex sibling order in case float/dock relocated the node.
+    const divider = document.getElementById('doc-divider');
+    const sidebar = document.getElementById('sidebar');
+    const isRight = sidebar && sidebar.classList.contains('right-side');
+    if (container && divider && pane.isConnected && container.parentNode) {
+      if (isRight) {
+        pane.classList.add('doc-left');
+        container.parentNode.insertBefore(pane, container);
+        container.parentNode.insertBefore(divider, container);
+      } else {
+        pane.classList.remove('doc-left');
+        container.after(divider);
+        divider.after(pane);
+      }
+    }
+  }
+
   /** Wire desktop drag / dock / tile snap for the doc editor pane. */
   function _wireDocTileWindow(pane) {
     if (!pane || pane.dataset.windowDragWired === '1') return;
-    const header = pane.querySelector('#doc-editor-actions, .doc-editor-header, .modal-header');
+    // Tab bar is the stable drag handle — the legacy header is usually empty/hidden.
+    const header = pane.querySelector('#doc-tab-bar, .doc-tab-bar')
+      || pane.querySelector('#doc-editor-actions, .doc-editor-header, .modal-header');
     if (!header) return;
+    header.classList.add('tile-window-header');
     pane.dataset.windowDragWired = '1';
     markTileWindow(pane, { content: pane });
+    // When edge-dock commits, convert to the native flex split so alignment
+    // matches the default right-side panel (not a floating overlay).
+    if (!pane._docDockSplitObs && typeof MutationObserver !== 'undefined') {
+      let _restoring = false;
+      pane._docDockSplitObs = new MutationObserver(() => {
+        if (_restoring) return;
+        if (!pane.classList.contains('modal-right-docked')
+          && !pane.classList.contains('modal-left-docked')) return;
+        // Left dock keeps overlay semantics; only right snap returns to flex.
+        if (pane.classList.contains('modal-left-docked')
+          && !pane.classList.contains('modal-right-docked')) return;
+        _restoring = true;
+        try { _restoreDocFlexSplit(pane); }
+        finally { requestAnimationFrame(() => { _restoring = false; }); }
+      });
+      pane._docDockSplitObs.observe(pane, { attributes: true, attributeFilter: ['class'] });
+    }
     makeWindowDraggable(pane, {
       content: pane,
       header,
       fsClass: 'doc-fullscreen',
-      skipSelector: 'button, input, select, textarea, label, .doc-mobile-grabber',
+      skipSelector: 'button, input, select, textarea, label, .doc-tab, .doc-tab-close, .doc-tab-new, .doc-tab-arrow, .doc-tab-play, .doc-tab-menu-btn, .doc-mobile-grabber',
       enableDock: true,
       enableLeftDock: true,
+      onDragStart: () => {
+        _setDocDividerVisible(false);
+      },
       onEnterFullscreen: () => {
         const container = document.getElementById('chat-container');
         pane.classList.add('doc-fullscreen');
         if (container) container.style.display = 'none';
+        // Keep the divider visible — its chevron is the exit-fullscreen control.
         snapModalToZone(pane, { name: 'fullscreen' });
       },
       onExitFullscreen: (cx, cy) => {
@@ -6960,37 +6971,74 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
           pane.style.bottom = 'auto';
           pane.style.maxWidth = 'none';
           pane.style.zIndex = '160';
+          _setDocDividerVisible(false);
+        } else {
+          _restoreDocFlexSplit(pane);
         }
       },
     });
   }
 
-  /** Opt-in undock of the markdown format toolbar into a tiled palette. */
+  /** Peel the right-cluster (Undo/type/Copy) so format palette undock leaves them in-pane. */
+  function _peelDocRightCluster(pane, toolbar) {
+    const cluster = toolbar?.querySelector?.('#md-toolbar-right-cluster');
+    if (!pane || !toolbar || !cluster) return null;
+    let stay = pane.querySelector('#doc-md-toolbar-stay');
+    if (!stay) {
+      stay = document.createElement('div');
+      stay.id = 'doc-md-toolbar-stay';
+      stay.className = 'doc-md-toolbar doc-md-toolbar-stay';
+      toolbar.parentElement?.insertBefore(stay, toolbar);
+    }
+    stay.appendChild(cluster);
+    stay.style.display = '';
+    return stay;
+  }
+
+  function _mergeDocRightCluster(pane, toolbar) {
+    const stay = pane?.querySelector?.('#doc-md-toolbar-stay');
+    const cluster = stay?.querySelector?.('#md-toolbar-right-cluster');
+    if (!stay || !cluster || !toolbar?.isConnected) return;
+    toolbar.appendChild(cluster);
+    stay.remove();
+  }
+
+  /** Undock format toolbar from the tab ⋯ menu (power-user). */
+  function _undockMdToolbarFromMenu() {
+    if (window.innerWidth <= 768) return;
+    const pane = document.getElementById('doc-editor-pane');
+    const toolbar = document.getElementById('doc-md-toolbar');
+    if (!pane || !toolbar) return;
+    _peelDocRightCluster(pane, toolbar);
+    undockToolbarAsWindow(toolbar, {
+      id: 'doc-md-toolbar',
+      title: 'Format',
+      preferredZone: 'right-half',
+      host: pane,
+    });
+  }
+
+  /** Restore persisted format-palette undock; right cluster stays in-pane. */
   function _wireMdToolbarUndock(pane) {
     const toolbar = pane?.querySelector?.('#doc-md-toolbar') || document.getElementById('doc-md-toolbar');
-    const btn = pane?.querySelector?.('#md-toolbar-undock-btn') || document.getElementById('md-toolbar-undock-btn');
-    if (!toolbar || !btn || btn.dataset.undockWired === '1') return;
-    btn.dataset.undockWired = '1';
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (window.innerWidth <= 768) return;
-      undockToolbarAsWindow(toolbar, {
-        id: 'doc-md-toolbar',
-        title: 'Format',
-        preferredZone: 'right-half',
-        host: pane,
-      });
-    });
+    if (!toolbar || pane.dataset.mdUndockWired === '1') return;
+    pane.dataset.mdUndockWired = '1';
+
     const tryRestore = () => {
       if (toolbar.style.display === 'none') return;
-      restoreToolbarUndockIfNeeded(toolbar, {
+      const wasUndocked = restoreToolbarUndockIfNeeded(toolbar, {
         id: 'doc-md-toolbar',
         title: 'Format',
         preferredZone: 'right-half',
         host: pane,
       });
+      if (wasUndocked) _peelDocRightCluster(pane, toolbar);
+      else _mergeDocRightCluster(pane, toolbar);
     };
+    pane.addEventListener('click', (e) => {
+      if (!e.target.closest?.('.toolbar-undock-redock-btn, .toolbar-palette-redock-btn')) return;
+      requestAnimationFrame(() => _mergeDocRightCluster(pane, toolbar));
+    });
     requestAnimationFrame(tryRestore);
     setTimeout(tryRestore, 400);
   }

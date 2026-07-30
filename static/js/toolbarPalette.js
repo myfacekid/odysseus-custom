@@ -5,14 +5,14 @@
  *   undockToolbarAsWindow(toolbarEl, { id, title, preferredZone: 'right-half' })
  *   redockToolbarWindow(id)   // or click the "re-dock" control in the placeholder
  *
- * Persists undocked state in localStorage under `odysseus-toolbar-undock:<id>`.
+ * Persists undocked state in localStorage under `nobody-toolbar-undock:<id>`.
  * Desktop only (>768). Does not touch transient menus.
  */
 
 import { makeWindowDraggable } from './windowDrag.js';
 import { markTileWindow, snapModalToZone } from './tileManager.js';
 
-const STORAGE_PREFIX = 'odysseus-toolbar-undock:';
+const STORAGE_PREFIX = 'nobody-toolbar-undock:';
 const _palettes = new Map(); // id → { shell, placeholder, toolbar, host, opts }
 
 function _storageKey(id) {

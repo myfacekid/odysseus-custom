@@ -36,12 +36,12 @@ def _ics_naive_dtstart(dt):
 # Single-user fallback identity. Used only when:
 #   1. The app is configured for single-user (no auth middleware), AND
 #   2. The request didn't resolve to an authenticated user.
-# Override at deploy time via `ODYSSEUS_FALLBACK_OWNER` env var. In a real
-# multi-user install set `ODYSSEUS_SINGLE_USER=0` so unauthenticated requests
+# Override at deploy time via `NOBODY_FALLBACK_OWNER` env var. In a real
+# multi-user install set `NOBODY_SINGLE_USER=0` so unauthenticated requests
 # are rejected instead of silently writing to this address.
-import os as _os
-FALLBACK_OWNER = _os.environ.get("ODYSSEUS_FALLBACK_OWNER", "owner@localhost")
-_SINGLE_USER_MODE = _os.environ.get("ODYSSEUS_SINGLE_USER", "1") != "0"
+from core.env import env_get
+FALLBACK_OWNER = env_get("FALLBACK_OWNER", "owner@localhost") or "owner@localhost"
+_SINGLE_USER_MODE = (env_get("SINGLE_USER", "1") or "1") != "0"
 
 
 def _require_user(request: Request) -> str:

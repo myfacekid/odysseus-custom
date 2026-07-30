@@ -330,7 +330,7 @@ Remove or finish the loose ends that add confusion.
 | `docs/projects-ui-roadmap.md` | Tabbed project workspace layout (G1–G8); historical — direction moved to context layer |
 | `docs/projects-suite-roadmap.md` | Projects suite cohesion (P1–P9); **paused** |
 | `docs/projects-context-layer-roadmap.md` | **Current:** Projects as harness context layer + promote cwd → Library |
-| `README.md` | Feature overview and architecture (`static/` front-end map) |
+| `README.md` / `docs/setup.md` | Feature overview; setup/architecture in the setup guide |
 
 ---
 

@@ -1,4 +1,4 @@
-"""Shared research prompts and report specs (LDR + IterResearch)."""
+"""Shared research prompts and report specs for LDR Deep Research."""
 from __future__ import annotations
 
 from datetime import datetime

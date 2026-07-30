@@ -83,6 +83,7 @@ class OneThingTask:
     completed_at: Optional[str] = None  # YYYY-MM-DD — set when marked done
     archived: bool = False
     parent_ids: List[str] = field(default_factory=list)
+    details: Optional[str] = None  # optional longer body; text stays the title
 
     def to_item(self) -> dict:
         out = {
@@ -99,6 +100,8 @@ class OneThingTask:
             out["due_date"] = self.due_date
         if self.completed_at:
             out["completed_at"] = self.completed_at
+        if self.details:
+            out["details"] = self.details
         return out
 
     @classmethod
@@ -116,6 +119,8 @@ class OneThingTask:
         due = _normalize_date(raw.get("due_date"))
         completed = _normalize_date(raw.get("completed_at"))
         parent_ids = _normalize_parent_id_list(raw.get("parent_ids"))
+        details_raw = raw.get("details")
+        details = (str(details_raw).strip() if details_raw is not None else "") or None
         return cls(
             id=tid,
             text=text,
@@ -126,6 +131,7 @@ class OneThingTask:
             completed_at=completed,
             archived=bool(raw.get("archived")),
             parent_ids=parent_ids,
+            details=details,
         )
 
 
@@ -490,9 +496,11 @@ def add_task(
     due_date: Optional[str] = None,
     parent_ids: Optional[List[str]] = None,
     require_links: bool = True,
+    details: Optional[str] = None,
 ) -> OneThingTask:
     note = get_or_create_board(db, owner)
     tasks = _load_tasks(note)
+    details_clean = (details or "").strip() or None
     task = OneThingTask(
         id=str(uuid.uuid4()),
         text=(text or "").strip(),
@@ -500,6 +508,7 @@ def add_task(
         priority=normalize_priority(priority),
         due_date=_normalize_date(due_date),
         parent_ids=_normalize_parent_id_list(parent_ids),
+        details=details_clean,
     )
     if not task.text:
         raise ValueError("Task text is required")
@@ -524,6 +533,7 @@ def update_task(
     due_date: Optional[str] = None,
     done: Optional[bool] = None,
     parent_ids: Optional[List[str]] = None,
+    details: Optional[str] = None,
 ) -> Optional[OneThingTask]:
     note = get_or_create_board(db, owner)
     tasks = _load_tasks(note)
@@ -545,6 +555,8 @@ def update_task(
             _apply_done_transition(t, done)
         if parent_ids is not None:
             t.parent_ids = _normalize_parent_id_list(parent_ids)
+        if details is not None:
+            t.details = (details or "").strip() or None
         if parent_ids is not None or horizon is not None:
             t.parent_ids = normalize_parent_ids(
                 t.parent_ids, tasks, child_horizon=t.horizon
@@ -833,7 +845,13 @@ def format_tasks_markdown(tasks: List[OneThingTask], *, horizon: Optional[str] =
 def format_agent_list(tasks: List[OneThingTask]) -> str:
     if not tasks:
         return "No todos found."
-    lines = ["TODOS", "=" * 40]
+    lines = [
+        "TODOS",
+        "=" * 40,
+        "Hierarchy: focus (Immediate) → build (Intermediate) → aim (Long Horizon).",
+        "When adding focus/build todos, pass parent_ids from the parent horizon below.",
+    ]
+    by_id = {t.id: t for t in tasks}
     by_hz: Dict[str, List[OneThingTask]] = {h: [] for h in HORIZONS}
     for t in tasks:
         by_hz.setdefault(t.horizon, []).append(t)
@@ -847,4 +865,21 @@ def format_agent_list(tasks: List[OneThingTask]) -> str:
             pri = PRIORITY_LABELS[t.priority]
             due = f" due {t.due_date}" if t.due_date else ""
             lines.append(f"  [{mark}] `{t.id[:8]}` {t.text} ({pri}{due})")
+            if t.parent_ids:
+                parent_bits = []
+                for pid in t.parent_ids:
+                    parent = by_id.get(pid) or next(
+                        (x for x in tasks if x.id.lower().startswith((pid or "").lower()[:8])),
+                        None,
+                    )
+                    if parent:
+                        parent_bits.append(f"`{parent.id[:8]}` {parent.text}")
+                    else:
+                        parent_bits.append(f"`{(pid or '')[:8]}`")
+                lines.append(f"      parents: {', '.join(parent_bits)}")
+            if t.details:
+                snippet = t.details.replace("\n", " ").strip()
+                if len(snippet) > 120:
+                    snippet = snippet[:117] + "..."
+                lines.append(f"      {snippet}")
     return "\n".join(lines)

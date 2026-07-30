@@ -16,6 +16,7 @@ MAX_RUN_TIMEOUT = 300
 MAX_OUTPUT_CHARS = 100_000
 _MAX_ARGS = 16
 _ARG_RE = re.compile(r"^[A-Za-z0-9_.=/:-]+$")
+_NETWORK_MARKER = "NOBODY_PROJECT_RUN_NETWORK"
 
 # Proxy / TLS env vars stripped when network is disabled (Phase C).
 _NETWORK_ENV_KEYS = frozenset({
@@ -77,7 +78,7 @@ def build_run_env(*, allow_network: Optional[bool] = None) -> dict:
     """Build subprocess env for project script execution.
 
     When network is disabled (default), only a minimal env is passed and proxy
-    variables are omitted. Scripts can read ``ODYSSEUS_PROJECT_RUN_NETWORK``
+    variables are omitted. Scripts can read ``NOBODY_PROJECT_RUN_NETWORK``
     (``"0"`` or ``"1"``). This does not kernel-block sockets — it reduces
     accidental outbound access via inherited proxy config.
     """
@@ -86,7 +87,7 @@ def build_run_env(*, allow_network: Optional[bool] = None) -> dict:
 
     if allow_network:
         env = dict(os.environ)
-        env["ODYSSEUS_PROJECT_RUN_NETWORK"] = "1"
+        env[_NETWORK_MARKER] = "1"
         env.setdefault("TERM", "xterm-256color")
         return env
 
@@ -98,7 +99,7 @@ def build_run_env(*, allow_network: Optional[bool] = None) -> dict:
     env.setdefault("LANG", "C.UTF-8")
     env.setdefault("LC_ALL", "C.UTF-8")
     env["TERM"] = "xterm-256color"
-    env["ODYSSEUS_PROJECT_RUN_NETWORK"] = "0"
+    env[_NETWORK_MARKER] = "0"
     return env
 
 

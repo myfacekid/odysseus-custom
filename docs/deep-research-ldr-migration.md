@@ -9,9 +9,9 @@
 
 ## Goal
 
-Replace Odysseus **IterResearch** (`src/deep_research.py`) as the research **orchestration and retrieval backend** with LDR’s **LangGraph agent strategy**, while **preserving**:
+Replace Nobody **IterResearch** (`src/deep_research.py`) as the research **orchestration and retrieval backend** with LDR’s **LangGraph agent strategy**, while **preserving**:
 
-| Must keep (Odysseus-owned) | Notes |
+| Must keep (Nobody-owned) | Notes |
 |----------------------------|--------|
 | Report output shape | Markdown + `visual_report.py` HTML, numbered `[N]` citations, References |
 | `EvidenceRegistry` | Stable `src:*` IDs, export BibTeX/CSL, sourcing tiers |
@@ -42,7 +42,7 @@ Our IterResearch loop is a fixed Plan → Query → Search → Extract → Synth
 
 User requested **A + B + C** together — not pick-one.
 
-### Tier A — Pattern port (Odysseus-native)
+### Tier A — Pattern port (Nobody-native)
 
 Port LDR concepts into our codebase without vendoring the whole app:
 
@@ -61,7 +61,7 @@ Add **`local-deep-research`** (PyPI) as a dependency for:
 - Relevance filter, rate limiting, citation normalization utilities
 - Optional: `ResearchClient` programmatic API for benchmarks
 
-**Constraint:** LDR requires **Python ≥3.12**; Odysseus currently runs 3.14 in venv — OK. Adds **LangChain + LangGraph + Flask stack** as transitive deps (Flask not used at runtime if we import engines only).
+**Constraint:** LDR requires **Python ≥3.12**; Nobody currently runs 3.14 in venv — OK. Adds **LangChain + LangGraph + Flask stack** as transitive deps (Flask not used at runtime if we import engines only).
 
 **Integration point:**
 
@@ -71,13 +71,13 @@ from local_deep_research.web_search_engines.search_engine_factory import create_
 from local_deep_research.advanced_search_system.strategies.langgraph_agent_strategy import LangGraphAgentStrategy
 ```
 
-Wrap with Odysseus LLM endpoint (`src/llm_core.py` → LangChain chat model adapter).
+Wrap with Nobody LLM endpoint (`src/llm_core.py` → LangChain chat model adapter).
 
 ### Tier C — Full LDR research engine
 
 Replace `DeepResearcher.research()` with LDR **`AdvancedSearchSystem` + `langgraph-agent`**:
 
-- Odysseus `ResearchHandler.call_research_service()` delegates to LDR
+- Nobody `ResearchHandler.call_research_service()` delegates to LDR
 - LDR collector output → **`EvidenceRegistry`** mapper
 - LDR markdown/citations → **`ResearchHandler._format_research_report()`** + `visual_report`
 - Custom LangGraph tools registered for **`search_zotero`**, **`search_knowledge`**, seed context injection
@@ -86,31 +86,31 @@ Replace `DeepResearcher.research()` with LDR **`AdvancedSearchSystem` + `langgra
 
 ---
 
-## Comparable components (Odysseus vs LDR)
+## Comparable components (Nobody vs LDR)
 
-| Capability | Odysseus today | LDR | Gap / action |
+| Capability | Nobody today | LDR | Gap / action |
 |------------|----------------|-----|--------------|
 | **Orchestration** | `DeepResearcher` IterResearch loop | `LangGraphAgentStrategy` | **Replace** — core migration |
 | **LangChain / LangGraph** | None | langchain ~1.2, langgraph ~1.2 (transitive) | **Add** deps + LLM adapter |
-| **Web search** | `services/search/core.py` (SearXNG, Brave, Tavily, …) | Same providers + meta-search | **Reuse Odysseus** via LDR engine wrapper or factory alias |
+| **Web search** | `services/search/core.py` (SearXNG, Brave, Tavily, …) | Same providers + meta-search | **Reuse Nobody** via LDR engine wrapper or factory alias |
 | **Academic APIs** | `research_similar_papers.py` (OA `related_to`, S2 recs) | S2/OpenAlex **search engines** + filter | **Replace** with LDR engines |
 | **Relevance gating** | `research_relevance.py` heuristics + LLM gate | `relevance_filter.py` batch LLM index pick | **Merge** — plan `avoid_topics` into filter prompt |
 | **Retrieval plan** | `research_retrieval_plan.py` (RT3) | Implicit (agent decides) | **Inject** plan into agent system prompt + tool query templates |
 | **Citations** | `EvidenceRegistry` stable IDs | `SearchResultsCollector` + `CitationHandler` | **Map** LDR results → registry at ingest |
-| **Report synthesis** | Multi-round `SYNTHESIZE_PROMPT` + thematic outline | LDR report assembler + citation handlers | **Keep Odysseus** final academic template initially |
+| **Report synthesis** | Multi-round `SYNTHESIZE_PROMPT` + thematic outline | LDR report assembler + citation handlers | **Keep Nobody** final academic template initially |
 | **Page fetch / extract** | `goal_based_extractor` + `research_paper_fetch` | LDR `fetch_url` tools (trafilatura, etc.) | **Evaluate** — may use LDR fetch or keep ours for PDF/Zotero |
-| **Vector / RAG** | ChromaDB + fastembed (`memory_vector`, `rag_vector`) | LDR SQLCipher library + sentence-transformers | **Keep Odysseus** vectors; optional LDR library later |
+| **Vector / RAG** | ChromaDB + fastembed (`memory_vector`, `rag_vector`) | LDR SQLCipher library + sentence-transformers | **Keep Nobody** vectors; optional LDR library later |
 | **Embeddings** | fastembed (ONNX) | sentence-transformers | Different stack; no need to unify for v1 |
 | **Rate limiting** | Minimal in `research_web_search` | Per-engine `rate_limiting/tracker` | **Port or use LDR** |
 | **Progress UI** | SSE phases (`planning`, `reading`, …) | WebSocket milestones | **Map** LDR callbacks → existing progress schema |
 | **Plan step** | `_create_plan()` auto-runs | Settings-driven; no HITL in LDR | **Keep** plan generation; add HITL gate later |
-| **Seed papers** | First-class (`research_seeds.py`, panel) | Library collections as retriever | **Odysseus extension** — seed tools + compare mode in agent prompt |
-| **Zotero** | Catalog + live API + save | Not built-in | **Odysseus-only tools** |
-| **Links / graph** | `research_knowledge.py`, typed edges | Generic collections | **Odysseus-only tools** + post-run `research_graph.py` |
+| **Seed papers** | First-class (`research_seeds.py`, panel) | Library collections as retriever | **Nobody extension** — seed tools + compare mode in agent prompt |
+| **Zotero** | Catalog + live API + save | Not built-in | **Nobody-only tools** |
+| **Links / graph** | `research_knowledge.py`, typed edges | Generic collections | **Nobody-only tools** + post-run `research_graph.py` |
 | **Session storage** | `data/deep_research/*.json` | SQLCipher DB | **Keep JSON** format; store LDR metadata fields |
 | **LLM calls** | `llm_call_async` OpenAI-compatible | LangChain chat models | **Adapter required** |
 
-### Odysseus components **without** LDR equivalent (preserve)
+### Nobody components **without** LDR equivalent (preserve)
 
 - `src/research_seeds.py` — seed resolution, PDF load, preview API
 - `src/research_evidence.py` — registry, export, synthesis window policy
@@ -121,7 +121,7 @@ Replace `DeepResearcher.research()` with LDR **`AdvancedSearchSystem` + `langgra
 - `static/js/research/panel.js` — seeds, modes, settings
 - `src/research_retrieval_plan.py` — structured plan (feeds agent context)
 
-### LDR components **without** Odysseus equivalent (adopt)
+### LDR components **without** Nobody equivalent (adopt)
 
 - `LangGraphAgentStrategy` — agent loop, subtopic parallel workers
 - `web_search_engines/engines/search_engine_*.py` — 20+ engines
@@ -136,12 +136,12 @@ Replace `DeepResearcher.research()` with LDR **`AdvancedSearchSystem` + `langgra
 
 ```mermaid
 flowchart TB
-    subgraph UI["Odysseus UI (unchanged v1)"]
+    subgraph UI["Nobody UI (unchanged v1)"]
         PANEL[research/panel.js]
         JOBS[jobs.js SSE]
     end
 
-    subgraph API["Odysseus API"]
+    subgraph API["Nobody API"]
         RH[ResearchHandler]
         ROUTES[/api/research/*]
     end
@@ -159,13 +159,13 @@ flowchart TB
         ENG[Search engines]
     end
 
-    subgraph ODY_TOOLS["Odysseus-only agent tools"]
+    subgraph ODY_TOOLS["Nobody-only agent tools"]
         ZOT[search_zotero]
         KNO[search_knowledge]
         SEED[seed_paper_context]
     end
 
-    subgraph OUT["Odysseus output (unchanged)"]
+    subgraph OUT["Nobody output (unchanged)"]
         REG[EvidenceRegistry]
         MD[Academic markdown report]
         VR[visual_report HTML]
@@ -195,7 +195,7 @@ LDR has no native “compare two seed papers” mode. We implement via **agent c
 3. **Agent system prompt:** Mode-specific instructions (literature_review | compare | gap_analysis | similar_papers)
 4. **Tools:**
    - `search_semantic_scholar`, `search_openalex`, `search_pubmed` — plan-driven queries
-   - `search_zotero` / `search_knowledge` — Odysseus wrappers
+   - `search_zotero` / `search_knowledge` — Nobody wrappers
    - **No** S2 `forpaper` recommendations
 5. **Post-run:** `research_typed_edges.py` infers `derives_from` / `supports` / `refutes` from report text
 
@@ -210,11 +210,11 @@ All existing panel fields must work when `research_engine=ldr` (Phase L2). Canon
 | Toggle | API field | LDR wiring (L2) |
 |--------|-----------|-----------------|
 | Preprints | `include_preprints` | Filter preprint hosts in engine config + agent prompt when off |
-| Zotero | `include_zotero` | Register `search_zotero` Odysseus tool **only when on**; no catalog dump at round 0 |
+| Zotero | `include_zotero` | Register `search_zotero` Nobody tool **only when on**; no catalog dump at round 0 |
 | Links / knowledge | `include_knowledge` | Register `search_knowledge` **only when on** |
 | Seed papers | `seed_papers` | Pre-load via `research_seeds.py`; mode-specific agent context; **no auto-seeding** |
 | Mode | `mode` | `literature_review` \| `compare` \| `gap_analysis` \| `similar_papers` → system prompt |
-| Report length | `report_length` | Odysseus synthesis token budget (decision B — not LDR report assembler) |
+| Report length | `report_length` | Nobody synthesis token budget (decision B — not LDR report assembler) |
 | Search provider | `search_provider` | Primary web/meta-search engine for LDR bridge |
 | Max rounds / time | `max_rounds`, `max_time` | LangGraph iteration cap + wall-clock timeout |
 
@@ -239,18 +239,18 @@ All existing panel fields must work when `research_engine=ldr` (Phase L2). Canon
 
 ### Phase L0 — Branch + deps + spike (this branch)
 
-- [x] Migration doc + decision B (LDR gather → Odysseus synthesis)
-- [x] `research_engine` setting (`iterresearch` | `ldr`)
+- [x] Migration doc + decision B (LDR gather → Nobody synthesis)
+- [x] `research_engine` setting (`ldr`; retired `iterresearch` ignored)
 - [x] `src/research/ldr_llm_adapter.py` — OpenAI-compatible endpoint → LangChain
 - [x] `src/research/ldr_progress.py` — SSE phase mapping
 - [x] `src/research/ldr_runner.py` — full L2 orchestration + `ResearchHandler` dispatch
-- [x] `requirements-optional-ldr.txt`
+- [x] `local-deep-research` in `requirements.txt` (Python 3.12–3.13; formerly `requirements-optional-ldr.txt`)
 - [x] Spike tests: `tests/test_ldr_live_spike.py` (construct LangGraph stack when LDR installed)
 
 ### Phase L1 — Engine layer (Tier A + B)
 
-- [x] `src/research_engines/` — registry + Odysseus web search bridge
-- [x] Wire LDR S2/OpenAlex/PubMed engines with Odysseus settings (API keys in admin)
+- [x] `src/research_engines/` — registry + Nobody web search bridge
+- [x] Wire LDR S2/OpenAlex/PubMed engines with Nobody settings (API keys in admin)
 - [x] Replace `research_similar_papers.py` API fallback with LDR search engines
 - [x] Retire S2 `forpaper` and OpenAlex `related_to` defaults
 
@@ -259,9 +259,9 @@ All existing panel fields must work when `research_engine=ldr` (Phase L2). Canon
 - [x] `run_ldr_research()` wired; `ResearchHandler` dispatches with panel toggles
 - [x] Custom tools: Zotero, knowledge graph (`ldr_tools.py`)
 - [x] `EvidenceRegistry` ingest from LDR collector (`ldr_collector_mapper.py`)
-- [x] Odysseus `research_templates` final synthesis (decision B — `ldr_synthesis.py`)
+- [x] Nobody `research_templates` final synthesis (decision B — `ldr_synthesis.py`)
 - [x] Live integration test with `local-deep-research` installed (Python 3.12–3.13; Docker + `tests/test_ldr_live_spike.py`)
-- [x] Feature flag: `research_engine=ldr` default (falls back to IterResearch when LDR deps missing)
+- [x] Feature flag: `research_engine=ldr` required (IterResearch fallback removed; pipeline deleted)
 
 ### Phase L3 — Output parity
 
@@ -276,16 +276,16 @@ All existing panel fields must work when `research_engine=ldr` (Phase L2). Canon
 
 - [x] `/api/research/plan` returns structured plan + retrieval plan
 - [x] Panel: review/edit plan → confirm → `/api/research/start` with `approved_plan`
-- [x] Agent receives frozen plan JSON in system context (`build_retrieval_plan` + IterResearch `_approved_plan`)
+- [x] Agent receives frozen plan JSON in system context (`build_retrieval_plan` + LDR approved plan)
 
 ### Phase L5 — Cleanup ✅
 
-- [x] Deprecate `src/deep_research.py` — thin shim re-exporting `src/research/iterresearch.py`
-- [x] Shared prompts in `src/research/research_prompts.py` (LDR + IterResearch)
+- [x] Retire IterResearch — deleted `src/research/iterresearch.py` and `src/deep_research.py` shim; LDR is the only backend
+- [x] Shared prompts in `src/research/research_prompts.py` (LDR)
 - [x] Cross-reference sync: retrieval RT2/RT4/RT6 marked superseded; panel toggles documented in all three roadmaps
 - [x] Archive IterResearch-only RT2/RT6 detail into retrieval doc `<details>` blocks only
 - [x] Update `docs/deep-research-roadmap.md` Phase 4 → **LangGraph via LDR**
-
+- [x] `local-deep-research` required in `requirements.txt`; Tongyi/IterResearch fallback removed
 ### Phase L6 — Full content acquisition ✅
 
 LDR gather + Fetch Content often leaves registry entries as **metadata/snippets only**. Phase L6 adds DOI-aware dedup, light abstract resolution, and **model-selected** full-text load (not dumped into synthesis for every source).
@@ -314,7 +314,7 @@ Root cause is split:
 | **LDR gather** | Agent calls `fetch_url` on S2/paper landing URLs that block bots or return shells — not DOI-resolved OA endpoints |
 | **L6 enrich** | Abstract pass capped at 40 DOI lookups; full-text limited to ≤6 LLM-picked sources; PMC-only ladder misses OpenAlex/S2 OA PDFs and preprint full-text |
 
-Phase L7 adds an **Odysseus-owned escalation ladder** after gather (independent of LDR Fetch Content) and evaluation smoke tests.
+Phase L7 adds an **Nobody-owned escalation ladder** after gather (independent of LDR Fetch Content) and evaluation smoke tests.
 
 | Step | Status | Module |
 |------|--------|--------|
@@ -358,10 +358,10 @@ Phase L7 adds an **Odysseus-owned escalation ladder** after gather (independent 
 
 From LDR `pyproject.toml` (minimal set for Tier B/C):
 
-| Package | Purpose | Odysseus note |
+| Package | Purpose | Nobody note |
 |---------|---------|---------------|
 | `local-deep-research` | Engine + strategy bundle | Pin version; import subset only |
-| `langchain`, `langchain-core`, `langchain-community` | Agent + tools | New to Odysseus |
+| `langchain`, `langchain-core`, `langchain-community` | Agent + tools | New to Nobody |
 | `langgraph` | Agent strategy | Transitive via LDR |
 | `langchain-openai` | Model adapter | Map to our endpoints |
 
@@ -380,7 +380,7 @@ From LDR `pyproject.toml` (minimal set for Tier B/C):
 | LDR dep weight (LangChain stack) | Optional extra; feature flag; import engines only first |
 | LLM adapter mismatch (local endpoints) | Spike on Ollama/OpenAI-compatible endpoints early |
 | Report format drift | Registry-first mapping; golden file tests |
-| Seed/compare quality | Plan + avoid_topics + Odysseus tools; no S2 recs |
+| Seed/compare quality | Plan + avoid_topics + Nobody tools; no S2 recs |
 | Progress UI breaks | Explicit phase mapping table in L0 |
 | Owner / multi-tenant | Pass `owner` into Zotero/knowledge tools; LDR `programmatic_mode=True` skips its DB |
 
@@ -390,20 +390,20 @@ From LDR `pyproject.toml` (minimal set for Tier B/C):
 
 | # | Decision | Choice |
 |---|----------|--------|
-| 1 | **Final report** | **(B) LDR gathers sources → Odysseus academic template / thematic synthesis** on `EvidenceRegistry` at end |
+| 1 | **Final report** | **(B) LDR gathers sources → Nobody academic template / thematic synthesis** on `EvidenceRegistry` at end |
 | 2 | Integration tiers | A + B + C (pattern port + PyPI dep + LangGraph engine) |
 | 3 | Orchestration | LangGraph replaces IterResearch entirely |
-| 4 | Seed/compare | Odysseus-owned tools + prompts; preserved |
+| 4 | Seed/compare | Nobody-owned tools + prompts; preserved |
 | 5 | HITL plan UI | After LangGraph conversion (Phase L4) |
 
 ---
 
 ## Open items
 
-1. ~~**Final report:** LDR synthesis only, or Odysseus academic template on top of registry?~~ → **B (locked)**
+1. ~~**Final report:** LDR synthesis only, or Nobody academic template on top of registry?~~ → **B (locked)**
 2. **LDR library / download-to-collection:** Adopt in Phase 6+ or skip?
-3. **Subagent parallelism:** LDR runs up to 4 subtopic workers — cap for Odysseus server load?
-4. **License:** LDR is MIT — compatible with Odysseus; keep `licenses/DeepResearch-Apache-2.0.txt` attribution note if any Alibaba IterResearch code remains during transition.
+3. **Subagent parallelism:** LDR runs up to 4 subtopic workers — cap for Nobody server load?
+4. **License:** LDR is MIT — compatible with Nobody. Tongyi/IterResearch pipeline and Apache-2.0 license file removed after retirement.
 
 ---
 

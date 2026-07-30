@@ -1,7 +1,7 @@
 """Run Deep Research via Local Deep Research LangGraph agent (Phase L2).
 
-Gathering: LDR langgraph-agent + search engines + Odysseus tools.
-Synthesis: Odysseus EvidenceRegistry + academic templates (decision B).
+Gathering: LDR langgraph-agent + search engines + Nobody tools.
+Synthesis: Nobody EvidenceRegistry + academic templates (decision B).
 """
 from __future__ import annotations
 
@@ -25,12 +25,12 @@ from src.research.ldr_planning import (
 from src.research.ldr_progress import wrap_progress_callback
 from src.research.ldr_session import LdrResearchSession
 from src.research.ldr_synthesis import synthesize_academic_report
-from src.research.ldr_tools import OdysseusAgentConfig, attach_odysseus_tools, map_ldr_progress_callback
+from src.research.ldr_tools import NobodyAgentConfig, attach_nobody_tools, map_ldr_progress_callback
 from src.research_relevance import build_relevance_query
 
 logger = logging.getLogger(__name__)
 
-# Odysseus search_provider → LDR search.tool
+# Nobody search_provider → LDR search.tool
 _SEARCH_TOOL_ALIASES = {
     "searxng": "searxng",
     "brave": "brave",
@@ -76,7 +76,7 @@ def _run_ldr_gather_sync(
     search_tool: str,
     max_iterations: int,
     progress_callback: Optional[Callable],
-    agent_config: OdysseusAgentConfig,
+    agent_config: NobodyAgentConfig,
     gather_state: Optional[dict] = None,
 ) -> List[dict]:
     """Blocking LDR LangGraph gather; returns collector link dicts."""
@@ -109,11 +109,27 @@ def _run_ldr_gather_sync(
     )
     if gather_state is not None:
         gather_state["system"] = system
-    ldr_progress = map_ldr_progress_callback(progress_callback)
+
+    def _live_source_count() -> int:
+        links = system.all_links_of_system
+        if links is not None:
+            try:
+                return len(links)
+            except TypeError:
+                pass
+        try:
+            return len(system.strategy.collector.results or [])
+        except Exception:
+            return 0
+
+    ldr_progress = map_ldr_progress_callback(
+        progress_callback,
+        source_count_fn=_live_source_count,
+    )
     if ldr_progress:
         system.set_progress_callback(ldr_progress)
 
-    attach_odysseus_tools(system.strategy, agent_config)
+    attach_nobody_tools(system.strategy, agent_config)
 
     try:
         system.analyze_topic(agent_query)
@@ -159,11 +175,11 @@ async def run_ldr_research(
     report_length: str = "standard",
     result_holder: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Execute LDR LangGraph research; returns Odysseus academic markdown report."""
+    """Execute LDR LangGraph research; returns Nobody academic markdown report."""
     if not ldr_stack_available():
         raise LdrResearchNotReadyError(
-            "research_engine=ldr but local-deep-research is not installed. "
-            "Run: pip install -r requirements-optional-ldr.txt "
+            "local-deep-research is not installed. "
+            "Reinstall with: pip install -r requirements.txt "
             "(requires Python 3.12–3.13; LDR dependencies may not install on 3.14+)."
         )
 
@@ -211,6 +227,13 @@ async def run_ldr_research(
             if doi:
                 session.dois_seen.add(doi)
         session.findings.extend(seed_findings)
+        if wrapped and seed_findings:
+            wrapped({
+                "phase": "reading",
+                "message": f"Loaded {len(seed_findings)} seed paper(s)",
+                "total_sources": len(session.evidence_registry),
+                "new_sources": len(seed_findings),
+            })
 
         # One-hop citation-graph snowball from seeds (forward + backward).
         from src.research_citation_lookup import snowball_seed
@@ -239,6 +262,13 @@ async def run_ldr_research(
             if expand:
                 session.findings.extend(expand)
                 logger.info("LDR seed citation-graph snowball: %d work(s)", len(expand))
+                if wrapped:
+                    wrapped({
+                        "phase": "reading",
+                        "message": f"Citation snowball: +{len(expand)} work(s)",
+                        "total_sources": len(session.evidence_registry),
+                        "new_sources": len(expand),
+                    })
 
     if prior_findings:
         session.evidence_registry.sync_findings(prior_findings)
@@ -287,8 +317,15 @@ async def run_ldr_research(
             if citing:
                 session.findings.extend(citing)
                 logger.info("LDR forward-citation discovery: %d citing work(s)", len(citing))
+                if wrapped:
+                    wrapped({
+                        "phase": "searching",
+                        "message": f"Found {len(citing)} citing work(s)",
+                        "total_sources": len(session.evidence_registry),
+                        "new_sources": len(citing),
+                    })
 
-    plan, plan_display = await build_retrieval_plan(
+    plan, plan_display, _plan_source = await build_retrieval_plan(
         question=question,
         llm_endpoint=llm_endpoint,
         llm_model=llm_model,
@@ -323,7 +360,7 @@ async def run_ldr_research(
     search_tool = _resolve_ldr_search_tool(search_provider)
     session.providers_used.append(search_tool)
 
-    agent_config = OdysseusAgentConfig(
+    agent_config = NobodyAgentConfig(
         owner=owner,
         include_zotero=include_zotero,
         include_knowledge=include_knowledge,
@@ -341,7 +378,7 @@ async def run_ldr_research(
         )
 
     effective_iterations = max(12, min(int(max_iterations or 50), 35))
-    # Reserve wall time for planning + Odysseus synthesis; gather uses the remainder.
+    # Reserve wall time for planning + Nobody synthesis; gather uses the remainder.
     elapsed_before_gather = time.time() - start_time
     gather_budget = int(max_time) - int(elapsed_before_gather) - 90 if max_time else None
     if gather_budget is not None:
@@ -420,16 +457,31 @@ async def run_ldr_research(
     )
     session.findings.extend(new_findings)
     session.round_count = 1
+    if wrapped:
+        wrapped({
+            "phase": "reading",
+            "message": f"Ingested {len(new_findings)} gathered source(s)",
+            "total_sources": len(session.evidence_registry),
+            "new_sources": len(new_findings),
+        })
 
     if wrapped:
         wrapped(
             {
                 "phase": "reading",
                 "message": "Enriching sources (DOI abstracts + selective full text)…",
+                "total_sources": len(session.evidence_registry),
             }
         )
 
     from src.research.ldr_content_enrich import run_ldr_content_enrichment
+
+    def _enrich_progress(event: Dict[str, Any]) -> None:
+        if not wrapped:
+            return
+        payload = dict(event or {})
+        payload.setdefault("total_sources", len(session.evidence_registry))
+        wrapped(payload)
 
     deep_read_context = await run_ldr_content_enrichment(
         question=question,
@@ -440,7 +492,7 @@ async def run_ldr_research(
         llm_model=llm_model,
         llm_headers=llm_headers,
         max_content_chars=max_content_chars,
-        progress_callback=progress_callback,
+        progress_callback=_enrich_progress if wrapped else None,
     )
 
     if wrapped:

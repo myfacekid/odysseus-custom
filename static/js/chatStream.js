@@ -151,6 +151,19 @@ export function handleUIControl(uiData) {
 
     } else if (uiEvent === 'open_panel' || uiData.ui_event === 'open_panel') {
       var panel = uiData.panel;
+      function _clickId(id) {
+        var el = document.getElementById(id);
+        if (el) { el.click(); return true; }
+        return false;
+      }
+      function _openMemoryTab(tabName) {
+        if (!_clickId('tool-memory-btn') && !_clickId('rail-memory')) return;
+        if (!tabName) return;
+        setTimeout(function() {
+          var tab = document.querySelector('.memory-tab[data-memory-tab="' + tabName + '"]');
+          if (tab) tab.click();
+        }, 50);
+      }
       if (panel === 'documents') {
         import('./documentLibrary.js').then(function(mod) {
           var fn = mod.openLibrary || (mod.default && mod.default.openLibrary);
@@ -176,12 +189,30 @@ export function handleUIControl(uiData) {
           var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
           if (fn) fn();
         }).catch(function(){});
-      } else if (panel === 'memories' || panel === 'skills' || panel === 'settings') {
-        // These live in the sidebar / settings drawer — most just need
-        // an existing button click.
-        var ids = { memories: 'tool-memory-btn', skills: 'skills-btn', settings: 'open-settings-btn' };
-        var btn = document.getElementById(ids[panel]);
-        if (btn) btn.click();
+      } else if (panel === 'memories') {
+        _openMemoryTab('browse');
+      } else if (panel === 'skills') {
+        _openMemoryTab('skills');
+      } else if (panel === 'settings') {
+        import('./ui/feedback.js').then(function(mod) {
+          var fn = mod.openSettingsTab;
+          if (fn) fn();
+          else if (!_clickId('tool-settings-btn')) _clickId('open-settings-btn');
+        }).catch(function() {
+          if (!_clickId('tool-settings-btn')) _clickId('open-settings-btn');
+        });
+      } else if (panel === 'calendar') {
+        if (!_clickId('tool-calendar-btn')) _clickId('rail-calendar');
+      } else if (panel === 'research') {
+        if (!_clickId('tool-research-btn')) _clickId('rail-research');
+      } else if (panel === 'compare') {
+        if (!_clickId('tool-compare-btn')) _clickId('rail-compare');
+      } else if (panel === 'tasks') {
+        if (!_clickId('tool-tasks-btn')) _clickId('rail-tasks');
+      } else if (panel === 'links') {
+        if (!_clickId('tool-knowledge-btn')) _clickId('rail-knowledge');
+      } else if (panel === 'theme') {
+        _clickId('tool-theme-btn');
       }
 
     }

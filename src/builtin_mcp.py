@@ -12,6 +12,7 @@ import sys
 import asyncio
 
 from core.platform_compat import IS_WINDOWS, which_tool
+from core.env import env_get
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +84,13 @@ _BUILTIN_NPX_SERVERS = {
 }
 
 # Global flag to disable MCP if there are compatibility issues
-MCP_DISABLED = os.environ.get("ODYSSEUS_DISABLE_MCP", "").lower() in ("1", "true", "yes")
+MCP_DISABLED = (env_get("DISABLE_MCP", "") or "").lower() in ("1", "true", "yes")
 
 
 async def register_builtin_servers(mcp_manager):
     """Connect all built-in MCP servers to the manager."""
     if MCP_DISABLED:
-        logger.info("Built-in MCP servers disabled via ODYSSEUS_DISABLE_MCP")
+        logger.info("Built-in MCP servers disabled via NOBODY_DISABLE_MCP")
         return
 
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

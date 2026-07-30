@@ -115,6 +115,16 @@ test('graph legend is toggleable from the overlay controls', () => {
   assert.match(graphJs, /legendVisible/);
 });
 
+test('graph legend always shows the complete kind key including refutes', () => {
+  const edgeKindsJs = read('static', 'js', 'edgeKinds.js');
+  const graphJs = read('static', 'js', 'knowledgeGraphView.js');
+  assert.match(edgeKindsJs, /export const LEGEND_EDGE_KINDS/);
+  assert.match(edgeKindsJs, /['"]refutes['"]/);
+  assert.match(graphJs, /LEGEND_EDGE_KINDS/);
+  assert.doesNotMatch(graphJs, /present\.has\(k\)/);
+  assert.doesNotMatch(graphJs, /new Set\(this\.edges\.map/);
+});
+
 test('document body snippets are hidden from compact Links panes', () => {
   assert.match(knowledgeJs, /function _compactSnippet/);
   assert.match(knowledgeJs, /type === 'document'/);

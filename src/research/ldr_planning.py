@@ -18,6 +18,13 @@ from src.research_utils import strip_thinking
 
 logger = logging.getLogger(__name__)
 
+_RETRY_REMINDER = (
+    "\n\nYour previous reply was missing required JSON fields or was not valid JSON. "
+    "Reply with ONLY a single JSON object. You MUST include non-empty arrays for "
+    "sub_questions, key_topics, and avoid_topics, plus a non-empty success_criteria "
+    "string, along with anchor_terms, search_keywords, and scope."
+)
+
 
 def _strip_code_block(text: str) -> str:
     text = (text or "").strip()
@@ -43,6 +50,16 @@ def parse_json_object(text: str) -> Optional[Dict]:
         except json.JSONDecodeError:
             return None
     return None
+
+
+def plan_has_scholarly_fields(raw: Optional[Dict]) -> bool:
+    """True when planner JSON includes optional HITL scholarly fields."""
+    if not raw or not isinstance(raw, dict):
+        return False
+    has_sub = bool(raw.get("sub_questions"))
+    has_topics = bool(raw.get("key_topics"))
+    has_success = bool(str(raw.get("success_criteria") or "").strip())
+    return has_sub or has_topics or has_success
 
 
 async def load_seed_findings(
@@ -83,8 +100,12 @@ async def build_retrieval_plan(
     research_mode: str = "literature_review",
     seed_findings: Optional[List[dict]] = None,
     approved_plan: Optional[dict] = None,
-) -> Tuple[ResearchRetrievalPlan, str]:
-    """Create structured retrieval plan + human-readable display text."""
+) -> Tuple[ResearchRetrievalPlan, str, str]:
+    """Create structured retrieval plan + display text + source tag.
+
+    Returns ``(plan, display, plan_source)`` where ``plan_source`` is
+    ``\"approved\"``, ``\"llm\"``, or ``\"fallback\"``.
+    """
     if approved_plan:
         plan = parse_retrieval_plan(
             approved_plan,
@@ -92,7 +113,7 @@ async def build_retrieval_plan(
             seed_findings or [],
             research_mode=research_mode,
         )
-        return plan, plan_to_display_text(plan)
+        return plan, plan_to_display_text(plan), "approved"
 
     mode_ctx = MODE_PLAN_CONTEXT.get(research_mode, "")
     seed_ctx = format_seed_context(seed_findings or []) if seed_findings else ""
@@ -108,33 +129,49 @@ async def build_retrieval_plan(
 
     from src.llm_core import llm_call_async
 
-    try:
+    async def _call(user_prompt: str) -> Optional[Dict]:
         response = await llm_call_async(
             url=llm_endpoint,
             model=llm_model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": user_prompt}],
             temperature=0.3,
-            max_tokens=1536,
+            max_tokens=2048,
             headers=llm_headers,
             timeout=45,
         )
-        parsed = parse_json_object(strip_thinking(response))
-        plan = parse_retrieval_plan(
-            parsed,
-            question,
-            seed_findings or [],
-            research_mode=research_mode,
+        return parse_json_object(strip_thinking(response))
+
+    try:
+        parsed = await _call(prompt)
+        if not plan_has_scholarly_fields(parsed):
+            logger.warning(
+                "LDR planning JSON incomplete or unparseable; retrying once "
+                "(parsed_keys=%s)",
+                sorted(parsed.keys()) if isinstance(parsed, dict) else None,
+            )
+            parsed = await _call(prompt + _RETRY_REMINDER)
+
+        if plan_has_scholarly_fields(parsed):
+            plan = parse_retrieval_plan(
+                parsed,
+                question,
+                seed_findings or [],
+                research_mode=research_mode,
+            )
+            return plan, plan_to_display_text(plan), "llm"
+
+        logger.warning(
+            "LDR planning still incomplete after retry; using enriched heuristic fallback"
         )
-        display = plan_to_display_text(plan)
-        return plan, display or strip_thinking(response)
     except Exception as exc:
         logger.warning("LDR planning failed: %s", exc)
-        plan = derive_retrieval_plan_fallback(
-            question,
-            seed_findings or [],
-            research_mode=research_mode,
-        )
-        return plan, plan_to_display_text(plan)
+
+    plan = derive_retrieval_plan_fallback(
+        question,
+        seed_findings or [],
+        research_mode=research_mode,
+    )
+    return plan, plan_to_display_text(plan), "fallback"
 
 
 def build_agent_context_prompt(

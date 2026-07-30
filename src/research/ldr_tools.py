@@ -1,4 +1,4 @@
-"""Odysseus-only LangGraph tools for Zotero and Links knowledge."""
+"""Nobody-only LangGraph tools for Zotero and Links knowledge."""
 from __future__ import annotations
 
 import logging
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class OdysseusAgentConfig:
+class NobodyAgentConfig:
     owner: str = ""
     include_zotero: bool = False
     include_knowledge: bool = False
@@ -18,7 +18,7 @@ class OdysseusAgentConfig:
     max_content_chars: int = 15000
 
 
-def _format_odysseus_tool_results(results: List[dict], start_idx: int) -> str:
+def _format_nobody_tool_results(results: List[dict], start_idx: int) -> str:
     lines = []
     for i, item in enumerate(results):
         if not isinstance(item, dict):
@@ -43,7 +43,7 @@ def _findings_to_ldr_results(findings: List[dict]) -> List[dict]:
                 "link": url,
                 "url": url,
                 "snippet": (f.get("content") or "")[:2000],
-                "source_engine": f.get("search_provider") or "odysseus",
+                "source_engine": f.get("search_provider") or "nobody",
                 "zotero_key": f.get("zotero_key"),
                 "paper_key": f.get("paper_key"),
                 "doi": f.get("doi_or_id"),
@@ -54,7 +54,7 @@ def _findings_to_ldr_results(findings: List[dict]) -> List[dict]:
     return out
 
 
-def make_zotero_search_tool(collector, config: OdysseusAgentConfig):
+def make_zotero_search_tool(collector, config: NobodyAgentConfig):
     from langchain_core.tools import tool
 
     @tool
@@ -74,7 +74,7 @@ def make_zotero_search_tool(collector, config: OdysseusAgentConfig):
         if not results:
             return outcome.note or f"No Zotero matches for '{query}'."
         start = collector.add_results(results, engine_name="zotero")
-        return _format_odysseus_tool_results(results, start + 1)
+        return _format_nobody_tool_results(results, start + 1)
 
     search_zotero.name = "search_zotero"
     search_zotero.description = (
@@ -84,7 +84,7 @@ def make_zotero_search_tool(collector, config: OdysseusAgentConfig):
     return search_zotero
 
 
-def make_knowledge_search_tool(collector, config: OdysseusAgentConfig):
+def make_knowledge_search_tool(collector, config: NobodyAgentConfig):
     from langchain_core.tools import tool
 
     @tool
@@ -105,7 +105,7 @@ def make_knowledge_search_tool(collector, config: OdysseusAgentConfig):
         if not results:
             return outcome.note or f"No knowledge graph matches for '{query}'."
         start = collector.add_results(results, engine_name="knowledge")
-        return _format_odysseus_tool_results(results, start + 1)
+        return _format_nobody_tool_results(results, start + 1)
 
     search_knowledge.name = "search_knowledge"
     search_knowledge.description = (
@@ -114,8 +114,8 @@ def make_knowledge_search_tool(collector, config: OdysseusAgentConfig):
     return search_knowledge
 
 
-def attach_odysseus_tools(strategy, config: OdysseusAgentConfig) -> None:
-    """Extend a LangGraphAgentStrategy with Odysseus Zotero/knowledge tools."""
+def attach_nobody_tools(strategy, config: NobodyAgentConfig) -> None:
+    """Extend a LangGraphAgentStrategy with Nobody Zotero/knowledge tools."""
     original_build: Callable = strategy._build_tools
     collector = strategy.collector
 
@@ -131,10 +131,16 @@ def attach_odysseus_tools(strategy, config: OdysseusAgentConfig) -> None:
 
 
 def map_ldr_progress_callback(
-    odysseus_callback: Optional[Callable],
+    nobody_callback: Optional[Callable],
+    *,
+    source_count_fn: Optional[Callable[[], int]] = None,
 ) -> Optional[Callable]:
-    """Adapt LDR (message, progress, metadata) → Odysseus progress dict."""
-    if odysseus_callback is None:
+    """Adapt LDR (message, progress, metadata) → Nobody progress dict.
+
+    When *source_count_fn* is provided, each tick includes ``total_sources``
+    so the research UI counter can climb during LangGraph gather.
+    """
+    if nobody_callback is None:
         return None
     from src.research.ldr_progress import ldr_event_to_progress
 
@@ -143,6 +149,16 @@ def map_ldr_progress_callback(
         if message:
             event.setdefault("message", message)
         event.setdefault("phase", event.get("phase") or "searching")
-        odysseus_callback(ldr_event_to_progress(event))
+        if "round" not in event and event.get("iteration") is not None:
+            try:
+                event["round"] = int(event["iteration"])
+            except (TypeError, ValueError):
+                pass
+        if source_count_fn is not None and event.get("total_sources") is None:
+            try:
+                event["total_sources"] = int(source_count_fn())
+            except Exception:
+                pass
+        nobody_callback(ldr_event_to_progress(event))
 
     return inner

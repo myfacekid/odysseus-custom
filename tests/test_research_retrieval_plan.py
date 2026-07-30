@@ -24,6 +24,9 @@ def test_derive_retrieval_plan_fallback_from_seeds():
     assert plan.must_stay_close_to_seeds
     assert "foldseek" in {t.lower() for t in plan.anchor_terms}
     assert plan.expansion_queries
+    assert plan.sub_questions
+    assert plan.key_topics
+    assert plan.success_criteria
 
 
 def test_parse_retrieval_plan_merges_planner_json():

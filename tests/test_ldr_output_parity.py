@@ -18,7 +18,7 @@ from src.visual_report import generate_visual_report
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "research"
 
-# Keys persisted by ResearchHandler._save_result (LDR and IterResearch).
+# Keys persisted by ResearchHandler._save_result for LDR sessions.
 SESSION_JSON_REQUIRED_KEYS = frozenset({
     "session_id",
     "query",
@@ -134,7 +134,7 @@ def test_ingest_ldr_links_on_reject_callback():
 
 @pytest.mark.asyncio
 async def test_handler_save_result_includes_research_engine(tmp_path, monkeypatch):
-    """LDR path persists the same session JSON shape as IterResearch."""
+    """LDR path persists the expected session JSON shape."""
     monkeypatch.setattr("src.research_handler.RESEARCH_DATA_DIR", tmp_path)
     from src.research_handler import ResearchHandler
     from src.research.ldr_session import LdrResearchSession

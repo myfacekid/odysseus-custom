@@ -9,7 +9,7 @@ let _idCounter = 0;
 
 // Dismissed-from-panel IDs persist across reloads so Clear actually sticks.
 // (Items still live on disk and in the Library; this just hides them here.)
-const _DISMISSED_KEY = 'odysseus-research-dismissed';
+const _DISMISSED_KEY = 'nobody-research-dismissed';
 function _loadDismissed() {
   try {
     const raw = localStorage.getItem(_DISMISSED_KEY);
@@ -29,7 +29,7 @@ function _markDismissed(ids) {
 // Graph-connection review is a one-time decision per research: once the user
 // accepts/rejects the proposed links, the "Review connections" CTA should not
 // reappear (in this session or after a reload).
-const _REVIEWED_CONN_KEY = 'odysseus-research-conn-reviewed';
+const _REVIEWED_CONN_KEY = 'nobody-research-conn-reviewed';
 function _loadReviewedConns() {
   try {
     const raw = localStorage.getItem(_REVIEWED_CONN_KEY);
@@ -222,12 +222,18 @@ export function formatPhase(progress, maxRounds) {
   if (!progress || !progress.phase) return 'Starting...';
   const p = progress;
   const rn = p.round ? (maxRounds ? `Round ${p.round}/${maxRounds}: ` : `Round ${p.round}: `) : '';
+  const src = typeof p.total_sources === 'number' ? p.total_sources : null;
   switch (p.phase) {
     case 'probing': return 'Probing model...';
     case 'planning': return 'Planning research strategy...';
-    case 'searching': return `${rn}Searching (${p.queries || 0} queries)`;
+    case 'searching':
+      return src != null
+        ? `${rn}Searching (${p.queries || 0} queries, ${src} sources)`
+        : `${rn}Searching (${p.queries || 0} queries)`;
     case 'reading': return `${rn}Reading ${p.total_sources || 0} sources`;
     case 'analyzing': return `${rn}Analyzing ${p.total_findings || 0} findings`;
+    case 'synthesizing':
+      return src != null ? `Synthesizing ${src} sources` : 'Synthesizing…';
     case 'writing': return `Writing report -- ${p.total_sources || 0} sources`;
     default: return p.phase;
   }

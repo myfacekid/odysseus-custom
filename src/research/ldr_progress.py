@@ -1,9 +1,9 @@
-"""Map Local Deep Research progress events to Odysseus SSE progress payloads."""
+"""Map Local Deep Research progress events to Nobody SSE progress payloads."""
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-# Odysseus panel phases (static/js/research/jobs.js)
+# Nobody panel phases (static/js/research/jobs.js)
 _PHASE_ALIASES = {
     "planning": "planning",
     "plan": "planning",
@@ -32,7 +32,7 @@ def normalize_ldr_phase(raw: Optional[str]) -> str:
 
 
 def ldr_event_to_progress(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert an LDR/strategy progress dict to Odysseus progress_callback shape."""
+    """Convert an LDR/strategy progress dict to Nobody progress_callback shape."""
     if not event:
         return {"phase": "searching"}
 

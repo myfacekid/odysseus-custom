@@ -32,6 +32,10 @@ ALWAYS_AVAILABLE = frozenset({
     # Keeping the always-on set small leaves room in the ~16-tool
     # budget for manage_tasks / manage_calendar / etc.
     "list_served_models", "stop_served_model",
+    # Ambient cookbook companions — rules claim these are always on;
+    # without them "what's downloading" / "what models do I have" fall
+    # through to bash when RAG misses the keyword path.
+    "list_downloads", "list_cached_models",
     # Generic API loopback — the catch-all when no named tool fits.
     "app_api",
 })
@@ -51,7 +55,7 @@ ASSISTANT_ALWAYS_AVAILABLE = frozenset({
     "ui_control",
 })
 
-COLLECTION_NAME = "odysseus_tool_index"
+COLLECTION_NAME = "nobody_tool_index"
 
 # ── Tool description registry ──
 # Each tool gets a searchable description that helps retrieval.
@@ -61,7 +65,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "python": "Execute Python code for computation, data processing, math, scripting, parsing, API calls. Not for writing code for the user.",
     "web_search": "Quick single web lookup for a fact, current event, or doc mid-task. NOT for the user's Zotero library — use search_zotero. NOT for 'research X' / 'do research on X' requests — those are deep-research jobs (use trigger_research). web_search = one query; trigger_research = a full researched report in the sidebar.",
     "search_zotero": "Search the user's Zotero library. Broad search = metadata/abstracts only. zotero_key + section=methods|results|… for Tier 2 section extract; include_pdf for full PDF. Prefer search_knowledge read on paper:KEY. Do NOT web_search paper titles when the PDF is in the library.",
-    "search_knowledge": "Search the unified knowledge graph (tasks, documents, memories, skills, Zotero papers). read on paper:… defaults to abstract + cached DR summary; section= for one PDF section; include_pdf for full text. neighbors excludes pending proposals unless include_proposed=true. suggest_link/merge_subgraph preview queue links for user review — do not apply unless user explicitly asks.",
+    "search_knowledge": "Search the unified knowledge graph (tasks, documents, memories, skills, Zotero papers). read on paper:… defaults to abstract + cached DR summary; section= for one PDF section; include_pdf for full text. neighbors excludes pending proposals unless include_proposed=true. suggest links / set up links / propose connections / link these → suggest_link or merge_subgraph preview (queue for user review — do not apply unless user explicitly asks).",
     "compare_papers": "Side-by-side comparison of 2–3 saved Zotero papers (methods, results, etc.). Reuses section extracts and DR summaries. 4+ papers auto-start Deep Research compare mode. Prefer over looping search_knowledge reads.",
     "web_fetch": "Fetch and read the text content of a specific URL/website the user names (e.g. 'check example.com', 'open this link'). Use when you have a concrete URL; for open-ended lookups use web_search instead.",
     "read_file": "Read a file from disk and return its contents. View source code, config files, logs.",
@@ -94,8 +98,8 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "list_sessions": "List all chats with their metadata (the UI calls these 'chats'). Use for 'list my chats', 'rename all my chats' (list first, then manage_session to rename each).",
     "send_to_session": "Send a message to another chat. Cross-chat communication.",
     "search_chats": "Search through chat history across all sessions.",
-    "ui_control": "Control the UI and toggle tools on/off. Use this to turn off / turn on / disable / enable individual tools and features: shell (bash), search (web), research, browser, documents, incognito. Open panels (documents library, gallery, sessions, notes, memories/brain, skills, settings, cookbook) via `open_panel <name>`. Also switches between chat/agent modes, changes the current model, and applies/creates themes.",
-    "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
+    "ui_control": "Control the UI and toggle tools on/off. Use this to turn off / turn on / disable / enable individual tools and features: shell (bash), search (web), research, browser, documents, incognito. Open panels (documents library, gallery, sessions, notes/todos, memories/brain, skills, settings, cookbook, calendar, research, compare, tasks, links/knowledge, theme) via `open_panel <name>`. Also switches between chat/agent modes, changes the current model, and applies/creates themes.",
+    "manage_notes": "Create and manage notes/checklists AND the Todos board (list_one_thing/add_one_thing/toggle_one_thing). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. Notes: natural-language due_date fires a reminder (do NOT also create a calendar event). Todos: title in text/title, optional details, horizon focus/build/aim/misc, priority critical/elevated/steady. focus/build REQUIRE parent_ids (list parent horizon first: focus→build, build→aim). Completing a todo proposes a Confirm/Dismiss toast — do not claim done until confirmed. Do NOT use manage_memory for note content.",
     "manage_calendar": "Calendar event management: list, create, update, delete. Each event can carry a tag/category (event_type — work/personal/health/travel/meal/social/admin/other) and importance (low/normal/high/critical). Use ISO datetimes; supports all-day events. For event reminders/alarms, pass reminder_minutes; this creates the Notes reminder, so do not also call manage_notes for the same reminder.",
     "download_model": "Download a HuggingFace model to a local or remote server. Specify repo_id (e.g. 'Qwen/Qwen3-8B'), optional server host, and optional include filter for specific files.",
     "serve_model": "Start serving a model with vLLM, SGLang, llama.cpp, Ollama, or Diffusers. For image/inpainting/diffusion use python3 scripts/diffusion_server.py --model <repo> --port 8100. After launch, call list_served_models for readiness/errors and retry suggestions.",
@@ -280,8 +284,22 @@ class ToolIndex:
         # "tell me ..." request and crowded out relevant tools (#1707).
         frozenset({"calendar", "event", "meeting", "schedule", "appointment"}):
             {"manage_calendar"},
-        frozenset({"note", "todo", "reminder", "remind", "checklist", "remember to"}):
+        frozenset({"note", "todo", "todos", "reminder", "remind", "checklist", "remember to",
+                   "add a todo", "add todo", "my todos"}):
             {"manage_notes"},
+        # Persistent memory (identity/preferences) — distinct from "remember to" notes.
+        frozenset({"remember that", "my name is", "call me", "add a memory",
+                   "forget that", "stored memories", "my memories", "what do you remember"}):
+            {"manage_memory"},
+        frozenset({"add a skill", "list skills", "my skills", "manage skills",
+                   "create a skill", "edit skill", "publish skill"}):
+            {"manage_skills", "ui_control"},
+        frozenset({"generate an image", "generate image", "draw a", "make a picture",
+                   "create an image", "make an image", "draw me", "paint a"}):
+            {"generate_image"},
+        frozenset({"search chats", "search my chats", "find the conversation",
+                   "did we discuss", "conversation about", "find chat about"}):
+            {"search_chats"},
         # Chat/session management. "rename" alone maps to documents below, so a
         # request like "rename the last 12 sessions/chats" needs these session
         # keywords to surface the right tools (NOT app_api — /api/sessions is
@@ -328,7 +346,12 @@ class ToolIndex:
                    "related task", "related document", "cross-entity", "show links",
                    "browse links", "how does this relate", "parent goal", "goal hierarchy",
                    "one thing", "intermediate goal", "long horizon", "my todos today",
-                   "what do i know about"}):
+                   "what do i know about",
+                   "suggest links", "suggest a link", "suggest link",
+                   "propose links", "propose a link", "propose connections",
+                   "set up links", "setup links", "set up a link",
+                   "link these", "connect these", "connect them", "link them",
+                   "suggested links", "graph links"}):
             {"search_knowledge", "manage_notes"},
         frozenset({"compare papers", "compare these papers", "side by side", "side-by-side",
                    "contrast methods", "compare methods", "compare results", "how do these papers",
@@ -345,7 +368,9 @@ class ToolIndex:
                    "preference", "preferences", "configure"}):
             {"manage_settings", "ui_control"},
         # Managing EXISTING research in the Library — open/read/find/delete.
-        frozenset({"my research", "the research", "research on", "open research",
+        # "open research" / "show research" are panel intents (ui_control) —
+        # kept out of this set so they don't force manage/trigger instead.
+        frozenset({"my research", "the research", "research on",
                    "read research", "find research", "delete research",
                    "remove research", "list research", "my reports", "the report",
                    "saved research", "research library", "past research",
@@ -410,10 +435,15 @@ class ToolIndex:
                    "switch model", "change model", "set mode", "agent mode", "chat mode",
                    "open library", "open documents", "open gallery",
                    "open settings", "open memories", "open memory",
-                   "open skills", "open notes", "open chats", "open sessions",
+                   "open skills", "open notes", "open todos", "show todos",
+                   "open chats", "open sessions",
+                   "open calendar", "open research", "show research",
+                   "open compare", "open tasks", "open links", "open knowledge",
+                   "open theme", "show theme",
                    "show library", "show gallery", "show settings",
                    "show memory", "show memories", "show skills", "show notes",
-                   "show chats", "show sessions", "show documents"}):
+                   "show chats", "show sessions", "show documents",
+                   "show calendar", "show tasks", "show links", "show compare"}):
             {"ui_control"},
         # Document creation intent
         frozenset({"write a", "create a doc", "draft", "compose", "poem", "story",
@@ -441,6 +471,13 @@ class ToolIndex:
         for keywords, tools in self._KEYWORD_HINTS.items():
             if any(re.search(rf"\b{re.escape(kw)}\b", ql) for kw in keywords):
                 base.update(tools)
+        # "open/show research" is a panel intent — bare "research" also matches
+        # the deep-research keyword set, so strip start/manage tools and keep
+        # ui_control so the model opens the Research overlay instead.
+        if re.search(r"\b(?:open|show)\s+research\b", ql):
+            base.discard("trigger_research")
+            base.discard("manage_research")
+            base.add("ui_control")
         # Structural scheduling-intent detection — typo-resilient (the literal
         # keyword "every day" misses "every dya"). Catches "every <word>",
         # daily/nightly/etc., or a clock time like "at 7:30 am" / "7am", which

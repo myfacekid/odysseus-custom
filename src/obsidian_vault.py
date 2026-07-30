@@ -954,7 +954,11 @@ def _execute_one_thing_actions(action: str, args: dict, owner: str) -> Optional[
             return {"output": format_agent_list(tasks), "exit_code": 0}
 
         if action == "add_task":
-            text = (args.get("text") or args.get("content") or args.get("title") or "").strip()
+            text = (args.get("text") or args.get("title") or "").strip()
+            details = (args.get("details") or args.get("content") or "").strip() or None
+            if not text and details:
+                text = details
+                details = None
             if not text:
                 return {"output": "text is required for add_task", "exit_code": 1}
             task = add_task(
@@ -964,6 +968,7 @@ def _execute_one_thing_actions(action: str, args: dict, owner: str) -> Optional[
                 horizon=args.get("horizon") or "focus",
                 priority=args.get("priority") or "steady",
                 due_date=args.get("due_date"),
+                details=details,
             )
             after_task_change(owner)
             return {
@@ -975,9 +980,31 @@ def _execute_one_thing_actions(action: str, args: dict, owner: str) -> Optional[
             }
 
         if action == "toggle_task":
+            from src.one_thing import get_task, HORIZON_LABELS
+
             tid = (args.get("id") or args.get("task_id") or "").strip()
             if not tid:
                 return {"output": "id is required for toggle_task", "exit_code": 1}
+            existing = get_task(db, owner, tid)
+            if not existing:
+                return {"output": f"Task not found: {tid}", "exit_code": 1}
+            confirmed = bool(args.get("confirmed") or args.get("confirm"))
+            if (not existing.done) and (not confirmed):
+                return {
+                    "action": "propose_complete",
+                    "task_id": existing.id,
+                    "text": existing.text,
+                    "details": existing.details,
+                    "horizon": existing.horizon,
+                    "horizon_label": HORIZON_LABELS.get(existing.horizon, existing.horizon),
+                    "priority": existing.priority,
+                    "output": (
+                        f"Proposed marking done: {existing.text} (id: {existing.id[:8]}). "
+                        "Waiting for the user to Confirm or Dismiss in the UI — "
+                        "do not claim the task is complete yet."
+                    ),
+                    "exit_code": 0,
+                }
             task = toggle_task(db, owner, tid)
             if not task:
                 return {"output": f"Task not found: {tid}", "exit_code": 1}

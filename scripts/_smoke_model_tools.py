@@ -30,7 +30,6 @@ BENIGN = {
     "python": {"code": "print('smoketest_ok')"},
     "web_search": {"query": "wikipedia"},
     "search_zotero": {"action": "list_collections"},
-    "search_vault": {"action": "list"},
     "search_knowledge": {"action": "search", "query": "test"},
     "compare_papers": {"paper_keys": ["__nope_a__", "__nope_b__"]},
     "web_fetch": {"url": "example.com"},

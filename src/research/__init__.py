@@ -1,4 +1,4 @@
-"""Odysseus Deep Research — LDR integration layer (LangGraph migration)."""
+"""Nobody Deep Research — LDR integration layer (LangGraph migration)."""
 
 from src.research.ldr_availability import ldr_stack_available, research_engine_mode
 

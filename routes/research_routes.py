@@ -300,20 +300,25 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
                 query = d.get("query", "")
                 if search and search.lower() not in query.lower():
                     continue
-                sources = d.get("sources", [])
+                sources = d.get("sources", []) or []
                 seed_papers = d.get("seed_papers") or []
                 breakdown = d.get("source_breakdown") or {}
-                if not breakdown and d.get("evidence_registry"):
+                registry = d.get("evidence_registry") or {}
+                registry_sources = registry.get("sources") if isinstance(registry, dict) else None
+                if not breakdown and registry:
                     try:
                         from src.research_graph import compute_source_breakdown
                         breakdown = compute_source_breakdown(d)
                     except Exception:
                         breakdown = {}
+                source_count = len(sources)
+                if source_count == 0 and isinstance(registry_sources, list):
+                    source_count = len(registry_sources)
                 items.append({
                     "id": p.stem,
                     "query": query,
                     "category": d.get("category") or "",
-                    "source_count": len(sources),
+                    "source_count": source_count,
                     "source_breakdown": breakdown,
                     "seed_count": len(seed_papers),
                     "research_mode": d.get("research_mode") or "literature_review",
@@ -503,7 +508,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
 
         user = require_privilege(request, "can_use_research")
         if user == "internal-tool":
-            tool_owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            tool_owner = (request.headers.get("X-Nobody-Owner") or "").strip()
             if tool_owner and tool_owner not in {"internal-tool", "api", "demo", "system"}:
                 user = tool_owner
         query = (body.query or "").strip()
@@ -542,7 +547,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         from src.auth_helpers import require_privilege
         user = require_privilege(request, "can_use_research")
         if user == "internal-tool":
-            tool_owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            tool_owner = (request.headers.get("X-Nobody-Owner") or "").strip()
             if tool_owner and tool_owner not in {"internal-tool", "api", "demo", "system"}:
                 auth_mgr = getattr(request.app.state, "auth_manager", None)
                 if auth_mgr is not None and getattr(auth_mgr, "is_configured", False):
@@ -632,7 +637,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
 
         user = require_privilege(request, "can_use_research")
         if user == "internal-tool":
-            tool_owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            tool_owner = (request.headers.get("X-Nobody-Owner") or "").strip()
             if tool_owner and tool_owner not in {"internal-tool", "api", "demo", "system"}:
                 user = tool_owner
         q = (search or "").strip()
@@ -677,7 +682,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
 
         user = require_privilege(request, "can_use_research")
         if user == "internal-tool":
-            tool_owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            tool_owner = (request.headers.get("X-Nobody-Owner") or "").strip()
             if tool_owner and tool_owner not in {"internal-tool", "api", "demo", "system"}:
                 user = tool_owner
         refs = [r.strip() for r in (body.refs or []) if (r or "").strip()]
@@ -756,11 +761,21 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         raw_findings = research_handler.get_raw_findings(session_id) or []
         task = research_handler._active_tasks.get(session_id, {})
         _researcher = task.get("researcher")
+        evidence_registry = (
+            task.get("evidence_registry")
+            or (
+                _researcher.evidence_registry.to_dict()
+                if _researcher and getattr(_researcher, "evidence_registry", None)
+                else None
+            )
+        )
         payload = {
             "result": result,
             "sources": sources,
             "raw_findings": raw_findings,
             "category": "",
+            "evidence_registry": evidence_registry or {},
+            "raw_report": task.get("raw_report") or result or "",
             "verification": (
                 getattr(_researcher, "verification_summary", None)
                 if _researcher else task.get("verification")

@@ -15,7 +15,7 @@ ACADEMIC_ENGINE_NAMES: Tuple[str, ...] = (
 # IterResearch similar-paper fallback: keyword search on these engines.
 DEFAULT_SIMILAR_ENGINES: Tuple[str, ...] = ("openalex", "semantic_scholar")
 
-# Odysseus panel search_provider → LDR meta-search tool (web bridge).
+# Nobody panel search_provider → LDR meta-search tool (web bridge).
 ODY_WEB_TO_LDR: Dict[str, str] = {
     "searxng": "searxng",
     "brave": "brave",
@@ -27,6 +27,6 @@ ODY_WEB_TO_LDR: Dict[str, str] = {
 }
 
 
-def odysseus_web_to_ldr_tool(search_provider: str | None) -> str:
+def nobody_web_to_ldr_tool(search_provider: str | None) -> str:
     key = (search_provider or "searxng").strip().lower()
     return ODY_WEB_TO_LDR.get(key, key or "searxng")

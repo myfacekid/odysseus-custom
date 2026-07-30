@@ -6,7 +6,6 @@ from src.research_evidence import (
     source_id_for_finding,
     split_references_section,
 )
-from src.deep_research import DeepResearcher
 
 
 def _web_finding(url: str, title: str, **extra):
@@ -150,22 +149,6 @@ def test_validate_and_repair_report_rebuilds_references():
     assert "[1]" in repaired and "Alpha" in repaired
     assert "[2]" in repaired and "Beta" in repaired
     assert extract_citation_nums(repaired) <= {1, 2}
-
-
-def test_structured_fallback_includes_references():
-    r = DeepResearcher.__new__(DeepResearcher)
-    r.evidence_registry = EvidenceRegistry()
-    findings = [
-        _web_finding("https://ex.com/a", "Diarization basics"),
-        _web_finding("https://ex.com/b", "x-vectors"),
-    ]
-    report = r._fallback_report("how does speaker diarization work", findings)
-    assert "speaker diarization" in report.lower()
-    assert "Diarization basics" in report
-    assert "x-vectors" in report
-    assert "## References" in report
-    assert "[1]" in report and "[2]" in report
-    assert "No information could be gathered" not in report
 
 
 def test_split_references_section():

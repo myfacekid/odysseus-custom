@@ -35,7 +35,7 @@ import { initActiveProjectChip } from './activeChip.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
 const esc = uiModule.esc;
-const PROJECT_ONBOARDING_KEY = 'odysseus_project_onboarding_seen';
+const PROJECT_ONBOARDING_KEY = 'nobody_project_onboarding_seen';
 
 let _projects = [];
 let _openProjectId = null;

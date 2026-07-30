@@ -1,7 +1,7 @@
 """
 agent_loop.py
 
-Streaming agent loop for odysseus-ui.
+Streaming agent loop for nobody-ui.
 Wraps stream_llm() with multi-round tool execution.
 The LLM decides when to use tools by writing fenced code blocks.
 """
@@ -76,7 +76,8 @@ _AGENT_RULES = """\
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add.
-- "Create/add/write a note" / in-app todos / "remind me to X at <time>" → use `manage_notes` (checklist, reminders). Do NOT store note content in `manage_memory`.
+- "Create/add/write a note" / in-app todos / "remind me to X at <time>" → use `manage_notes` (checklist, reminders). Do NOT store note content in `manage_memory`. For Todos board Immediate/Intermediate tasks, list parent goals then pass `parent_ids` (focus→build→aim).
+- Cross-entity / "suggest links" / "set up links" → `search_knowledge` with `suggest_link` (or `merge_subgraph` preview for batches). Do not narrate edges in prose.
 - "Do X every morning / daily / on a schedule / automatically" (e.g. "summarize my inbox every morning") → this is a request to CREATE A SCHEDULED TASK, not to do X once right now. Call `manage_tasks` with action=create (prompt = what to do, schedule + cron/time). Do NOT just perform the action inline this turn — the user wants it to recur. After creating, return a clickable `[Task name](#task-<id>)` link and tell them it'll run on schedule and show in the Tasks panel. If you also want to show a sample of this run, do that AFTER creating the task, not instead of it.
 
 ## UI conventions
@@ -115,16 +116,16 @@ _API_AGENT_RULES = """\
 - AFTER A TOOL FAILS, DO NOT GO SILENT. The user expects a follow-up: retry with a fix, run a diagnostic (`tail`, `ls`, `which`), or explicitly tell them what didn't work and what you'll try next. Failure is not a stopping condition.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
-- "Create/add/write a note" / quick reminders / "remind me at 3pm" → use `manage_notes`. For **One Thing** horizons (this week / ~3 months / this year with priority + due date) → use `manage_notes` with `action=list_one_thing|add_one_thing|toggle_one_thing`. Horizons: `focus`=this week, `build`=~3 months, `aim`=this year. Priorities: `critical`, `elevated`, `steady`. Do NOT store notes in `manage_memory`.
+- "Create/add/write a note" / quick reminders / "remind me at 3pm" → use `manage_notes`. For **Todos board / One Thing** horizons (Immediate / Intermediate / Long Horizon with priority + due date) → use `manage_notes` with `action=list_one_thing|add_one_thing|toggle_one_thing`. Horizons: `focus`=Immediate Tasks, `build`=Intermediate Goals, `aim`=Long Horizon, `misc`. Priorities: `critical`, `elevated`, `steady`. Task title goes in `text`/`title`; optional longer body in `details`. **Hierarchy:** `focus` must link to a `build` parent and `build` to an `aim` parent — call `list_one_thing` on the parent horizon first, then `add_one_thing` with `parent_ids` (8-char prefixes OK). `aim`/`misc` need no parents. **Marking complete** via `toggle_one_thing` shows the user a Confirm/Dismiss toast — do NOT claim the task is done until they confirm (or until you call again with `confirmed=true` after they said yes). Do NOT store notes in `manage_memory`.
 - New documents, articles, files, or long-form content for the Library → `create_document` (appears in Documents library + Links). NOT `write_file` or markdown-on-disk tools.
 - Cross-entity context ("what connects to X", tasks + docs + memories + papers together) → call `search_knowledge` (search/read/neighbors). Prefer over calling manage_documents + manage_memory + list_tasks separately. Use `types: ["paper"]` for synced Zotero items (Links → Papers tab).
 - **Reading a saved paper** (user asks to read/summarize/analyze a library paper, or you have a `paper:<zotero_key>` id) → **Tier 1 first:** `search_knowledge` `action=read` on that id (abstract + metadata; **includes cached Deep Research summary** when the paper was researched before). **Tier 2:** `section=methods|introduction|results|discussion` for one PDF section. **Tier 3:** `include_pdf=true` when abstract/section is insufficient. Do **NOT** `web_search` the title/DOI. Only `web_search` if PDF extraction failed **and** the user asks for outside sources.
 - **Compare 2–3 saved papers** (methods, results, limitations side-by-side) → `compare_papers` with `paper_keys` and `focus`. Uses section extracts + cached DR summaries — do **NOT** loop multiple `search_knowledge` reads unless compare fails. **4+ papers** → same tool auto-starts Deep Research `compare` mode.
-- When two graph items clearly relate (documents, tasks, memories, skills, papers) → call `search_knowledge` with `action=suggest_link`, a typed `kind` (`derives_from`, `refutes`, `supports`, `relates`, `depends_on`), and a brief `reason`. The user gets a notification to link or dismiss — do NOT call `link` unless they explicitly asked to connect them. Use graph ids like `document:<uuid>`, `paper:<zotero_key>`, or `task:<uuid>` from search_knowledge hits. **`refutes` edges are inhibitory** — follow when looking for contradictions, not as supporting evidence. For **3+ edges** from `compare_papers` / Deep Research / batch compare: use `merge_subgraph` **phase=preview** only — the UI queues proposals for user review; never call `merge_subgraph` phase=apply unless the user explicitly asks to save/accept links.
+- **"Suggest links" / "set up links" / "propose connections" / "link these" / "connect these"** → resolve node ids via `search_knowledge` search/read if needed, then call `suggest_link` (1–2 edges) with typed `kind` + `reason`, or `merge_subgraph` **phase=preview** for 3+. Do **NOT** answer with a prose list of suggested edges — the tool queues a Confirm toast / Connections inbox. Default to `suggest_link`; do **NOT** call `action=link` or `merge_subgraph` phase=apply unless the user explicitly asked to connect/save/accept. Use graph ids like `document:<uuid>`, `paper:<zotero_key>`, or `task:<uuid>`. **`refutes` edges are inhibitory**. Anti-pattern: inventing markdown `#document-` anchors instead of proposing graph edges. (`search_vault` is disabled — Obsidian vault linking was removed.)
 - "Disable/turn off/enable/turn on <tool>" (shell, search, research, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, search→web, deepresearch→research, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
 - "Research X" / "do research on X" / "look into Y" / "deep dive on Z" → call `trigger_research` with `topic`. This starts a live job that appears in the Deep Research sidebar (streams progress + final report). **Do NOT use `web_search` for these** — saw the agent do a plain web_search for "do research on X" when the user wanted the deep-research job. "research X" is a deep-research request, not a quick lookup. (web_search is only for a single quick fact mid-task.) Do NOT POST /api/research/start via app_api either — blocked. After starting, tell the user it's running in the Deep Research sidebar. Only if the user explicitly wants it inline/quick should you fall back to web_search.
 - "My Zotero library" / "my papers" / "read this paper" / saved sources → `search_knowledge` `action=read` with `paper:<key>` (abstract first). For full PDF: same call with `include_pdf=true`. Alternate: `search_zotero` with `zotero_key` (PDF) or broad search without PDF. Do **NOT** `web_search` to read papers in the user's library. NOT trigger_research for a single saved paper.
-- "Open/show <panel>" (documents, library, gallery, sessions, brain/memories, skills, settings, notes, cookbook) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open cookbook" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for.
+- "Open/show <panel>" (documents, library, gallery, sessions, brain/memories, skills, settings, notes/todos, cookbook, calendar, research, compare, tasks, links/knowledge, theme) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook, todos→notes, knowledge→links. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes/todos" / "open documents" / "open cookbook" / "open research" / "open links" means OPEN THE PANEL — call `ui_control`, NOT a manage/list/trigger tool. The "manage_*" tools list contents in chat; `ui_control open_panel` opens the visual modal the user is asking for. "Open research" ≠ start research and ≠ read a saved report.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add.
 - You are running INSIDE Nobody — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
 - After `list_sessions`, preserve the returned `[Chat title](#session-<id>)` links in your user-facing reply. Do not rewrite chat lists as plain tables with non-clickable titles.
@@ -213,57 +214,6 @@ Side-by-side comparison of **2–3** saved papers at section-level cost. Pulls P
 {"paper_keys": ["paper:AFOLD001", "paper:ESMF001", "paper:OTHER01", "paper:FOURTH1"], "focus": "results"}
 ```
 **4+ papers** — tool auto-starts Deep Research compare mode (async report in sidebar). NOT trigger_research for ≤3 papers when compare_papers suffices.""",
-
-    "search_vault": """\
-```search_vault
-{"action": "list", "folder": "Meetings"}
-```
-List folders and markdown notes under a vault path.
-
-```search_vault
-{"action": "read", "path": "Daily Notes/2026-06-01.md"}
-```
-Read one note by vault-relative path.
-
-```search_vault
-{"action": "search", "query": "epistasis", "folder": "Notes", "limit": 10}
-```
-Hybrid search: keywords, YAML tags/frontmatter, semantic index, and native `[[wikilink]]` graph neighbors. Use #tag for tag search. No Obsidian app required.
-
-```search_vault
-{"action": "follow", "path": "Epistasis and Influenza.md", "depth": 1}
-```
-Read a note AND follow its `[[wikilinks]]` — returns a link map (outgoing/backlinks) plus connected note bodies. Use this to explore topic clusters before writing.
-
-```search_vault
-{"action": "backlinks", "path": "Epistasis and Influenza.md"}
-```
-List notes linking to/from a note.
-
-```search_vault
-{"action": "create", "folder": "Notes", "title": "New Topic", "content": "# New Topic\\n\\nSee also [[Epistasis and Influenza]].", "tags": ["research"]}
-```
-Create a new markdown note. Include `[[wikilinks]]` in content to fuse with the graph.
-
-```search_vault
-{"action": "append", "path": "Meetings/standup.md", "content": "- [ ] Follow up on [[Epistasis and Influenza]]"}
-```
-Append markdown to an existing note.
-
-```search_vault
-{"action": "append_daily", "content": "- Met with lab about epistasis"}
-```
-Append to today's daily note (creates if missing).
-
-```search_vault
-{"action": "patch", "path": "Notes/foo.md", "find": "old text", "replace": "new text with [[Related Note]]"}
-```
-Targeted find/replace in a note (read first). Multiple edits: `"edits": [{"find":"...","replace":"..."}]`.
-
-```search_vault
-{"action": "link", "from": "Daily Notes/2026-06-01.md", "to": "Epistasis and Influenza"}
-```
-Insert a wikilink from one note to another — builds the knowledge graph. NOT manage_notes or write_file.""",
 
     "search_knowledge": """\
 **Semantic edge vocabulary** (always use on suggest_link / explicit link):
@@ -461,7 +411,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
 ```manage_notes
 {"action": "add", "title": "<short todo>", "due_date": "<natural language or ISO datetime>"}
 ```
-Notes, checklists, AND user reminders. Use this for "create/add/write a note", todos, checklists, and "remind me to X at <time>" — never use memory for note content. For reminders, pair a short `title` (what to do) with a `due_date` (when). `due_date` accepts natural language ("tomorrow at 1pm", "in 2 hours", "next monday 9am") or ISO ("2026-05-12T13:00:00"). Actions: `list`, `add` (title, content OR items:[{text,done}], note_type, color, label, due_date), `update`, `delete`, `toggle_item`.""",
+Notes, checklists, reminders, AND the Todos board. Use for "create/add/write a note", checklists, "remind me to X at <time>", and Todos (`list_one_thing` / `add_one_thing` / `toggle_one_thing`). Reminders: short `title` + natural-language `due_date`. Todos: `text`/`title` + optional `details`, `horizon` (`focus`/`build`/`aim`/`misc`), `priority` (`critical`/`elevated`/`steady`), `due_date` (YYYY-MM-DD), and for focus/build **`parent_ids`** (list parent horizon first: focus→build→aim). Completing a todo proposes a UI Confirm toast — do not claim done until confirmed.""",
     "manage_calendar": """\
 ```manage_calendar
 {"action": "create_event", "summary": "<event title>", "dtstart": "<natural language or ISO datetime>"}
@@ -478,7 +428,7 @@ If the user asks for a reminder/alarm before the event, pass `reminder_minutes` 
     "send_to_session": "- ```send_to_session``` — Send a message to another session. Line 1 = session_id, rest = message. Use for orchestrating work across sessions.",
     "search_chats": "- ```search_chats``` — Search across all chat history. Use when user asks 'did we discuss X?' or 'find the conversation about Y'.",
     "pipeline": "- ```pipeline``` — Run a multi-step AI pipeline. Args (JSON) with ordered steps, each specifying a model and prompt. Use for complex workflows.",
-    "ui_control": "- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, web/search, research, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, sessions, notes, memories/brain, skills, settings, cookbook), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). \"open documents\" / \"open library\" / \"show gallery\" / \"open notes\" / \"open cookbook\" all map to `open_panel <name>`. Theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute.",
+    "ui_control": "- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, web/search, research, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, sessions, notes/todos, memories/brain, skills, settings, cookbook, calendar, research, compare, tasks, links/knowledge, theme), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). \"open documents\" / \"open library\" / \"show gallery\" / \"open notes/todos\" / \"open cookbook\" / \"open research\" / \"open links\" all map to `open_panel <name>`. Theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute.",
     "list_served_models": "- ```list_served_models``` — Show what the Cookbook (LLM-serving subsystem) is currently running. NO args. Use this for ANY 'what's running' / 'what's serving' / 'show my cookbook' / 'is anything up' query. DO NOT shell out (`ps aux`, `docker ps`, etc.) — this tool is the source of truth. Failed serve tasks include recent logs plus diagnosis/retry suggestions; use those suggestions to call `serve_model` again with an adjusted command when appropriate.",
     "stop_served_model": "- ```stop_served_model``` — Stop a running model server. Args (JSON): {\"session_id\": \"<from list_served_models>\"}. Use for 'kill my cookbook' / 'stop the model' / 'shut down vLLM'.",
     "download_model": "- ```download_model``` — Download a HuggingFace model. Args (JSON): {\"repo_id\": \"Qwen/Qwen3-8B\", \"host\": \"user@gpu-box\"?, \"include\": \"*Q4_K_M*\"?}.",
@@ -631,8 +581,7 @@ _API_HOSTS = frozenset([
     "localhost", "127.0.0.1", "host.docker.internal",
 ])
 _MCP_KEYWORDS = frozenset(["browse", "browser", "website", "calendar", "event", "email",
-                           "gmail", "screenshot", "navigate", "click", "miniflux", "rss", "feed",
-                           "obsidian", "vault", "wikilink", "daily note", "meeting transcript"])
+                           "gmail", "screenshot", "navigate", "click", "miniflux", "rss", "feed"])
 _ADMIN_SCHEMA_NAMES = frozenset([
     "manage_session", "manage_skills", "manage_tasks",
     "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens",
@@ -2236,7 +2185,7 @@ async def stream_agent_loop(
             # first so the <!-- SOURCES:…--> marker is found and stripped even
             # when the result doesn't carry a "results" or "stdout" key.
             _src_text = result.get("output") or result.get("results") or result.get("stdout") or ""
-            if block.tool_type in ("web_search", "search_zotero", "search_vault") and _src_text:
+            if block.tool_type in ("web_search", "search_zotero") and _src_text:
                 _src_marker = "<!-- SOURCES:"
                 _src_idx = _src_text.find(_src_marker)
                 if _src_idx >= 0:
@@ -2284,6 +2233,21 @@ async def stream_agent_loop(
                 if link_project_id:
                     _link_payload["project_id"] = link_project_id
                 yield f'data: {json.dumps(_link_payload)}\n\n'
+
+            if (
+                block.tool_type == "manage_notes"
+                and result.get("action") == "propose_complete"
+            ):
+                _todo_payload = {
+                    "type": "todo_complete_suggestion",
+                    "task_id": result.get("task_id"),
+                    "text": result.get("text"),
+                    "details": result.get("details"),
+                    "horizon": result.get("horizon"),
+                    "horizon_label": result.get("horizon_label"),
+                    "priority": result.get("priority"),
+                }
+                yield f'data: {json.dumps(_todo_payload)}\n\n'
 
             if block.tool_type == "search_knowledge" and result.get("action") == "merge_subgraph":
                 rows = result.get("rows") or []
@@ -2372,6 +2336,18 @@ async def stream_agent_loop(
                 if link_project_id:
                     _ls["project_id"] = link_project_id
                 tool_output_data["link_suggestion"] = _ls
+            if (
+                block.tool_type == "manage_notes"
+                and result.get("action") == "propose_complete"
+            ):
+                tool_output_data["todo_complete_suggestion"] = {
+                    "task_id": result.get("task_id"),
+                    "text": result.get("text"),
+                    "details": result.get("details"),
+                    "horizon": result.get("horizon"),
+                    "horizon_label": result.get("horizon_label"),
+                    "priority": result.get("priority"),
+                }
             if block.tool_type == "search_knowledge" and result.get("action") == "merge_subgraph":
                 rows = result.get("rows") or []
                 if rows:

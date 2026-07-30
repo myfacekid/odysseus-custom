@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-  Odysseus - native Windows launcher (no Docker).
+  Nobody - native Windows launcher (no Docker).
 
   One command to: create a virtualenv, install dependencies, run first-time
   setup (prints an admin password on first run), and start the server.
@@ -50,7 +50,7 @@ function Find-GitBash {
     return $null
 }
 
-# 1. Locate a Python interpreter (3.11+ required)
+# 1. Locate a Python interpreter (3.12–3.13 required for Deep Research / LDR)
 Write-Step "Checking for Python"
 function Get-PythonVersionText($launcher, $launcherArgs) {
     try {
@@ -60,15 +60,23 @@ function Get-PythonVersionText($launcher, $launcherArgs) {
     }
 }
 
+function Test-SupportedPythonVersion($ver) {
+    if (-not $ver) { return $false }
+    $versionParts = $ver.Split('.')
+    $major = [int]$versionParts[0]
+    $minor = [int]$versionParts[1]
+    return ($major -eq 3 -and $minor -ge 12 -and $minor -le 13)
+}
+
 $pyExe = $null
 $pyArgs = @()
 $pyVersion = $null
 
 $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
 if ($pyLauncher) {
-    foreach ($v in @("-3.13", "-3.12", "-3.11")) {
+    foreach ($v in @("-3.13", "-3.12")) {
         $ver = Get-PythonVersionText $pyLauncher.Source @($v)
-        if ($ver) {
+        if (Test-SupportedPythonVersion $ver) {
             $pyExe = $pyLauncher.Source
             $pyArgs = @($v)
             $pyVersion = $ver
@@ -81,20 +89,15 @@ if (-not $pyExe) {
     $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
     if ($pythonCmd) {
         $ver = Get-PythonVersionText $pythonCmd.Source @()
-        if ($ver) {
-            $versionParts = $ver.Split('.')
-            $major = [int]$versionParts[0]
-            $minor = [int]$versionParts[1]
-            if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 11)) {
-                $pyExe = $pythonCmd.Source
-                $pyVersion = $ver
-            }
+        if (Test-SupportedPythonVersion $ver) {
+            $pyExe = $pythonCmd.Source
+            $pyVersion = $ver
         }
     }
 }
 
 if (-not $pyExe) {
-    Fail "Couldn't find Python 3.11+ for Windows setup. Install Python 3.11+ (or open the Python launcher with 'py -3.11') from https://www.python.org/downloads/, then re-run this script."
+    Fail "Couldn't find Python 3.12–3.13 for Windows setup. Install Python 3.12 or 3.13 (or open the Python launcher with 'py -3.12') from https://www.python.org/downloads/, then re-run this script."
 }
 $pythonLabel = ("Using Python {0}: {1} {2}" -f $pyVersion, $pyExe, ($pyArgs -join ' ')).TrimEnd()
 Write-Host $pythonLabel
@@ -130,7 +133,7 @@ if (-not (Find-GitBash)) {
 }
 
 # 6. Start the server (use `python -m uvicorn` - bare `uvicorn` may not be on PATH)
-Write-Step ("Starting Odysseus at http://{0}:{1}" -f $BindHost, $Port)
+Write-Step ("Starting Nobody at http://{0}:{1}" -f $BindHost, $Port)
 Write-Host "Press Ctrl+C to stop."
 Write-Host ""
 & $venvPy -m uvicorn app:app --host $BindHost --port $Port

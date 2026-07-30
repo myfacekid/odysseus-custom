@@ -1,4 +1,4 @@
-"""Odysseus academic synthesis on EvidenceRegistry (LDR decision B)."""
+"""Nobody academic synthesis on EvidenceRegistry (LDR decision B)."""
 from __future__ import annotations
 
 import logging
@@ -93,7 +93,7 @@ async def synthesize_academic_report(
     max_report_tokens: int = 16384,
     deep_read_context: str = "",
 ) -> str:
-    """Produce the final Odysseus academic report from gathered evidence."""
+    """Produce the final Nobody academic report from gathered evidence."""
     length_spec = REPORT_LENGTH_SPECS.get(
         report_length if report_length in REPORT_LENGTH_SPECS else "standard",
         REPORT_LENGTH_SPECS["standard"],
@@ -158,6 +158,6 @@ async def synthesize_academic_report(
         repaired, _warnings = registry.validate_and_repair_report(result)
         return repaired
     except Exception as exc:
-        logger.error("LDR Odysseus synthesis failed: %s", exc)
+        logger.error("LDR Nobody synthesis failed: %s", exc)
         repaired, _warnings = registry.validate_and_repair_report(draft_report)
         return repaired

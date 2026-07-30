@@ -232,6 +232,11 @@ function initializeEventListeners() {
     document.querySelectorAll(
       '.skill-kebab-menu, .note-reminder-menu, .task-dropdown, .doclib-card-dropdown, .msg-overflow-menu'
     ).forEach(m => { if (m !== except) m.remove(); });
+    const exportMenuEl = el('export-dropdown-menu');
+    const exportBtn = el('export-dl-btn');
+    if (exportBtn && exportMenuEl && !exportMenuEl.classList.contains('open')) {
+      exportBtn.setAttribute('aria-expanded', 'false');
+    }
   };
   // Window-opening / nav controls (rail buttons, sidebar tool rows + session
   // rows, section headers) count as "other actions" — dismiss popups when one
@@ -245,11 +250,21 @@ function initializeEventListeners() {
   });
 
   const exportMenu = el('export-dropdown-menu');
+  const _closeExportMenu = () => {
+    if (exportMenu) exportMenu.classList.remove('open');
+    if (exportDlBtn) exportDlBtn.setAttribute('aria-expanded', 'false');
+  };
   if (exportDlBtn && exportMenu) {
-    exportDlBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
+    const _setExportExpanded = (open) => {
+      exportDlBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    const _toggleExportMenu = (e) => {
+      // Inline rename injects an <input> into #current-meta — don't open the menu then.
+      if (exportDlBtn.querySelector('.session-rename-input')) return;
+      if (e?.target?.closest?.('.session-rename-input')) return;
+      e?.stopPropagation?.();
       if (exportMenu.classList.contains('open')) {
-        exportMenu.classList.remove('open');
+        _closeExportMenu();
       } else {
         // Move menu to body so it's not affected by ancestor transforms
         if (exportMenu.parentElement !== document.body) document.body.appendChild(exportMenu);
@@ -258,13 +273,21 @@ function initializeEventListeners() {
         exportMenu.style.left = 'auto';
         exportMenu.style.right = (window.innerWidth - rect.right) + 'px';
         exportMenu.classList.add('open');
+        _setExportExpanded(true);
       }
+    };
+    exportDlBtn.addEventListener('click', _toggleExportMenu);
+    exportDlBtn.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (exportDlBtn.querySelector('.session-rename-input')) return;
+      e.preventDefault();
+      _toggleExportMenu(e);
     });
-    document.addEventListener('click', () => exportMenu.classList.remove('open'));
+    document.addEventListener('click', () => {
+      if (exportMenu.classList.contains('open')) _closeExportMenu();
+    });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && exportMenu.classList.contains('open')) {
-        exportMenu.classList.remove('open');
-      }
+      if (e.key === 'Escape' && exportMenu.classList.contains('open')) _closeExportMenu();
     });
     // Opening the sidebar should dismiss any open popup. Many code paths open
     // the sidebar (toggle button, swipe, keyboard, rail), so watch its class
@@ -277,15 +300,6 @@ function initializeEventListeners() {
         if (_wasHidden && !nowHidden) window.closeAllPopups();
         _wasHidden = nowHidden;
       }).observe(_sidebarEl, { attributes: true, attributeFilter: ['class'] });
-    }
-    // Clicking session name also opens dropdown
-    const currentMeta = el('current-meta');
-    if (currentMeta) {
-      currentMeta.style.cursor = 'pointer';
-      currentMeta.addEventListener('click', (e) => {
-        e.stopPropagation();
-        exportDlBtn.click();
-      });
     }
   }
 
@@ -339,7 +353,7 @@ function initializeEventListeners() {
   if (exportCopyBtn) {
     exportCopyBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      exportMenu.classList.remove('open');
+      _closeExportMenu();
       const transcript = _serializeChatTranscript();
       // A new/empty chat has nothing to copy — don't write an empty string and
       // falsely report "Copied".
@@ -353,7 +367,7 @@ function initializeEventListeners() {
   if (exportPdfBtn) {
     exportPdfBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      exportMenu.classList.remove('open');
+      _closeExportMenu();
       const meta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
       const sessionName = meta ? meta.name : 'Nobody Chat';
       const originalTitle = document.title;
@@ -378,7 +392,7 @@ function initializeEventListeners() {
   if (exportDocBtn) {
     exportDocBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      exportMenu.classList.remove('open');
+      _closeExportMenu();
       try {
         const sessionId = sessionModule.getCurrentSessionId();
         const texts = _serializeChatTranscript();
@@ -405,7 +419,7 @@ function initializeEventListeners() {
   if (exportRenameBtn) {
     exportRenameBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      exportMenu.classList.remove('open');
+      _closeExportMenu();
       let sid = sessionModule.getCurrentSessionId();
       // A brand-new chat has no session id yet — still allow renaming if there's
       // a pending chat (we materialize it on commit so the name sticks).

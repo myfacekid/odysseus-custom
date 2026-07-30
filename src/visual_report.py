@@ -2,7 +2,7 @@
 """
 Generate a self-contained, styled HTML page from deep research results.
 
-Takes the markdown report, sources, and stats produced by DeepResearcher
+Takes the markdown report, sources, and stats produced by Deep Research
 and wraps them in a Blueprint + Modus Operandi Tinted HTML document with:
 - Self-hosted Iosevka / Roboto Mono (same origin /static/fonts)
 - Light default: Modus Operandi Tinted; dark: Modus Vivendi Tinted via prefers-color-scheme
@@ -531,7 +531,7 @@ _TEMPLATE = """\
 (function() {{
   try {{
     var raw = null;
-    try {{ raw = localStorage.getItem('nobody-theme') || localStorage.getItem('odysseus-theme') || localStorage.getItem('oculus-theme'); }} catch (e) {{}}
+    try {{ raw = localStorage.getItem('nobody-theme') || localStorage.getItem('oculus-theme'); }} catch (e) {{}}
     if (!raw) return;
     var t = JSON.parse(raw);
     var s = document.documentElement.style;
@@ -1859,7 +1859,7 @@ body::after {{
     if (!nodeId) return;
     try {{
       if (window.opener && !window.opener.closed) {{
-        window.opener.postMessage({{ type: 'odysseus-open-knowledge', nodeId: nodeId }}, window.location.origin);
+        window.opener.postMessage({{ type: 'nobody-open-knowledge', nodeId: nodeId }}, window.location.origin);
         window.opener.focus();
         return;
       }}
@@ -2077,7 +2077,7 @@ body::after {{
         var url = '/#' + data.session_id;
         var opened = false;
         // The report typically opens in a new tab — if we have access to the
-        // original Odysseus tab, navigate it and close this report tab so the
+        // original Nobody tab, navigate it and close this report tab so the
         // user lands directly in the new chat.
         try {{
           if (window.opener && !window.opener.closed) {{

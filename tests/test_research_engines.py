@@ -12,7 +12,7 @@ from src.research_engines.keyword_search import (
 from src.research_engines.registry import (
     ACADEMIC_ENGINE_NAMES,
     DEFAULT_SIMILAR_ENGINES,
-    odysseus_web_to_ldr_tool,
+    nobody_web_to_ldr_tool,
 )
 from src.research_engines.settings_bridge import academic_engine_overrides
 
@@ -20,7 +20,7 @@ from src.research_engines.settings_bridge import academic_engine_overrides
 def test_registry_constants():
     assert "openalex" in ACADEMIC_ENGINE_NAMES
     assert "semantic_scholar" in DEFAULT_SIMILAR_ENGINES
-    assert odysseus_web_to_ldr_tool("google") == "serper"
+    assert nobody_web_to_ldr_tool("google") == "serper"
 
 
 def test_build_seed_search_queries_title_first():
@@ -51,7 +51,7 @@ def test_preview_to_finding_openalex_shape():
 
 def test_academic_engine_overrides_reads_settings(monkeypatch):
     monkeypatch.setattr(
-        "src.research_engines.settings_bridge._odysseus_settings",
+        "src.research_engines.settings_bridge._nobody_settings",
         lambda: {"openalex_email": "user@example.com", "semantic_scholar_api_key": "s2-key"},
     )
     overrides = academic_engine_overrides()

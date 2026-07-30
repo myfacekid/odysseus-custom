@@ -1,4 +1,4 @@
-"""Create LDR academic search engines with Odysseus settings (Phase L1 Tier B)."""
+"""Create LDR academic search engines with Nobody settings (Phase L1 Tier B)."""
 from __future__ import annotations
 
 import logging
@@ -33,7 +33,8 @@ def create_academic_engine(
     if not ldr_engines_available():
         raise RuntimeError(
             "local-deep-research is not installed; "
-            "pip install -r requirements-optional-ldr.txt"
+            "reinstall with: pip install -r requirements.txt "
+            "(requires Python 3.12–3.13)"
         )
 
     from local_deep_research.web_search_engines.search_engine_factory import (

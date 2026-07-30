@@ -20,7 +20,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Manual development uses Python 3.11+:
+Manual development uses Python 3.12–3.13:
 
 ```bash
 python3 -m venv venv
@@ -30,6 +30,7 @@ python -m uvicorn app:app --host 0.0.0.0 --port 7000
 ```
 
 Windows is not actively tested. Docker on Linux or a Linux/macOS manual install is the safer path for now.
+Full install, GPU, and security notes: [docs/setup.md](docs/setup.md).
 
 ## Running Checks
 
@@ -46,7 +47,7 @@ For Docker-related changes:
 ```bash
 docker compose config
 docker compose up -d --build
-docker compose logs --tail=120 odysseus
+docker compose logs --tail=120 nobody
 ```
 
 Mention what you ran in the pull request description. If you could not run a check, say so.

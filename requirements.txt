@@ -21,6 +21,11 @@ youtube-transcript-api
 # Markdown rendering for research reports (src/visual_report.py).
 # Imported at module-top so it's a hard core dep, not optional.
 markdown
+# Local Deep Research (LDR) — LangGraph gather/retrieval for Deep Research.
+# Requires Python >=3.12 and <=3.13 (LDR transitive deps may lack wheels on
+# 3.14+). Brings LangChain + LangGraph; Flask/SQLCipher from LDR are unused
+# at runtime when programmatic_mode=True.
+local-deep-research>=1.7.0,<2.0.0
 # Calendar .ics import/export (routes/calendar_routes.py).
 icalendar
 # Recurrence rule expansion for calendar events (routes/calendar_routes.py).

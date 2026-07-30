@@ -209,7 +209,14 @@ async function _fetchPlanDraftBackground() {
       note.textContent = text;
       note.hidden = !text;
     }
-    _setPlanStatus('ready', 'Draft ready — tune keywords, anchors, and exclusions, then start research.');
+    if (planData.plan_source === 'fallback') {
+      _setPlanStatus(
+        'ready',
+        'Heuristic draft — the model did not return a full plan. Edit keywords, anchors, and optional fields before starting.'
+      );
+    } else {
+      _setPlanStatus('ready', 'Draft ready — tune keywords, anchors, and exclusions, then start research.');
+    }
   } catch (err) {
     if (token !== _planFetchToken || _researchStep !== 2) return;
     _setPlanStatus('error', `${err.message || 'Could not draft plan'} — fill keywords manually or go back.`);
@@ -293,10 +300,10 @@ let _endpoints = [];
 let _expandedJobId = null;
 let _markdownModule = null;
 let _sessionModule = null;
-const _SETTINGS_KEY = 'odysseus-research-settings';
+const _SETTINGS_KEY = 'nobody-research-settings';
 
-const _SEEDS_KEY = 'odysseus-research-seeds';
-const _TAB_KEY = 'odysseus-research-compose-tab';
+const _SEEDS_KEY = 'nobody-research-seeds';
+const _TAB_KEY = 'nobody-research-compose-tab';
 /** @type {'topic'|'papers'} */
 let _activeComposeTab = 'topic';
 /** @type {Array<{zotero_key:string,title:string,authors?:string,year?:string,has_pdf?:boolean,doi?:string}>} */
@@ -1922,10 +1929,22 @@ function _buildJobCard(job) {
 
   } else if (job.status === 'done') {
     // Library-loaded jobs have sources=null but pre-set sourceCount; fresh jobs
-    // populate sources directly. Prefer the pre-set count if present.
-    const srcCount = job.sources?.length ?? job.sourceCount ?? 0;
-    // 0 sources = the research couldn't gather/extract anything — flag it.
-    const failed = srcCount === 0;
+    // populate sources directly. Prefer the pre-set count if present. LDR also
+    // stores sources on evidence_registry even when top-level sources is empty.
+    const registryCount = Array.isArray(job.evidence_registry?.sources)
+      ? job.evidence_registry.sources.length
+      : 0;
+    const srcCount = Math.max(
+      job.sources?.length || 0,
+      typeof job.sourceCount === 'number' ? job.sourceCount : 0,
+      registryCount,
+    );
+    // Flag failure only when nothing usable was gathered (no sources and no report).
+    const hasReport = !!(job.raw_report || job.result || '').trim()
+      && !/## Research Failed|## Complete Research Failure|## Research Engine Unavailable/i.test(
+        job.raw_report || job.result || ''
+      );
+    const failed = srcCount === 0 && !hasReport;
     if (failed) card.classList.add('research-job-failed');
     const doneBadge = failed
       ? `<span class="research-cat-badge research-cat-failed">${_cancelIcon} no results</span>`

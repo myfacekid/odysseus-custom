@@ -1269,7 +1269,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
       switch_model <model>    — Change the model for the current session
       set_theme <preset>      — Apply a theme preset (dark, light, paper, nord, dracula, gruvbox, gpt, claude, lavender, etc.)
       create_theme <name> <bg> <fg> <panel> <border> <accent> [key=val ...] — Create custom theme. Optional key=val: advanced color overrides AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false
-      open_panel <name>       — Open a panel (documents, gallery, sessions, notes, memories, skills, settings, cookbook)
+      open_panel <name>       — Open a panel (documents, gallery, sessions, notes/todos, memories, skills, settings, cookbook, calendar, research, compare, tasks, links, theme)
       get_toggles             — Return current toggle states (server-side knowledge)
     """
     lines = content.strip().split("\n")
@@ -1473,7 +1473,8 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
 
     elif action == "open_panel":
         # Open a top-level panel/modal: documents/library, gallery,
-        # email, sessions, notes, memories, skills, settings, cookbook.
+        # sessions, notes/todos, memories, skills, settings, cookbook,
+        # calendar, research, compare, tasks, links, theme.
         panel = parts[1].lower() if len(parts) > 1 else ""
         _panel_aliases = {
             "documents": "documents",
@@ -1502,10 +1503,27 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
             "llm": "cookbook",
             "serve": "cookbook",
             "serving": "cookbook",
+            "calendar": "calendar",
+            "cal": "calendar",
+            "research": "research",
+            "deepresearch": "research",
+            "deep-research": "research",
+            "compare": "compare",
+            "tasks": "tasks",
+            "scheduled": "tasks",
+            "links": "links",
+            "knowledge": "links",
+            "graph": "links",
+            "theme": "theme",
+            "themes": "theme",
         }
         target = _panel_aliases.get(panel)
         if not target:
-            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, sessions, notes, memories, skills, settings, cookbook."}
+            return {"error": (
+                "Unknown panel '{panel}'. Valid: documents, gallery, sessions, notes, "
+                "memories, skills, settings, cookbook, calendar, research, compare, "
+                "tasks, links, theme."
+            ).format(panel=panel)}
         return {
             "ui_event": "open_panel",
             "panel": target,
@@ -1522,7 +1540,10 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
         }
 
     else:
-        return {"error": f"Unknown action '{action}'. Use: toggle, set_mode, switch_model, set_theme, highlight, clear_highlight, get_toggles"}
+        return {"error": (
+            "Unknown action '{action}'. Use: toggle, open_panel, set_mode, switch_model, "
+            "set_theme, create_theme, highlight, clear_highlight, get_toggles"
+        ).format(action=action)}
 
 
 # ---------------------------------------------------------------------------

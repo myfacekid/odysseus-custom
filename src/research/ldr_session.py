@@ -8,7 +8,7 @@ from src.research_evidence import EvidenceRegistry
 
 
 class LdrResearchSession:
-    """Mimics DeepResearcher surface used by ResearchHandler persistence."""
+    """Session object used by ResearchHandler persistence for LDR runs."""
 
     def __init__(
         self,

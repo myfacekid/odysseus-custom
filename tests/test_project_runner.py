@@ -177,7 +177,7 @@ def test_build_run_env_strips_proxy_when_network_off(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     env = build_run_env(allow_network=False)
     assert "HTTP_PROXY" not in env
-    assert env.get("ODYSSEUS_PROJECT_RUN_NETWORK") == "0"
+    assert env.get("NOBODY_PROJECT_RUN_NETWORK") == "0"
     assert env.get("PATH") == "/usr/bin:/bin"
 
 
@@ -185,7 +185,7 @@ def test_build_run_env_inherits_proxy_when_network_on(monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:8080")
     env = build_run_env(allow_network=True)
     assert env.get("HTTP_PROXY") == "http://proxy.example:8080"
-    assert env.get("ODYSSEUS_PROJECT_RUN_NETWORK") == "1"
+    assert env.get("NOBODY_PROJECT_RUN_NETWORK") == "1"
 
 
 def test_run_result_includes_network_policy(project_env, monkeypatch):
@@ -193,7 +193,7 @@ def test_run_result_includes_network_policy(project_env, monkeypatch):
         "alice",
         project_env["project_id"],
         "net_flag.py",
-        "import os\nprint(os.environ.get('ODYSSEUS_PROJECT_RUN_NETWORK', '?'))\n",
+        "import os\nprint(os.environ.get('NOBODY_PROJECT_RUN_NETWORK', '?'))\n",
     )
     result = run_python_script(
         "alice",

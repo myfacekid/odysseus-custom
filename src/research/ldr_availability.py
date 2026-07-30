@@ -1,4 +1,4 @@
-"""Feature detection for the Local Deep Research optional stack."""
+"""Feature detection for the Local Deep Research stack."""
 from __future__ import annotations
 
 import logging
@@ -6,7 +6,7 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-ResearchEngineMode = Literal["iterresearch", "ldr"]
+ResearchEngineMode = Literal["ldr"]
 DEFAULT_RESEARCH_ENGINE: ResearchEngineMode = "ldr"
 
 
@@ -23,22 +23,16 @@ def ldr_stack_available() -> bool:
 def research_engine_mode() -> ResearchEngineMode:
     """Resolved research backend from settings.
 
-    Default is LDR. When ``research_engine=ldr`` but the optional stack is not
-    installed (e.g. Python 3.14 without wheels), falls back to IterResearch.
+    Deep Research always uses LDR. Unknown or retired values (e.g. the former
+    ``iterresearch`` setting) are ignored and LDR is used.
     """
     from src.settings import get_setting
 
     raw = (get_setting("research_engine", DEFAULT_RESEARCH_ENGINE) or DEFAULT_RESEARCH_ENGINE).strip().lower()
-    if raw == "iterresearch":
-        return "iterresearch"
-    if raw == "ldr":
-        if ldr_stack_available():
-            return "ldr"
+    if raw and raw != "ldr":
         logger.warning(
-            "research_engine=ldr but local-deep-research is not installed; "
-            "using iterresearch. Install: pip install -r requirements-optional-ldr.txt "
-            "(Python 3.12–3.13)."
+            "Unknown or retired research_engine=%r; using ldr "
+            "(IterResearch has been removed)",
+            raw,
         )
-        return "iterresearch"
-    logger.warning("Unknown research_engine=%r; using iterresearch", raw)
-    return "iterresearch"
+    return "ldr"

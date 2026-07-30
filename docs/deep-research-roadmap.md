@@ -1,6 +1,6 @@
 # Deep Research Roadmap
 
-Living plan for Deep Research in Odysseus — UI, output, Zotero/Links integration, and session persistence.
+Living plan for Deep Research in Nobody — UI, output, Zotero/Links integration, and session persistence.
 
 **Use this doc for:** panel UX, report/export, graph linking, Library integration.
 
@@ -16,7 +16,7 @@ Living plan for Deep Research in Odysseus — UI, output, Zotero/Links integrati
 |-----|--------|-------------|
 | **[`deep-research-ldr-migration.md`](deep-research-ldr-migration.md)** | **Active backend track** — LangGraph agent, LDR search engines, `research_engine` flag | Source discovery, agent tools, Phase L0–L5 |
 | **This doc** | Product phases 0–5, UI, output, Zotero/Links polish | Panel, visual report, export, graph edges |
-| [`deep-research-retrieval-roadmap.md`](deep-research-retrieval-roadmap.md) | Legacy IterResearch retrieval (RT0–RT6); **policy + partial RT0b/RT3** still apply | Policy rules, iterresearch-only gaps, audit history |
+| [`deep-research-retrieval-roadmap.md`](deep-research-retrieval-roadmap.md) | Legacy IterResearch retrieval history (RT0–RT6); **policy still applies** | Policy rules; IterResearch path **retired** |
 
 ---
 
@@ -25,25 +25,25 @@ Living plan for Deep Research in Odysseus — UI, output, Zotero/Links integrati
 | Track | State |
 |-------|--------|
 | **Phases 0–3, 5** | ✅ Shipped — evidence registry, seeds/modes, academic templates, Library/Links seed UX, export, typed graph edges |
-| **Backend migration** | ✅ **LDR default** — LangGraph gather + Odysseus synthesis ([migration doc](deep-research-ldr-migration.md)); IterResearch fallback when LDR deps missing |
-| **Default runtime** | `research_engine=ldr` (auto-fallback to `iterresearch` without `local-deep-research`) |
+| **Backend migration** | ✅ **LDR only** — LangGraph gather + Nobody synthesis ([migration doc](deep-research-ldr-migration.md)); IterResearch retired |
+| **Default runtime** | `research_engine=ldr` (`local-deep-research` is a default install dependency; Python 3.12–3.13) |
 | **Phase 4 (custom agent loop)** | **Superseded** by LDR LangGraph — see [open decision #5](#open-decisions) |
-| **Legacy retrieval RT2/RT4/RT6** | **Not planned on IterResearch path** — LDR handles academic/web source discovery instead ([retrieval roadmap](deep-research-retrieval-roadmap.md#superseded-by-ldr)) |
+| **Legacy retrieval RT2/RT4/RT6** | **Not planned** — LDR handles academic/web source discovery ([retrieval roadmap](deep-research-retrieval-roadmap.md#superseded-by-ldr)) |
 
-**Retrieval policy** (no auto-seed, recency on request, etc.) applies to **both** engines via agent prompts + panel toggles — see [retrieval policy](deep-research-retrieval-roadmap.md#retrieval-policy-locked--2026-06).
+**Retrieval policy** (no auto-seed, recency on request, etc.) applies via agent prompts + panel toggles — see [retrieval policy](deep-research-retrieval-roadmap.md#retrieval-policy-locked--2026-06).
 
-### Panel toggles (both engines)
+### Panel toggles
 
 See also [LDR migration — panel toggles](deep-research-ldr-migration.md#panel-toggles-preserved).
 
 | Toggle / field | API / setting | LDR behavior (planned L2) |
 |----------------|---------------|---------------------------|
 | Include preprints | `include_preprints` | Agent prompt + engine filters exclude preprint hosts when off |
-| Include Zotero | `include_zotero` | Registers Odysseus `search_zotero` tool only when on; no round-0 catalog dump |
+| Include Zotero | `include_zotero` | Registers Nobody `search_zotero` tool only when on; no round-0 catalog dump |
 | Include Links / knowledge | `include_knowledge` | Registers `search_knowledge` tool only when on |
 | Seed papers | `seed_papers` | Pre-load seeds + compare/gap/similar mode prompts; no auto-seeding |
 | Research mode | `mode` | `literature_review` \| `compare` \| `gap_analysis` \| `similar_papers` → agent system context |
-| Report length | `report_length` | `standard` \| `extended` → Odysseus synthesis token budget (unchanged) |
+| Report length | `report_length` | `standard` \| `extended` → Nobody synthesis token budget (unchanged) |
 | Search provider | `search_provider` | Primary web engine for LDR meta-search / SearXNG bridge |
 | Max rounds / time | `max_rounds`, `max_time` | Agent iteration cap + wall-clock timeout |
 
@@ -51,32 +51,30 @@ See also [LDR migration — panel toggles](deep-research-ldr-migration.md#panel-
 
 ## Current state (baseline)
 
-**Engines (dual):**
+**Engine:**
 
 | Engine | Setting | Role |
 |--------|---------|------|
-| **LDR LangGraph** (default) | `research_engine=ldr` | `src/research/ldr_runner.py` → LDR `langgraph-agent` gathers sources; Odysseus synthesizes ([decision B](deep-research-ldr-migration.md#decisions-locked)) |
-| **IterResearch** (legacy fallback) | `research_engine=iterresearch` or LDR deps missing | `src/research/iterresearch.py` — Plan → query → search → extract → synthesize loop |
+| **LDR LangGraph** | `research_engine=ldr` | `src/research/ldr_runner.py` → LDR `langgraph-agent` gathers sources; Nobody synthesizes ([decision B](deep-research-ldr-migration.md#decisions-locked)) |
 
-**Integrations today (IterResearch path):**
+**Integrations today:**
 
 | Source | How research uses it | Gap vs recent work |
 |--------|----------------------|--------------------|
-| **Web** | Search provider chain (SearXNG/Brave/etc.) + academic URL ranking | Not the same path as chat `web_search`; no shared query/time-filter behavior |
-| **Zotero** | Live API via `fetch_zotero_findings()` (keyword match on query) | Does **not** use local catalog, PDF keys, or `search_knowledge` / Links graph |
-| **Links** | Not used | No paper nodes, collections, or `read_knowledge_content` |
+| **Web** | LDR meta-search / SearXNG bridge + academic engines | Shared with Nobody search settings via `settings_bridge` |
+| **Zotero** | Custom LDR tool when enabled | Does **not** use local catalog PDF dump by default |
+| **Links** | Custom LDR knowledge tool when enabled | Graph search via registered tools |
 
-**Report pipeline:** Evolving synthesis (last **10 findings only** per round via `synthesis_window`) → final academic template (1200+ words, numbered citations, References). Failures fall back to a raw findings dump (`_fallback_report`).
+**Report pipeline:** LDR gather → Nobody academic synthesis (numbered citations, References).
 
-**UI:** `static/js/research/panel.js` — query box + settings (preprints, Zotero on/off). **No way to attach seed papers** from Library or Links.
+**UI:** `static/js/research/panel.js` — query box + settings (preprints, Zotero on/off).
 
 **Key files:**
 
 | Area | Path |
 |------|------|
-| Research engine (legacy) | `src/research/iterresearch.py` (`src/deep_research.py` shim) |
 | Research engine (LDR) | `src/research/ldr_runner.py`, `src/research/ldr_llm_adapter.py` |
-| Retrieval plan (feeds both) | `src/research_retrieval_plan.py` |
+| Retrieval plan | `src/research_retrieval_plan.py` |
 | Handler / persistence | `src/research_handler.py` |
 | API routes | `routes/research_routes.py` |
 | Visual HTML report | `src/visual_report.py` |
@@ -187,7 +185,7 @@ Replace/supplement live-only `fetch_zotero_findings` with:
 3. Rank candidates: citation overlap, semantic title match, recency, peer-review status.
 4. Dedupe against seeds + `_zotero_keys_seen`.
 
-**Deliverable:** “Given these 3 papers, find related work and summarize key findings” works end-to-end — via LDR agent + Odysseus synthesis when migrated.
+**Deliverable:** “Given these 3 papers, find related work and summarize key findings” works end-to-end — via LDR agent + Nobody synthesis when migrated.
 
 ---
 
@@ -309,7 +307,7 @@ This is the **recommended next phase**. Phase 4 (agent tool orchestration) stays
 
 ## Phase 4 — Agent-shaped research ~~(optional)~~ **superseded**
 
-> **Replaced by** [`deep-research-ldr-migration.md`](deep-research-ldr-migration.md) — LDR `langgraph-agent` with Odysseus custom tools (`search_zotero`, `search_knowledge`, seeds). Do not build a separate Phase 4 orchestrator.
+> **Replaced by** [`deep-research-ldr-migration.md`](deep-research-ldr-migration.md) — LDR `langgraph-agent` with Nobody custom tools (`search_zotero`, `search_knowledge`, seeds). Do not build a separate Phase 4 orchestrator.
 
 <details>
 <summary>Original Phase 4 spec (historical)</summary>
@@ -335,7 +333,7 @@ Research agent with constrained tools:
 ```
 Phases 0–3, 5        ✅  UI, output, seeds, export, graph
     → LDR L0–L7      ✅  LangGraph default + full-text escalation + L6 URL enrich
-    → LDR L5         ✅  IterResearch → iterresearch.py; deep_research shim
+    → LDR L5         ✅  IterResearch retired; LDR-only backend
     → LDR L1         ✅  research_engines + keyword similar-paper fallback
 ```
 
@@ -350,11 +348,11 @@ Record choices here when made:
 | # | Question | Decision |
 |---|----------|----------|
 | 1 | Similar-paper / academic API strategy? | **LDR LangGraph + keyword search engines** ([`deep-research-ldr-migration.md`](deep-research-ldr-migration.md)); legacy RT2 **not planned**. IterResearch: S2 recs off; see [retrieval roadmap](deep-research-retrieval-roadmap.md). |
-| 2 | Report length default: 1200 vs 3000+ words? | **User toggle** (Standard ~1200 / Extended 3000+) — applies to Odysseus synthesis pass |
+| 2 | Report length default: 1200 vs 3000+ words? | **User toggle** (Standard ~1200 / Extended 3000+) — applies to Nobody synthesis pass |
 | 3 | Preprints: default include vs peer-review-only? | **Keep toggle; include on by default** — `include_preprints` gates LDR + legacy |
 | 4 | Seed papers: optional add-on vs first-class panel mode? | **First-class panel mode** |
 | 5 | Phase 4 custom agent vs IterResearch loop? | **LangGraph via LDR** ([migration doc](deep-research-ldr-migration.md)); IterResearch deprecated on migration branch |
-| 6 | Final report synthesis? | **(B) LDR gathers → Odysseus `research_templates` / registry synthesis** ([migration doc](deep-research-ldr-migration.md#decisions-locked)) |
+| 6 | Final report synthesis? | **(B) LDR gathers → Nobody `research_templates` / registry synthesis** ([migration doc](deep-research-ldr-migration.md#decisions-locked)) |
 
 ---
 

@@ -32,6 +32,7 @@ class TaskCreate(BaseModel):
     priority: str = "steady"
     due_date: Optional[str] = None
     parent_ids: List[str] = Field(default_factory=list)
+    details: Optional[str] = Field(None, max_length=4000)
 
 
 class TaskUpdate(BaseModel):
@@ -41,6 +42,7 @@ class TaskUpdate(BaseModel):
     due_date: Optional[str] = None
     done: Optional[bool] = None
     parent_ids: Optional[List[str]] = None
+    details: Optional[str] = Field(None, max_length=4000)
 
 
 def setup_one_thing_routes() -> APIRouter:
@@ -130,6 +132,7 @@ def setup_one_thing_routes() -> APIRouter:
                 priority=body.priority,
                 due_date=body.due_date,
                 parent_ids=body.parent_ids,
+                details=body.details,
             )
             after_task_change(owner)
             from src.one_thing import enrich_task_item, list_tasks as _list_tasks
@@ -156,6 +159,7 @@ def setup_one_thing_routes() -> APIRouter:
                 due_date=body.due_date,
                 done=body.done,
                 parent_ids=body.parent_ids,
+                details=body.details,
             )
             if not task:
                 raise HTTPException(404, "Task not found")

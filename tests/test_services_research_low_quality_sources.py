@@ -52,6 +52,17 @@ def test_good_summary_is_kept(handler_cls):
     assert out == [{"url": "http://a", "title": "T"}]
 
 
+def test_ldr_content_field_is_kept(handler_cls):
+    out = handler_cls._extract_sources(
+        [{
+            "url": "http://a",
+            "title": "T",
+            "content": "Detailed statistics about the experimental methods used.",
+        }]
+    )
+    assert out == [{"url": "http://a", "title": "T"}]
+
+
 def test_junk_first_no_longer_suppresses_the_good_finding(handler_cls):
     out = handler_cls._extract_sources(
         [

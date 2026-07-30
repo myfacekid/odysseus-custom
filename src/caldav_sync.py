@@ -31,6 +31,8 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse, urlunparse
 
+from core.env import env_get
+
 logger = logging.getLogger(__name__)
 
 # Pull window: 90 days back, 1 year forward. Keeps the REPORT cheap and
@@ -47,7 +49,7 @@ _BLOCKED_HOSTS = {
 
 
 def _private_caldav_allowed() -> bool:
-    return os.environ.get("ODYSSEUS_ALLOW_PRIVATE_CALDAV", "0").lower() in {"1", "true", "yes"}
+    return (env_get("ALLOW_PRIVATE_CALDAV", "0") or "0").lower() in {"1", "true", "yes"}
 
 
 def _validate_caldav_ip(host: str) -> None:
@@ -58,7 +60,7 @@ def _validate_caldav_ip(host: str) -> None:
     if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
         raise ValueError("CalDAV URL host is not allowed")
     if ip.is_private and not _private_caldav_allowed():
-        raise ValueError("Private CalDAV IPs require ODYSSEUS_ALLOW_PRIVATE_CALDAV=1")
+        raise ValueError("Private CalDAV IPs require NOBODY_ALLOW_PRIVATE_CALDAV=1")
 
 
 def validate_caldav_url(raw_url: str) -> str:

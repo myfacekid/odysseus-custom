@@ -1,4 +1,4 @@
-"""Map Odysseus OpenAI-compatible endpoints to LangChain chat models for LDR."""
+"""Map Nobody OpenAI-compatible endpoints to LangChain chat models for LDR."""
 from __future__ import annotations
 
 import logging
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def openai_api_base_from_endpoint(chat_endpoint: str) -> str:
-    """Derive LangChain ``base_url`` from an Odysseus chat completions URL."""
+    """Derive LangChain ``base_url`` from an Nobody chat completions URL."""
     base = normalize_base((chat_endpoint or "").strip())
     if not base:
         raise ValueError("Empty LLM endpoint URL")
@@ -72,13 +72,14 @@ def build_langchain_chat_model(
     max_tokens: Optional[int] = None,
     **kwargs: Any,
 ):
-    """Return a LangChain chat model wired to an Odysseus research endpoint."""
+    """Return a LangChain chat model wired to an Nobody research endpoint."""
     try:
         from langchain_openai import ChatOpenAI
     except ImportError as exc:
         raise ImportError(
             "LangChain stack not installed. "
-            "Run: pip install -r requirements-optional-ldr.txt"
+            "Reinstall with: pip install -r requirements.txt "
+            "(requires Python 3.12–3.13)."
         ) from exc
 
     model_name = (model or "").strip()

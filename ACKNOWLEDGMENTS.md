@@ -1,11 +1,21 @@
 # Acknowledgments
 
-Nobody stands on the shoulders of a lot of open-source work. This file
+Nobody is built through the combined work lot of open-source projects. This file
 credits the projects whose code, assets, or designs are included in or
 adapted by this repository, and notes their licenses.
 
 If you believe something here is mis-attributed or missing, please open an
-issue — it will be corrected promptly.
+issue, it will be corrected as soon as possible.
+
+---
+
+## Lineage
+
+- **[Odysseus](https://github.com/odysseus-dev/odysseus)** — the
+  grandfather of this harness. Nobody inherits its self-hosted workspace
+  shape: chat/agents, Cookbook, documents, memory, and the overall local-first
+  product idea. This repository continues that line under a new name and with
+  its own research, library, links, and project-context work on top.
 
 ---
 
@@ -30,12 +40,15 @@ The full license texts are kept in [`licenses/`](licenses/).
   (hardware detection, quant-aware fit scoring, model catalog),
   `routes/cookbook_*.py`, `routes/hwfit_routes.py`, `static/js/cookbook*.js`,
   and `scripts/odysseus-cookbook`.
-- **[Tongyi DeepResearch](https://github.com/Alibaba-NLP/DeepResearch)** by
-  **Alibaba-NLP / Tongyi Lab** — the multi-step deep-research agent pipeline.
-  Copyright © Alibaba-NLP / Tongyi Lab. **Apache-2.0.** Adapted for Nobody's
-  Deep Research feature (`services/research/`, `src/research_handler.py`,
-  `routes/research_routes.py`, `services/search/`). Full text in
-  [`licenses/DeepResearch-Apache-2.0.txt`](licenses/DeepResearch-Apache-2.0.txt).
+- **[Local Deep Research (LDR)](https://github.com/LearningCircuit/local-deep-research)**
+  by **LearningCircuit** — the Deep Research gather/retrieval backend
+  (`research_engine=ldr`). Copyright © 2025 LearningCircuit.
+  **MIT License.** Nobody uses LDR's LangGraph agent strategy and search-engine
+  stack for multi-step retrieval (`src/research/ldr_*.py`,
+  `src/research_engines/`), then runs Nobody-owned synthesis, evidence
+  registry, Zotero, and Links integration on top. Installed by default via
+  `requirements.txt` (Python 3.12–3.13). Full text in
+  [`licenses/local-deep-research-MIT-LICENSE.txt`](licenses/local-deep-research-MIT-LICENSE.txt).
 
 ---
 

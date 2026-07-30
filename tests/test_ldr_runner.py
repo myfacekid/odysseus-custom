@@ -51,7 +51,7 @@ async def test_run_ldr_research_end_to_end_mocked(monkeypatch):
         from src.research_retrieval_plan import derive_retrieval_plan_fallback
 
         plan = derive_retrieval_plan_fallback(kwargs["question"], [], research_mode="literature_review")
-        return plan, "plan text"
+        return plan, "plan text", "fallback"
 
     async def fake_synthesis(**kwargs):
         return "## Executive Summary\n\nMock report [1].\n\n## References\n\n[1] Test."
@@ -110,7 +110,7 @@ async def test_run_ldr_research_honors_preprint_toggle(monkeypatch):
         from src.research_retrieval_plan import derive_retrieval_plan_fallback
 
         plan = derive_retrieval_plan_fallback(kwargs["question"], [], research_mode="literature_review")
-        return plan, ""
+        return plan, "", "fallback"
 
     async def fake_synthesis_async(**kwargs):
         return "report"
@@ -168,7 +168,7 @@ async def test_run_ldr_research_emits_source_rejected_events(monkeypatch):
     async def fake_plan(**kwargs):
         from src.research_retrieval_plan import derive_retrieval_plan_fallback
 
-        return derive_retrieval_plan_fallback(kwargs["question"], [], research_mode="literature_review"), ""
+        return derive_retrieval_plan_fallback(kwargs["question"], [], research_mode="literature_review"), "", "fallback"
 
     async def fake_synthesis(**kwargs):
         return "report"
@@ -225,7 +225,7 @@ async def test_run_ldr_research_continues_on_gather_timeout_with_partial_links(m
     async def fake_plan(**kwargs):
         from src.research_retrieval_plan import derive_retrieval_plan_fallback
 
-        return derive_retrieval_plan_fallback(kwargs["question"], [], research_mode="literature_review"), ""
+        return derive_retrieval_plan_fallback(kwargs["question"], [], research_mode="literature_review"), "", "fallback"
 
     async def fake_synthesis(**kwargs):
         return "## Summary\n\nPartial gather report [1]."

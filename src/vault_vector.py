@@ -13,7 +13,7 @@ from src.vault_note_parser import parse_note
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "odysseus_vault"
+COLLECTION_NAME = "nobody_vault"
 VECTOR_WEIGHT = 0.7
 KEYWORD_WEIGHT = 0.3
 

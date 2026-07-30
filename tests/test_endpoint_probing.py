@@ -143,7 +143,7 @@ class TestPingEndpoint:
             "reachable": False, "status_code": 401, "error": "HTTP 401",
         }
 
-    def test_detects_odysseus_login_redirect(self, monkeypatch):
+    def test_detects_nobody_login_redirect(self, monkeypatch):
         _patch_resolve(monkeypatch)
 
         def fake_get(url, headers=None, timeout=None):

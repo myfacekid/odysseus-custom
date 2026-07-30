@@ -1,11 +1,11 @@
-"""LDR Phase L0 spike — construct LangGraph stack when optional deps are installed."""
+"""LDR Phase L0 spike — construct LangGraph stack when LDR is installed."""
 
 import pytest
 
 from src.research.ldr_availability import ldr_stack_available
 
 
-@pytest.mark.skipif(not ldr_stack_available(), reason="optional LDR stack not installed")
+@pytest.mark.skipif(not ldr_stack_available(), reason="LDR stack not installed")
 def test_ldr_settings_snapshot_programmatic_mode():
     from local_deep_research.api.settings_utils import create_settings_snapshot
 
@@ -22,7 +22,7 @@ def test_ldr_settings_snapshot_programmatic_mode():
     assert value == "searxng"
 
 
-@pytest.mark.skipif(not ldr_stack_available(), reason="optional LDR stack not installed")
+@pytest.mark.skipif(not ldr_stack_available(), reason="LDR stack not installed")
 def test_ldr_langgraph_strategy_builds_tools():
     """Smoke: LangGraphAgentStrategy exposes academic search tools without running the agent."""
     from unittest.mock import MagicMock
@@ -51,7 +51,7 @@ def test_ldr_langgraph_strategy_builds_tools():
     assert any(n.startswith("search_") for n in names)
 
 
-@pytest.mark.skipif(not ldr_stack_available(), reason="optional LDR stack not installed")
+@pytest.mark.skipif(not ldr_stack_available(), reason="LDR stack not installed")
 def test_ldr_advanced_search_system_instantiates():
     from unittest.mock import MagicMock
 

@@ -25,6 +25,19 @@ export const EDGE_KINDS = {
   related:       { label: 'Related',      color: '#8aa0c0', glyph: '·' },
 };
 
+/** Fixed legend order — always shown; excludes legacy link/related aliases. */
+export const LEGEND_EDGE_KINDS = [
+  'relates',
+  'derives_from',
+  'supports',
+  'refutes',
+  'depends_on',
+  'summarizes',
+  'in_collection',
+  'parent',
+  'wikilink',
+];
+
 export const DEFAULT_EDGE_KIND = { label: 'Link', color: '#8aa0c0', glyph: '·' };
 
 /** Resolve an edge kind string to its {label, color, glyph} descriptor. */
@@ -32,4 +45,4 @@ export function edgeKind(kind) {
   return EDGE_KINDS[(kind || '').toLowerCase()] || DEFAULT_EDGE_KIND;
 }
 
-export default { EDGE_KINDS, DEFAULT_EDGE_KIND, edgeKind };
+export default { EDGE_KINDS, LEGEND_EDGE_KINDS, DEFAULT_EDGE_KIND, edgeKind };

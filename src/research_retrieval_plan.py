@@ -134,11 +134,53 @@ def derive_retrieval_plan_fallback(
         if title and len(title) >= 10:
             keywords.append(title[:120])
     keywords = _clean_str_list(keywords, limit=16)
+
+    q = (question or "").strip()
+    sub_questions: List[str] = []
+    if q:
+        sub_questions.append(f"What are the main findings and methods addressing: {q}?")
+        sub_questions.append(f"What limitations, open questions, or conflicting evidence exist for: {q}?")
+        if seeds:
+            titles = [
+                (f.get("title") or "").strip()
+                for f in seeds[:2]
+                if (f.get("title") or "").strip()
+            ]
+            if titles:
+                sub_questions.append(
+                    "How do the seed papers ("
+                    + "; ".join(t[:80] for t in titles)
+                    + ") relate to this question?"
+                )
+        else:
+            sub_questions.append(
+                f"Which peer-reviewed sources best establish background and recent progress on: {q}?"
+            )
+    sub_questions = _clean_str_list(sub_questions, limit=6)
+
+    key_topics = _topics_distinct_from_anchors(
+        _clean_str_list(
+            [
+                "methods and experimental design",
+                "key results and effect sizes",
+                "limitations and open questions",
+            ],
+            limit=6,
+        ),
+        anchors,
+    )
+    success = (
+        f"A sourced academic synthesis that answers: {q}"
+        if q
+        else "A sourced academic synthesis covering the research question."
+    )
+    if len(success) > 240:
+        success = success[:237] + "…"
+
     return ResearchRetrievalPlan(
-        sub_questions=[],
-        # Concepts come from the planner; do not mirror anchors here.
-        key_topics=[],
-        success_criteria="",
+        sub_questions=sub_questions,
+        key_topics=key_topics,
+        success_criteria=success,
         anchor_terms=anchors,
         search_keywords=keywords,
         scope=scope,

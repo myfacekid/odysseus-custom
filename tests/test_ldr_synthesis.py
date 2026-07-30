@@ -1,4 +1,4 @@
-"""Tests for Odysseus academic synthesis after LDR gather."""
+"""Tests for Nobody academic synthesis after LDR gather."""
 
 import pytest
 

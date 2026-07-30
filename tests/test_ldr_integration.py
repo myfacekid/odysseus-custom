@@ -1,4 +1,4 @@
-"""LDR migration — adapter, progress, runner (optional LDR install for smoke)."""
+"""LDR migration — adapter, progress, runner."""
 
 import pytest
 
@@ -32,31 +32,45 @@ def test_ldr_event_to_progress_maps_searching():
     assert "PubMed" in out["message"]
 
 
+def test_map_ldr_progress_callback_attaches_total_sources():
+    from src.research.ldr_tools import map_ldr_progress_callback
+
+    seen = []
+
+    def _cb(event):
+        seen.append(event)
+
+    adapted = map_ldr_progress_callback(_cb, source_count_fn=lambda: 7)
+    adapted("gathering", 10, {"phase": "agent_thinking", "iteration": 3})
+    assert len(seen) == 1
+    assert seen[0]["total_sources"] == 7
+    assert seen[0]["round"] == 3
+
+
 def test_normalize_ldr_phase_synthesis():
     assert normalize_ldr_phase("writing") == "synthesizing"
 
 
 def test_research_engine_mode_default(monkeypatch):
     monkeypatch.setattr("src.settings.get_setting", lambda k, d=None: d)
-    expected = "ldr" if ldr_stack_available() else "iterresearch"
-    assert research_engine_mode() == expected
+    assert research_engine_mode() == "ldr"
 
 
-def test_research_engine_mode_explicit_iterresearch(monkeypatch):
+def test_research_engine_mode_ignores_retired_iterresearch(monkeypatch):
     monkeypatch.setattr(
         "src.settings.get_setting",
         lambda k, d=None: "iterresearch" if k == "research_engine" else d,
     )
-    assert research_engine_mode() == "iterresearch"
+    assert research_engine_mode() == "ldr"
 
 
-def test_research_engine_mode_falls_back_without_ldr_stack(monkeypatch):
+def test_research_engine_mode_still_ldr_without_stack(monkeypatch):
     monkeypatch.setattr(
         "src.settings.get_setting",
         lambda k, d=None: "ldr" if k == "research_engine" else d,
     )
     monkeypatch.setattr("src.research.ldr_availability.ldr_stack_available", lambda: False)
-    assert research_engine_mode() == "iterresearch"
+    assert research_engine_mode() == "ldr"
 
 
 def test_ldr_stack_available_without_install():
@@ -79,7 +93,7 @@ def test_ldr_event_to_progress_preserves_rejection_metadata():
     assert "missing" in str(err)
 
 
-@pytest.mark.skipif(not ldr_stack_available(), reason="optional LDR stack not installed")
+@pytest.mark.skipif(not ldr_stack_available(), reason="LDR stack not installed")
 def test_build_langchain_chat_model_smoke():
     from src.research.ldr_llm_adapter import build_langchain_chat_model
 

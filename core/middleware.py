@@ -16,13 +16,11 @@ from starlette.responses import Response
 INTERNAL_TOOL_TOKEN = (
     os.environ.get("NOBODY_INTERNAL_TOKEN")
     or os.environ.get("OCULUS_INTERNAL_TOKEN")
-    or os.environ.get("ODYSSEUS_INTERNAL_TOKEN")
     or secrets.token_hex(32)
 )
 INTERNAL_TOOL_HEADER = "X-Nobody-Internal-Token"
 LEGACY_INTERNAL_TOOL_HEADERS = (
     "X-Oculus-Internal-Token",
-    "X-Odysseus-Internal-Token",
 )
 
 
@@ -32,7 +30,7 @@ def require_admin(request: Request):
     the in-process internal-tool token used by loopback agent tools.
     """
     # In-process bypass for tool-layer loopback calls. Two paths:
-    # (a) header-direct (caller set X-Odysseus-Internal-Token), or
+    # (a) header-direct (caller set X-Nobody-Internal-Token), or
     # (b) the auth middleware already validated the token and stamped
     #     request.state.current_user = "internal-tool".
     try:

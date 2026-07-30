@@ -1,12 +1,12 @@
 /**
  * Active project preference for the harness context layer.
- * Migrates legacy `odysseus_project_last_open` once into the chip key.
+ * Migrates legacy `nobody_project_last_open` once into the chip key.
  */
 import Storage from '../storage.js';
 import { LAST_OPEN_PROJECT_KEY, clearLastOpenProject } from './workspaceState.js';
 
-export const ACTIVE_PROJECT_KEY = 'odysseus_active_project_id';
-export const ACTIVE_PROJECT_EVENT = 'odysseus-active-project-changed';
+export const ACTIVE_PROJECT_KEY = 'nobody_active_project_id';
+export const ACTIVE_PROJECT_EVENT = 'nobody-active-project-changed';
 
 let _cache = undefined;
 

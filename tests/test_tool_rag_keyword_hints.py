@@ -10,9 +10,14 @@ were force-included for non-email queries.
 
 These hints are deterministic string matching — no embeddings — so we can test
 `get_tools_for_query` directly with retrieval stubbed out (no ChromaDB needed).
+
+Also covers Links / Todos / panel / memory keyword coverage from the tool-calling
+awareness pass.
 """
 
+from src.agent_tools import TOOL_TAGS
 from src.tool_index import ToolIndex, ALWAYS_AVAILABLE
+from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
 
 _EMAIL_TOOLS = {
     "list_emails", "read_email", "send_email", "reply_to_email",
@@ -40,12 +45,13 @@ def test_tell_in_web_query_does_not_force_email_tools():
     assert "web_search" in tools and "web_fetch" in tools
 
 
-def test_genuine_email_query_still_gets_email_tools():
-    """Removing 'tell' must not break real email intent — the actual email
-    keywords still force-include the toolset."""
+def test_genuine_email_query_does_not_require_builtin_email_hints():
+    """Email is MCP-backed now — keyword hints no longer map inbox phrases to
+    builtin list_emails/send_email. A real inbox query must still avoid the
+    #1707 failure mode of crowding the toolset with a fake email suite."""
     ti = _index_without_embeddings()
     tools = ti.get_tools_for_query("reply to the unread email in my inbox")
-    assert {"reply_to_email", "send_email", "read_email"} <= tools
+    assert not (_EMAIL_TOOLS & tools)
 
 
 def test_plain_tell_request_stays_minimal():
@@ -55,3 +61,80 @@ def test_plain_tell_request_stays_minimal():
     assert not (_EMAIL_TOOLS & tools)
     # Always-available baseline is still there.
     assert set(ALWAYS_AVAILABLE) <= tools
+
+
+def test_suggest_links_force_includes_search_knowledge():
+    ti = _index_without_embeddings()
+    for q in (
+        "suggest links between these papers",
+        "set up links for these documents",
+        "propose a link",
+        "connect these",
+        "link these",
+    ):
+        tools = ti.get_tools_for_query(q)
+        assert "search_knowledge" in tools, f"{q!r} must include search_knowledge"
+
+
+def test_suggest_doc_improvements_does_not_force_graph_tools():
+    """Document review phrasing must not force search_knowledge via bare 'suggest'."""
+    ti = _index_without_embeddings()
+    tools = ti.get_tools_for_query("suggest improvements to the doc")
+    assert "suggest_document" in tools or "edit_document" in tools
+    assert "search_knowledge" not in tools
+
+
+def test_open_research_prefers_ui_control_not_manage_research():
+    ti = _index_without_embeddings()
+    tools = ti.get_tools_for_query("open research")
+    assert "ui_control" in tools
+    assert "manage_research" not in tools
+    assert "trigger_research" not in tools
+
+
+def test_read_research_still_gets_manage_research():
+    ti = _index_without_embeddings()
+    tools = ti.get_tools_for_query("read research about epistasis")
+    assert "manage_research" in tools
+
+
+def test_remember_that_gets_memory_not_notes():
+    ti = _index_without_embeddings()
+    tools = ti.get_tools_for_query("remember that my name is Ada")
+    assert "manage_memory" in tools
+
+
+def test_remember_to_still_gets_notes():
+    ti = _index_without_embeddings()
+    tools = ti.get_tools_for_query("remember to buy milk")
+    assert "manage_notes" in tools
+
+
+def test_open_todos_gets_ui_control():
+    ti = _index_without_embeddings()
+    tools = ti.get_tools_for_query("open todos")
+    assert "ui_control" in tools
+
+
+def test_generate_image_keywords():
+    ti = _index_without_embeddings()
+    tools = ti.get_tools_for_query("generate an image of a cat")
+    assert "generate_image" in tools
+
+
+def test_search_chats_keywords():
+    ti = _index_without_embeddings()
+    tools = ti.get_tools_for_query("did we discuss the deadline")
+    assert "search_chats" in tools
+
+
+def test_cookbook_ambient_tools_always_available():
+    assert "list_downloads" in ALWAYS_AVAILABLE
+    assert "list_cached_models" in ALWAYS_AVAILABLE
+    assert "list_served_models" in ALWAYS_AVAILABLE
+
+
+def test_search_vault_not_advertised():
+    assert "search_vault" not in TOOL_TAGS
+    names = {s["function"]["name"] for s in FUNCTION_TOOL_SCHEMAS}
+    assert "search_vault" not in names

@@ -22,7 +22,7 @@ Projects’ real promise is not a file tree + editor + Run panel. It is:
 2. **A user-chosen cwd** — computational depth (read/write/run under that folder).
 3. **Linked concepts** — curated graph links to papers, research, documents (breadth).
 
-The harness stays the product. A project is a **layer above** it: turn it on, and those surfaces inherit scope. Turn it off, and Odysseus behaves as today.
+The harness stays the product. A project is a **layer above** it: turn it on, and those surfaces inherit scope. Turn it off, and Nobody behaves as today.
 
 ### Boundaries (keep separate)
 
@@ -111,7 +111,7 @@ Dedicated modal (not Documents pane, not IDE workspace):
 
 ## Success criteria
 
-- User can run Odysseus with **no project** and never see the IDE workspace shell.
+- User can run Nobody with **no project** and never see the IDE workspace shell.
 - User can set an active project and have chat/research/tools inherit it without opening an IDE shell.
 - User can browse cwd files in a working pop-out, preview them, and **promote** into Library.
 - cwd and Library remain clearly separate in UI copy and data model (depth badge vs Library docs).

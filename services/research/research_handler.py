@@ -1,11 +1,8 @@
-# src/research_handler.py
+# services/research/research_handler.py
 """Handler for research service integration with expandable UI support.
 
-Uses the IterResearch-style DeepResearcher (LLM-in-the-loop) as the primary
-engine, falling back to the legacy ResearchOrchestrator or basic web search
-if needed.
-
-Includes a task registry so research survives page refreshes and can be cancelled.
+Runs Deep Research via LDR LangGraph. Includes a task registry so research
+survives page refreshes and can be cancelled.
 """
 import asyncio
 import json
@@ -14,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Optional, Dict
 
-from src.research_utils import is_low_quality
+from src.research_utils import is_low_quality, strip_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -22,27 +19,11 @@ RESEARCH_DATA_DIR = Path("data/deep_research")
 
 
 class ResearchHandler:
-    """Handles research service operations with iterative deep research."""
+    """Handles research service operations with LDR deep research."""
 
     def __init__(self):
-        self._legacy_engine = None
         self._active_tasks: Dict[str, dict] = {}
-        self._initialize_legacy_engine()
         RESEARCH_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    def _initialize_legacy_engine(self):
-        """Initialize the legacy research engine as a fallback."""
-        try:
-            from research_engine import ResearchOrchestrator, Config
-            config = Config(max_searches=12, max_content_per_page=15000)
-            self._legacy_engine = ResearchOrchestrator(config)
-            logger.info("Legacy ResearchOrchestrator initialized (fallback)")
-        except ImportError:
-            logger.info("Legacy research_engine.py not found — DeepResearcher only")
-            self._legacy_engine = None
-        except Exception as e:
-            logger.warning(f"Legacy research engine init failed: {e}")
-            self._legacy_engine = None
 
     # ------------------------------------------------------------------
     # Task registry — background research with persistence
@@ -180,14 +161,25 @@ class ResearchHandler:
         return None
 
     @staticmethod
+    def _finding_text(finding: dict) -> str:
+        """Best available text blob for quality gating (LDR uses content/abstract)."""
+        for key in ("summary", "evidence", "content", "abstract"):
+            val = finding.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return ""
+
+    @staticmethod
     def _extract_sources(findings: list) -> list:
         """Extract deduplicated [{url, title}] from findings, filtering low-quality ones."""
         seen = set()
         sources = []
         for f in findings:
+            if not isinstance(f, dict):
+                continue
             url = f.get("url", "")
             title = f.get("title", "") or url
-            summary = f.get("summary", "") or f.get("evidence", "")
+            summary = ResearchHandler._finding_text(f)
             if url and url not in seen and not is_low_quality(summary):
                 seen.add(url)
                 sources.append({"url": url, "title": title})
@@ -237,102 +229,51 @@ class ResearchHandler:
         _task_entry: dict = None,
         llm_headers: dict = None,
     ) -> str:
-        """
-        Run iterative deep research using the LLM-in-the-loop DeepResearcher.
+        """Run deep research via LDR LangGraph."""
+        from src.research.ldr_runner import LdrResearchNotReadyError, run_ldr_research
 
-        Args:
-            query: Research question
-            llm_endpoint: LLM endpoint URL for chat completions
-            llm_model: Model name/ID
-            max_time: Maximum research time in seconds (default 5 minutes)
-            _task_entry: Internal - registry entry to store researcher ref
-
-        Returns:
-            Formatted research report with expandable section and summary
-        """
-        logger.info("Starting IterResearch Deep Research")
+        logger.info("Starting LDR Deep Research")
         logger.info(f"Query: {query}")
         logger.info(f"LLM: {llm_endpoint} / {llm_model}")
         logger.info(f"Max time: {max_time}s")
 
         try:
-            from src.deep_research import DeepResearcher
-            from src.settings import get_setting
-            from src.research_utils import (
-                get_research_max_content_chars,
-                get_research_synthesis_window,
-            )
-
-            researcher = DeepResearcher(
+            _holder: dict = {}
+            report = await run_ldr_research(
+                query,
                 llm_endpoint=llm_endpoint,
                 llm_model=llm_model,
                 llm_headers=llm_headers,
-                max_rounds=8,
-                max_time=max_time,
-                max_report_tokens=int(get_setting("research_max_tokens", 8192)),
-                max_content_chars=get_research_max_content_chars(),
-                synthesis_window=get_research_synthesis_window(),
                 progress_callback=progress_callback,
+                max_time=max_time,
+                result_holder=_holder,
             )
-            if _task_entry is not None:
+            researcher = _holder.get("researcher")
+            if _task_entry is not None and researcher is not None:
                 _task_entry["researcher"] = researcher
 
-            start_time = time.time()
-            report = await researcher.research(query)
-            elapsed = time.time() - start_time
+            elapsed = 0.0
+            stats = researcher.get_stats() if researcher else {}
+            if stats.get("Duration"):
+                try:
+                    elapsed = float(str(stats["Duration"]).rstrip("s"))
+                except ValueError:
+                    elapsed = 0.0
 
-            stats = researcher.get_stats()
-            logger.info("IterResearch completed successfully")
-            for key, value in stats.items():
-                logger.info(f"  {key}: {value}")
-
+            findings = getattr(researcher, "findings", None) if researcher else None
+            evolving = getattr(researcher, "evolving_report", None) if researcher else None
             return self._format_research_report(
-                query, report, stats, elapsed,
-                findings=researcher.findings,
-                evolving_report=researcher.evolving_report,
+                query, strip_thinking(report), stats, elapsed,
+                findings=findings,
+                evolving_report=evolving,
             )
 
+        except LdrResearchNotReadyError as e:
+            logger.error("LDR research not ready: %s", e)
+            return self._handle_research_failure(query, str(e))
         except Exception as e:
-            logger.error(f"DeepResearcher failed: {e}", exc_info=True)
-            return await self._fallback_research(query, llm_endpoint, llm_model, max_time, str(e))
-
-    async def _fallback_research(
-        self, query: str, llm_endpoint: str, llm_model: str,
-        max_time: int, primary_error: str,
-    ) -> str:
-        """Fall back to legacy engine, then to basic web search."""
-        # Try legacy orchestrator
-        if self._legacy_engine:
-            try:
-                import asyncio
-                logger.info("Falling back to legacy ResearchOrchestrator...")
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None, self._legacy_engine.start_research, query, max_time
-                )
-                stats = self._get_legacy_stats()
-                elapsed = float(stats.get("Duration", "0").rstrip("s") or 0)
-                return self._format_research_report(query, result, stats, elapsed)
-            except Exception as e:
-                logger.error(f"Legacy engine also failed: {e}")
-
-        # Fall back to basic web search
-        return self._handle_research_failure(query, primary_error)
-
-    def _get_legacy_stats(self) -> dict:
-        """Get statistics from the legacy research engine."""
-        if not self._legacy_engine:
-            return {}
-        try:
-            tracker = self._legacy_engine.progress_tracker
-            return {
-                "Findings": len(self._legacy_engine.findings),
-                "Sources": len(self._legacy_engine.source_reports),
-                "Searches": tracker.counters['searches_executed'],
-                "URLs": tracker.counters['urls_processed'],
-            }
-        except Exception:
-            return {}
+            logger.error(f"LDR research failed: {e}", exc_info=True)
+            return self._handle_research_failure(query, str(e))
 
     def _format_research_report(
         self, query: str, full_report: str, stats: dict, elapsed: float,
@@ -355,7 +296,7 @@ class ResearchHandler:
             for f in findings:
                 url = f.get("url", "")
                 title = f.get("title", "") or url
-                summary = f.get("summary", "") or f.get("evidence", "")
+                summary = self._finding_text(f) if isinstance(f, dict) else ""
                 if url and url not in seen_urls and not is_low_quality(summary):
                     seen_urls.add(url)
                     source_lines.append(f"- [{title}]({url})")
@@ -367,11 +308,13 @@ class ResearchHandler:
         if findings:
             parts = []
             for i, f in enumerate(findings, 1):
-                url = f.get("url", "")
-                title = f.get("title", "") or "Untitled"
-                summary = f.get("summary", "")
-                evidence = f.get("evidence", "")
-                content = summary if summary else (evidence[:2000] if evidence else "(no content)")
+                url = f.get("url", "") if isinstance(f, dict) else ""
+                title = (f.get("title", "") if isinstance(f, dict) else "") or "Untitled"
+                content = self._finding_text(f) if isinstance(f, dict) else ""
+                if content and len(content) > 2000:
+                    content = content[:2000]
+                if not content:
+                    content = "(no content)"
                 parts.append(f"**{i}. [{title}]({url})**\n\n{content}")
             raw_findings_section = "\n\n".join(parts)
 

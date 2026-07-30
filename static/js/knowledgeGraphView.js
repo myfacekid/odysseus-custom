@@ -9,7 +9,7 @@
  * no build/dependency surface.
  */
 
-import { edgeKind, EDGE_KINDS } from './edgeKinds.js';
+import { edgeKind, EDGE_KINDS, LEGEND_EDGE_KINDS } from './edgeKinds.js';
 
 // Node fill colors by graph node type.
 const TYPE_COLORS = {
@@ -656,9 +656,11 @@ export class KnowledgeGraphView {
       const hops = dist ? dist.get(node.id) : 0;
       const isFocus = node.id === focus;
       const matches = query && node.title.toLowerCase().includes(query);
-      const targetA = dist ? this._distAlpha(hops, 1, 0.55, 0.12) : 1;
+      // Keep dimmed nodes readable — neighbours stay mostly solid, far nodes
+      // only soft-fade (was 0.55 / 0.12, which read as too transparent).
+      const targetA = dist ? this._distAlpha(hops, 1, 0.78, 0.38) : 1;
       let alpha = 1 + (targetA - 1) * s;
-      if (query && !matches) alpha = Math.min(alpha, 0.16);
+      if (query && !matches) alpha = Math.min(alpha, 0.38);
       const color = _typeColor(node.type);
 
       if ((isFocus || node.id === this.selectedId)) {
@@ -884,15 +886,7 @@ export class KnowledgeGraphView {
   }
 
   _buildLegend() {
-    const present = new Set(this.edges.map((e) => e.kind));
-    const order = Object.keys(EDGE_KINDS);
-    const kinds = order.filter((k) => present.has(k) && k !== 'related');
-    if (!kinds.length) {
-      this.legend.innerHTML = '';
-      this._syncLegendVisibility();
-      return;
-    }
-    this.legend.innerHTML = kinds.map((k) => {
+    this.legend.innerHTML = LEGEND_EDGE_KINDS.map((k) => {
       const kd = EDGE_KINDS[k];
       return `<span class="kg-legend-item"><span class="kg-legend-glyph" style="color:${kd.color}">${kd.glyph}</span>${kd.label}</span>`;
     }).join('');

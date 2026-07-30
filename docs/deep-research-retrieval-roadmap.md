@@ -2,17 +2,17 @@
 
 **Topical, seed-aware academic retrieval — policy and legacy IterResearch path.**
 
-**Status:** **RT0 partial** + **RT0b/RT3 partial** on IterResearch. **Source discovery superseded by LDR** when `research_engine=ldr`.
+**Status:** IterResearch path **retired**. Source discovery is LDR-only. **Retrieval policy** below still applies to LDR agent prompts and panel toggles.
 
-**Last updated:** 2026-06-01
+**Last updated:** 2026-07-29
 
-**Primary backend (active):** [`deep-research-ldr-migration.md`](deep-research-ldr-migration.md) — LangGraph agent + LDR search engines replace RT2/RT4/RT6 for gathering sources.
+**Primary backend (active):** [`deep-research-ldr-migration.md`](deep-research-ldr-migration.md) — LangGraph agent + LDR search engines.
 
 **Use this doc when:**
 
 - Applying **retrieval policy** to LDR agent prompts and panel toggles
-- Maintaining **IterResearch** path as explicit fallback (`research_engine=iterresearch` or missing LDR deps)
-- Audit history and acceptance criteria shared with parent roadmap
+- Reading audit history for former IterResearch phases (RT0–RT6)
+- Acceptance criteria shared with parent roadmap
 
 **Parent doc:** [`deep-research-roadmap.md`](deep-research-roadmap.md) (UI, output, Library/Links). **Do not use this doc alone for new OpenAlex/S2 wiring** — see LDR migration L1–L2 instead.
 
@@ -34,7 +34,7 @@ When **`research_engine=ldr`** (see [`deep-research-ldr-migration.md`](deep-rese
 | Phase | Was | LDR replacement |
 |-------|-----|-----------------|
 | **RT2** | Wire OpenAlex search/refs/cited-by in `research_similar_papers.py` | LDR `OpenAlexSearchEngine`, `SemanticScholarSearchEngine`, agent tool selection |
-| **RT4** | Embedding hybrid gate in `research_relevance.py` | LDR relevance filter + optional future Odysseus embed overlay (P2) |
+| **RT4** | Embedding hybrid gate in `research_relevance.py` | LDR relevance filter + optional future Nobody embed overlay (P2) |
 | **RT6** | Dynamic URL budget in `deep_research.py` | LDR agent iteration limits + `max_rounds` / `max_time` panel toggles |
 | **RT2 S2 recs / OA `related_to`** | Co-citation APIs | **Never** — LDR uses keyword search only |
 
@@ -116,7 +116,7 @@ Implement and test against these product rules. Do not regress them without an e
 | Gap | Was RT phase | LDR instead |
 |-----|--------------|-------------|
 | Custom OpenAlex search/refs in `research_similar_papers.py` | RT2 | LDR OpenAlex engine + agent |
-| Embedding similarity gate | RT4 | LDR filter; optional Odysseus embed later |
+| Embedding similarity gate | RT4 | LDR filter; optional Nobody embed later |
 | Dynamic fetch budget in loop | RT6 | Agent caps + panel `max_rounds` |
 | S2 `forpaper` / OA `related_to` as primary path | RT2 (explicitly off) | LDR keyword search only |
 
@@ -217,15 +217,17 @@ Panel toggles + seeds + mode
     → ResearchRetrievalPlan (JSON): anchors, avoid_topics, scope, expansion_queries
     → LangGraph agent (LDR langgraph-agent)
           • LDR engines: S2/OpenAlex/PubMed/SearXNG keyword search
-          • Odysseus tools (when toggles on): search_zotero, search_knowledge
+          • Nobody tools (when toggles on): search_zotero, search_knowledge
           • LDR relevance filter on previews
     → EvidenceRegistry ← map collector results
-    → Odysseus academic synthesis (decision B) — NOT LDR report assembler
+    → Nobody academic synthesis (decision B) — NOT LDR report assembler
 ```
 
 See [`deep-research-ldr-migration.md`](deep-research-ldr-migration.md).
 
-### Legacy IterResearch path (`research_engine=iterresearch`)
+### Legacy IterResearch path (retired)
+
+IterResearch (`research_engine=iterresearch`) has been **removed**. The notes below are historical audit only.
 
 ```
 User question + optional explicit seed papers
@@ -382,7 +384,7 @@ User question + optional explicit seed papers
 
 ## Phase RT4 — Semantic ranking & embeddings
 
-> **Superseded for source discovery by LDR** — LDR relevance filter handles preview gating. Optional Odysseus embed overlay (P2) may augment synthesis window only.
+> **Superseded for source discovery by LDR** — LDR relevance filter handles preview gating. Optional Nobody embed overlay (P2) may augment synthesis window only.
 
 <details>
 <summary>Original RT4 spec (historical — IterResearch only)</summary>
@@ -476,14 +478,13 @@ L0 (partial) → L1 engines → L2 LangGraph + panel toggles → L3 output parit
 
 See [`deep-research-ldr-migration.md`](deep-research-ldr-migration.md#migration-phases).
 
-### Legacy IterResearch (maintenance only — L5 shipped)
+### Legacy IterResearch (retired)
 
 ```
-src/research/iterresearch.py   ← legacy loop (fallback when LDR unavailable)
-src/deep_research.py           ← deprecated shim; do not add new imports
+src/research/ldr_runner.py   ← LDR LangGraph gather (sole research backend)
 ```
 
-**Do not start:** RT2, RT4, RT6 on IterResearch — superseded by LDR L1–L2.
+**Do not start:** RT2, RT4, RT6 on IterResearch — superseded by LDR L1–L2; IterResearch code deleted.
 
 ---
 

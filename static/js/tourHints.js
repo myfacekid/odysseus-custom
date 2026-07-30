@@ -4,7 +4,7 @@
 // fullscreened by dragging the title bar. Shown once globally — once the
 // user has dismissed it (or it auto-hides), it never returns.
 
-const HINT_SEEN_KEY = 'odysseus-hint-drag-to-snap-seen';
+const HINT_SEEN_KEY = 'nobody-hint-drag-to-snap-seen';
 
 // Allow-list of modals where the snap/fullscreen hint makes sense.
 // These are the full-window "tool" modals where users commonly want to
@@ -180,11 +180,11 @@ const NAV_HINT_COPY = {
 };
 
 const NAV_HINT_KEYS = {
-  desktopRail: 'odysseus-hint-nav-desktop-rail',
-  mobileMenu: 'odysseus-hint-nav-mobile-menu',
-  mobileMini: 'odysseus-hint-nav-mobile-mini',
-  connectionsVsLinks: 'odysseus-hint-nav-connections-links',
-  libraryVsResearch: 'odysseus-hint-nav-library-research',
+  desktopRail: 'nobody-hint-nav-desktop-rail',
+  mobileMenu: 'nobody-hint-nav-mobile-menu',
+  mobileMini: 'nobody-hint-nav-mobile-mini',
+  connectionsVsLinks: 'nobody-hint-nav-connections-links',
+  libraryVsResearch: 'nobody-hint-nav-library-research',
 };
 
 let _navToastEl = null;

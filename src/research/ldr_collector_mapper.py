@@ -1,4 +1,4 @@
-"""Map Local Deep Research collector results to Odysseus evidence findings."""
+"""Map Local Deep Research collector results to Nobody evidence findings."""
 from __future__ import annotations
 
 import logging
@@ -17,7 +17,6 @@ from src.research_relevance import matches_avoid_topics
 logger = logging.getLogger(__name__)
 
 
-# Keep in sync with deep_research.PREPRINT_HOST_FRAGMENTS
 PREPRINT_HOST_FRAGMENTS = (
     "arxiv.org",
     "biorxiv.org",
@@ -44,7 +43,7 @@ def ldr_link_to_finding(
     search_query: str = "",
     engine_name: str = "",
 ) -> dict:
-    """Convert one LDR collector / all_links entry to an Odysseus finding dict."""
+    """Convert one LDR collector / all_links entry to an Nobody finding dict."""
     url = _coerce_text(raw.get("link") or raw.get("url"))
     title = _coerce_text(raw.get("title") or "Untitled") or "Untitled"
     snippet = _coerce_text(

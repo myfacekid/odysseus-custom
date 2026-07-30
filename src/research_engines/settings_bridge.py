@@ -1,11 +1,11 @@
-"""Map Odysseus admin settings into LDR settings snapshots (Phase L1)."""
+"""Map Nobody admin settings into LDR settings snapshots (Phase L1)."""
 from __future__ import annotations
 
 import os
 from typing import Any, Dict, Optional
 
 
-def _odysseus_settings() -> dict:
+def _nobody_settings() -> dict:
     try:
         from src.settings import load_settings
 
@@ -15,8 +15,8 @@ def _odysseus_settings() -> dict:
 
 
 def academic_engine_overrides(*, include_preprints: bool = True) -> Dict[str, Any]:
-    """LDR snapshot overrides for academic engines using Odysseus admin keys."""
-    settings = _odysseus_settings()
+    """LDR snapshot overrides for academic engines using Nobody admin keys."""
+    settings = _nobody_settings()
     overrides: Dict[str, Any] = {}
 
     email = (settings.get("openalex_email") or os.environ.get("OPENALEX_EMAIL") or "").strip()
@@ -38,11 +38,11 @@ def academic_engine_overrides(*, include_preprints: bool = True) -> Dict[str, An
 
 
 def web_search_overrides(search_provider: Optional[str] = None) -> Dict[str, Any]:
-    """LDR snapshot overrides for Odysseus web search provider + API keys."""
-    from src.research_engines.registry import odysseus_web_to_ldr_tool
+    """LDR snapshot overrides for Nobody web search provider + API keys."""
+    from src.research_engines.registry import nobody_web_to_ldr_tool
 
-    settings = _odysseus_settings()
-    tool = odysseus_web_to_ldr_tool(search_provider or settings.get("research_search_provider"))
+    settings = _nobody_settings()
+    tool = nobody_web_to_ldr_tool(search_provider or settings.get("research_search_provider"))
     overrides: Dict[str, Any] = {"search.tool": tool}
 
     key_map = {
@@ -70,7 +70,7 @@ def build_ldr_settings_snapshot(
     include_preprints: bool = True,
     extra_overrides: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Full LDR settings snapshot with Odysseus keys wired in."""
+    """Full LDR settings snapshot with Nobody keys wired in."""
     from local_deep_research.api.settings_utils import create_settings_snapshot
 
     overrides: Dict[str, Any] = {}

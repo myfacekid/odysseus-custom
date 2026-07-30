@@ -1,8 +1,7 @@
 # src/research_handler.py
 """Handler for research service integration with expandable UI support.
 
-Dispatches to LDR LangGraph by default (``research_engine=ldr``), with IterResearch
-(``src.research.iterresearch``) and legacy ResearchOrchestrator as fallbacks.
+Runs Deep Research via LDR LangGraph (``src.research.ldr_runner``).
 Includes a task registry so research survives page refreshes and can be cancelled.
 """
 import asyncio
@@ -47,32 +46,11 @@ def _format_probe_failure(model: str, exc: Exception) -> str:
 
 
 class ResearchHandler:
-    """Handles research service operations with iterative deep research."""
+    """Handles research service operations with LDR deep research."""
 
     def __init__(self):
-        self._legacy_engine = None
         self._active_tasks: Dict[str, dict] = {}
-        self._initialize_legacy_engine()
         RESEARCH_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    def _initialize_legacy_engine(self):
-        """Initialize the legacy research engine as a fallback."""
-        try:
-            from research_engine import ResearchOrchestrator, Config
-            from src.research_utils import get_research_max_content_chars
-
-            config = Config(
-                max_searches=12,
-                max_content_per_page=get_research_max_content_chars(),
-            )
-            self._legacy_engine = ResearchOrchestrator(config)
-            logger.info("Legacy ResearchOrchestrator initialized (fallback)")
-        except ImportError:
-            logger.info("Legacy research_engine.py not found — DeepResearcher only")
-            self._legacy_engine = None
-        except Exception as e:
-            logger.warning(f"Legacy research engine init failed: {e}")
-            self._legacy_engine = None
 
     # ------------------------------------------------------------------
     # Query synthesis & planning
@@ -233,7 +211,7 @@ class ResearchHandler:
                 max_content_chars=max_content_chars,
             )
 
-        plan, display = await build_retrieval_plan(
+        plan, display, plan_source = await build_retrieval_plan(
             question=query,
             llm_endpoint=llm_endpoint,
             llm_model=llm_model,
@@ -245,6 +223,7 @@ class ResearchHandler:
             "retrieval_plan": plan_to_dict(plan),
             "display": display,
             "seed_note": seed_note or "",
+            "plan_source": plan_source,
         }
 
     # ------------------------------------------------------------------
@@ -532,6 +511,15 @@ class ResearchHandler:
         return None
 
     @staticmethod
+    def _finding_text(finding: dict) -> str:
+        """Best available text blob for quality gating (LDR uses content/abstract)."""
+        for key in ("summary", "evidence", "content", "abstract"):
+            val = finding.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return ""
+
+    @staticmethod
     def _extract_sources(findings: list) -> list:
         """Extract deduplicated [{url, title}] from findings, filtering low-quality ones."""
         seen = set()
@@ -541,7 +529,7 @@ class ResearchHandler:
                 continue
             url = f.get("url", "")
             title = f.get("title", "") or url
-            summary = f.get("summary", "") or f.get("evidence", "")
+            summary = ResearchHandler._finding_text(f)
             if url and url not in seen and not is_low_quality(summary):
                 seen.add(url)
                 sources.append({"url": url, "title": title})
@@ -557,9 +545,9 @@ class ResearchHandler:
                     continue
                 url = f.get("url", "")
                 title = f.get("title", "") or "Untitled"
-                summary = f.get("summary", "")
-                evidence = f.get("evidence", "")
-                content = summary if summary else (evidence[:2000] if evidence else "")
+                content = ResearchHandler._finding_text(f)
+                if content and len(content) > 2000:
+                    content = content[:2000]
                 if url and content and not is_low_quality(content):
                     items.append({"url": url, "title": title, "summary": content})
             return items
@@ -873,7 +861,7 @@ class ResearchHandler:
         approved_plan: Optional[dict] = None,
     ) -> str:
         """
-        Run iterative deep research using the LLM-in-the-loop DeepResearcher.
+        Run deep research via LDR LangGraph.
 
         Args:
             query: Research question
@@ -890,6 +878,7 @@ class ResearchHandler:
         """
         is_continuation = bool(prior_report)
         from src.research.ldr_availability import research_engine_mode
+        from src.research.ldr_runner import LdrResearchNotReadyError, run_ldr_research
 
         engine = research_engine_mode()
         logger.info(
@@ -907,9 +896,7 @@ class ResearchHandler:
             progress_callback({"phase": "probing", "model": llm_model})
         await self._probe_endpoint(llm_endpoint, llm_model, llm_headers)
 
-        if engine == "ldr":
-            from src.research.ldr_runner import run_ldr_research
-
+        try:
             _holder: dict = {}
             report = await run_ldr_research(
                 query,
@@ -950,120 +937,12 @@ class ResearchHandler:
                 except ValueError:
                     elapsed = 0.0
             return self._format_research_report(query, report, stats, elapsed)
-
-        try:
-            from src.research.iterresearch import DeepResearcher
-
-            from src.settings import get_setting
-            from src.research_utils import (
-                get_research_max_content_chars,
-                get_research_synthesis_window,
-            )
-            _max_report_tokens = int(get_setting("research_max_tokens", 16384))
-            if report_length == "extended":
-                _max_report_tokens = max(_max_report_tokens, 24576)
-            _extraction_timeout = _bounded_int(
-                extraction_timeout if extraction_timeout is not None else get_setting("research_extraction_timeout_seconds", 90),
-                default=90,
-                minimum=15,
-                maximum=3600,
-            )
-            _extraction_concurrency = _bounded_int(
-                extraction_concurrency if extraction_concurrency is not None else get_setting("research_extraction_concurrency", 3),
-                default=3,
-                minimum=1,
-                maximum=12,
-            )
-
-            researcher = DeepResearcher(
-                llm_endpoint=llm_endpoint,
-                llm_model=llm_model,
-                llm_headers=llm_headers,
-                max_rounds=max_rounds,
-                min_rounds=min(3, max_rounds),
-                max_time=max_time,
-                max_report_tokens=_max_report_tokens,
-                max_content_chars=get_research_max_content_chars(),
-                synthesis_window=get_research_synthesis_window(),
-                extraction_timeout=_extraction_timeout,
-                extraction_concurrency=_extraction_concurrency,
-                progress_callback=progress_callback,
-                search_provider=search_provider,
-                category="academic",
-                include_preprints=include_preprints,
-                include_zotero=include_zotero,
-                include_knowledge=include_knowledge,
-                owner=owner or (_task_entry.get("owner") if _task_entry else ""),
-                seed_papers=seed_papers or (_task_entry.get("seed_papers") if _task_entry else None),
-                research_mode=research_mode or (_task_entry.get("research_mode") if _task_entry else "literature_review"),
-                report_length=report_length or (_task_entry.get("report_length") if _task_entry else "standard"),
-                approved_plan=approved_plan,
-            )
-            if _task_entry is not None:
-                _task_entry["researcher"] = researcher
-
-            start_time = time.time()
-            report = await researcher.research(
-                query,
-                prior_report=prior_report,
-                prior_findings=prior_findings,
-                prior_urls=prior_urls,
-            )
-            elapsed = time.time() - start_time
-
-            stats = researcher.get_stats()
-            logger.info("IterResearch completed successfully")
-            for key, value in stats.items():
-                logger.info(f"  {key}: {value}")
-
-            # Store raw report and stats for visual report generation
-            if _task_entry is not None:
-                _task_entry["raw_report"] = strip_thinking(report)
-                _task_entry["stats"] = stats
-
-            return self._format_research_report(query, report, stats, elapsed)
-
+        except LdrResearchNotReadyError as e:
+            logger.error("LDR research not ready: %s", e)
+            return self._handle_research_failure(query, str(e))
         except Exception as e:
-            logger.error(f"DeepResearcher failed: {e}", exc_info=True)
-            return await self._fallback_research(query, llm_endpoint, llm_model, max_time, str(e))
-
-    async def _fallback_research(
-        self, query: str, llm_endpoint: str, llm_model: str,
-        max_time: int, primary_error: str,
-    ) -> str:
-        """Fall back to legacy engine, then to basic web search."""
-        # Try legacy orchestrator
-        if self._legacy_engine:
-            try:
-                import asyncio
-                logger.info("Falling back to legacy ResearchOrchestrator...")
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
-                    None, self._legacy_engine.start_research, query, max_time
-                )
-                stats = self._get_legacy_stats()
-                elapsed = float(stats.get("Duration", "0").rstrip("s") or 0)
-                return self._format_research_report(query, result, stats, elapsed)
-            except Exception as e:
-                logger.error(f"Legacy engine also failed: {e}")
-
-        # Fall back to basic web search
-        return self._handle_research_failure(query, primary_error)
-
-    def _get_legacy_stats(self) -> dict:
-        """Get statistics from the legacy research engine."""
-        if not self._legacy_engine:
-            return {}
-        try:
-            tracker = self._legacy_engine.progress_tracker
-            return {
-                "Findings": len(self._legacy_engine.findings),
-                "Sources": len(self._legacy_engine.source_reports),
-                "Searches": tracker.counters['searches_executed'],
-                "URLs": tracker.counters['urls_processed'],
-            }
-        except Exception:
-            return {}
+            logger.error(f"LDR research failed: {e}", exc_info=True)
+            return self._handle_research_failure(query, str(e))
 
     def _format_research_report(
         self, query: str, full_report: str, stats: dict, elapsed: float,

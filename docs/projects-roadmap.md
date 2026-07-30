@@ -30,7 +30,7 @@ Use this doc when starting future chats: *"Follow docs/projects-roadmap.md Phase
 
 **Phase C — run panel UI (2026-06-01):** `static/js/projects/runPanel.js` — Run on editor toolbar (`.py` only), stdout/stderr panel, re-run/clear/copy, save-before-run prompt, first-run intro per project session.
 
-**Phase C — network policy (2026-06-01):** `project_run_allow_network` in `settings.py` (default **false**). Subprocess gets minimal env + stripped proxy/TLS vars; `ODYSSEUS_PROJECT_RUN_NETWORK=0|1` marker; `network_allowed` in run response. Not kernel-level socket blocking — see open question #6.
+**Phase C — network policy (2026-06-01):** `project_run_allow_network` in `settings.py` (default **false**). Subprocess gets minimal env + stripped proxy/TLS vars; `NOBODY_PROJECT_RUN_NETWORK=0|1` marker; `network_allowed` in run response. Not kernel-level socket blocking — see open question #6.
 
 **Phase B — agent tools (2026-06-01):** `read_project_file` / `write_project_file` in `tool_execution.py` — project session only; path relative to cwd; traversal rejected.
 
@@ -122,7 +122,7 @@ These are settled unless explicitly revisited in this doc.
 
 ### Deployment assumption (clarified)
 
-**Working directory = a path on the host where the Odysseus process runs.**
+**Working directory = a path on the host where the Nobody process runs.**
 
 | Model | Implication |
 |-------|-------------|

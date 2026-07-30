@@ -100,8 +100,7 @@ DEFAULT_SETTINGS = {
     # unbounded model/API bill. Other values are bounded to [60, 86400].
     # Tune via Settings or by editing data/settings.json.
     "research_run_timeout_seconds": 1800,
-    # Deep research backend: "ldr" (default, LangGraph via local-deep-research) or
-    # "iterresearch" (legacy fallback when LDR deps are unavailable).
+    # Deep research backend: "ldr" (LangGraph via local-deep-research).
     "research_engine": "ldr",
     # Academic API keys for LDR engine layer (Phase L1).
     "openalex_email": "",

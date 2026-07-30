@@ -2015,34 +2015,108 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
             return {"results": format_agent_list(tasks), "exit_code": 0}
 
         elif action in ("add_one_thing", "add_task"):
-            from src.one_thing import add_task as ot_add
+            from src.one_thing import (
+                HORIZON_LABELS,
+                add_task as ot_add,
+                list_tasks as ot_list,
+                parent_horizon_for,
+            )
             from src.knowledge_sync import after_task_change
 
-            text = (args.get("text") or args.get("title") or args.get("content") or "").strip()
+            text = (args.get("text") or args.get("title") or "").strip()
+            details = (args.get("details") or args.get("content") or "").strip() or None
+            # If model put the body in content and title elsewhere, keep content as details.
+            if not text and details:
+                text = details
+                details = None
             if not text:
-                return {"error": "text is required", "exit_code": 1}
-            task = ot_add(
-                db,
-                owner or "",
-                text,
-                horizon=args.get("horizon") or "focus",
-                priority=args.get("priority") or "steady",
-                due_date=args.get("due_date"),
-            )
+                return {"error": "text (title) is required", "exit_code": 1}
+            raw_parents = args.get("parent_ids") or args.get("parents") or args.get("links")
+            if isinstance(raw_parents, str):
+                parent_ids = [p.strip() for p in raw_parents.split(",") if p.strip()]
+            elif isinstance(raw_parents, list):
+                parent_ids = [str(p).strip() for p in raw_parents if str(p).strip()]
+            else:
+                parent_ids = None
+            horizon = args.get("horizon") or "focus"
+            try:
+                task = ot_add(
+                    db,
+                    owner or "",
+                    text,
+                    horizon=horizon,
+                    priority=args.get("priority") or "steady",
+                    due_date=args.get("due_date"),
+                    details=details,
+                    parent_ids=parent_ids,
+                )
+            except ValueError as e:
+                parent_hz = parent_horizon_for(horizon)
+                hint = ""
+                if parent_hz:
+                    candidates = [
+                        t for t in ot_list(db, owner or "", horizon=parent_hz, include_done=False)
+                        if not t.done
+                    ]
+                    if candidates:
+                        rows = "; ".join(
+                            f"`{t.id[:8]}` {t.text}" for t in candidates[:12]
+                        )
+                        hint = (
+                            f" Candidate {HORIZON_LABELS[parent_hz]} goals: {rows}. "
+                            "Call list_one_thing on the parent horizon, then retry "
+                            "add_one_thing with parent_ids."
+                        )
+                    else:
+                        hint = (
+                            f" No {HORIZON_LABELS[parent_hz]} goals exist yet — "
+                            f"add a {parent_hz} goal first (aim needs no parents), "
+                            "then link the child with parent_ids."
+                        )
+                return {"error": f"{e}.{hint}", "exit_code": 1}
             after_task_change(owner or "")
+            parents_note = ""
+            if task.parent_ids:
+                parents_note = f", parents={[p[:8] for p in task.parent_ids]}"
             return {
-                "response": f"One Thing task added ({task.horizon}, {task.priority}): {task.text} (id: {task.id[:8]})",
+                "response": (
+                    f"One Thing task added ({task.horizon}, {task.priority}"
+                    f"{parents_note}): {task.text} (id: {task.id[:8]})"
+                ),
                 "task_id": task.id,
                 "exit_code": 0,
             }
 
         elif action in ("toggle_one_thing", "toggle_task"):
-            from src.one_thing import toggle_task as ot_toggle
+            from src.one_thing import get_task as ot_get, toggle_task as ot_toggle
             from src.knowledge_sync import after_task_change
+            from src.one_thing import HORIZON_LABELS
 
             tid = (args.get("id") or args.get("task_id") or "").strip()
             if not tid:
                 return {"error": "id is required", "exit_code": 1}
+            existing = ot_get(db, owner or "", tid)
+            if not existing:
+                return {"error": f"Task '{tid}' not found", "exit_code": 1}
+            # Marking done requires user confirmation via UI toast.
+            # Marking open (undo) applies immediately. Pass confirmed=true to skip the toast.
+            confirmed = bool(args.get("confirmed") or args.get("confirm"))
+            if (not existing.done) and (not confirmed):
+                return {
+                    "action": "propose_complete",
+                    "task_id": existing.id,
+                    "text": existing.text,
+                    "details": existing.details,
+                    "horizon": existing.horizon,
+                    "horizon_label": HORIZON_LABELS.get(existing.horizon, existing.horizon),
+                    "priority": existing.priority,
+                    "response": (
+                        f"Proposed marking done: {existing.text} (id: {existing.id[:8]}). "
+                        "Waiting for the user to Confirm or Dismiss in the UI — "
+                        "do not claim the task is complete yet."
+                    ),
+                    "exit_code": 0,
+                }
             task = ot_toggle(db, owner or "", tid)
             if not task:
                 return {"error": f"Task '{tid}' not found", "exit_code": 1}
@@ -3791,32 +3865,15 @@ async def do_manage_research(content: str, owner: Optional[str] = None) -> Dict:
 
 
 async def do_search_vault(content: str, owner: Optional[str] = None) -> Dict:
-    """List, read, or search the user's local markdown vault."""
-    from src.constants import OBSIDIAN_INTEGRATION_ENABLED
-    if not OBSIDIAN_INTEGRATION_ENABLED:
-        return {
-            "error": "Vault integration is disabled. Use create_document for library files or manage_notes for todos.",
-            "exit_code": 1,
-        }
-    import asyncio
-    from src.obsidian_vault import execute_search_vault_tool
-    try:
-        args = _parse_tool_args(content)
-    except ValueError:
-        return {"error": "Invalid JSON arguments", "exit_code": 1}
-    if not isinstance(args, dict):
-        args = {}
-    loop = asyncio.get_running_loop()
-    try:
-        return await asyncio.wait_for(
-            loop.run_in_executor(
-                None,
-                lambda: execute_search_vault_tool(args, owner=owner or ""),
-            ),
-            timeout=60,
-        )
-    except asyncio.TimeoutError:
-        return {"error": "search_vault timed out", "exit_code": 1}
+    """Deprecated — Obsidian vault linking was dropped. Kept as a stub."""
+    return {
+        "error": (
+            "search_vault is disabled (Obsidian vault integration was removed). "
+            "Use create_document for library files, manage_notes for todos, "
+            "or search_knowledge for the Links graph."
+        ),
+        "exit_code": 1,
+    }
 
 
 async def do_search_knowledge(content: str, owner: Optional[str] = None) -> Dict:

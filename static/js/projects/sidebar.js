@@ -7,7 +7,7 @@ import uiModule from '../ui.js';
 import { mountEmptyState } from '../ui/feedback.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
-export const PROJECT_SORT_KEY = 'odysseus-project-sort';
+export const PROJECT_SORT_KEY = 'nobody-project-sort';
 const META_TTL_MS = 30000;
 
 const FOLDER_ICON =

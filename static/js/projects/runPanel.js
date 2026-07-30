@@ -5,7 +5,7 @@
 import uiModule, { styledChoice } from '../ui.js';
 
 const API_BASE = window.API_BASE || window.location.origin;
-const FIRST_RUN_KEY = 'odysseus_project_run_intro_seen';
+const FIRST_RUN_KEY = 'nobody_project_run_intro_seen';
 
 let _container = null;
 let _projectId = null;

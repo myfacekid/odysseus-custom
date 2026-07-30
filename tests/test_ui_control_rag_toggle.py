@@ -34,3 +34,33 @@ def test_unknown_toggle_still_rejected():
 def test_existing_toggle_still_works():
     r = asyncio.run(do_ui_control("toggle web on"))
     assert r.get("toggle_name") == "web" and r.get("state") is True
+
+
+def test_open_panel_new_aliases():
+    for raw, expected in (
+        ("open_panel calendar", "calendar"),
+        ("open_panel research", "research"),
+        ("open_panel compare", "compare"),
+        ("open_panel tasks", "tasks"),
+        ("open_panel links", "links"),
+        ("open_panel knowledge", "links"),
+        ("open_panel theme", "theme"),
+        ("open_panel todos", "notes"),
+    ):
+        r = asyncio.run(do_ui_control(raw))
+        assert r.get("ui_event") == "open_panel", raw
+        assert r.get("panel") == expected, raw
+        assert "error" not in r
+
+
+def test_open_panel_unknown_lists_new_panels():
+    r = asyncio.run(do_ui_control("open_panel bogushub"))
+    assert "error" in r
+    assert "links" in r["error"]
+    assert "calendar" in r["error"]
+
+
+def test_unknown_action_mentions_open_panel():
+    r = asyncio.run(do_ui_control("frobnicate"))
+    assert "error" in r
+    assert "open_panel" in r["error"]

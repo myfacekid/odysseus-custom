@@ -1595,9 +1595,9 @@ class TaskScheduler:
         return full_text or "(no output)"
 
     async def _execute_research_task(self, task, db) -> str:
-        """Execute a deep research task using DeepResearcher."""
+        """Execute a deep research task using LDR."""
         from core.database import Session as DbSession, ChatMessage
-        from src.deep_research import DeepResearcher
+        from src.research.ldr_runner import run_ldr_research
         from src.research_handler import RESEARCH_DATA_DIR, ResearchHandler
         from src.research_utils import strip_thinking
         from src.settings import get_setting
@@ -1641,26 +1641,22 @@ class TaskScheduler:
         except Exception:
             pass
 
-        max_tokens = int(get_setting("research_max_tokens", 8192))
-        extraction_timeout = int(get_setting("research_extraction_timeout_seconds", 90) or 90)
-        extraction_concurrency = int(get_setting("research_extraction_concurrency", 3) or 3)
-
-        researcher = DeepResearcher(
+        started_ts = time.time()
+        _holder: dict = {}
+        report = await run_ldr_research(
+            task.prompt,
             llm_endpoint=endpoint_url,
             llm_model=model,
             llm_headers=headers,
-            max_rounds=8,
+            owner=task.owner or "",
+            max_iterations=8,
             max_time=600,  # 10 min for scheduled research
-            max_report_tokens=max_tokens,
-            extraction_timeout=extraction_timeout,
-            extraction_concurrency=extraction_concurrency,
+            result_holder=_holder,
         )
-
-        started_ts = time.time()
-        report = await researcher.research(task.prompt)
         completed_ts = time.time()
+        researcher = _holder.get("researcher")
         try:
-            stats = researcher.get_stats() or {}
+            stats = researcher.get_stats() if researcher else {}
         except Exception:
             stats = {}
 
@@ -1786,9 +1782,9 @@ class TaskScheduler:
             "subject": f"[Task] {task.name}",
             "body": result,
             "headers": {
-                "X-Odysseus-Origin": "odysseus-ui",
-                "X-Odysseus-Kind": "task",
-                "X-Odysseus-Ref": str(task.id),
+                "X-Nobody-Origin": "nobody-ui",
+                "X-Nobody-Kind": "task",
+                "X-Nobody-Ref": str(task.id),
             },
         }
         if recipient:

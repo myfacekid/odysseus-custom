@@ -39,6 +39,7 @@ from src.project_workspace import (
 from src.project_paths import find_dirs_named_under_root, is_path_under_root
 from src.project_graph import get_project_graph_links, project_node_id
 from src.knowledge_graph import add_graph_link, remove_graph_link
+from core.env import env_get
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ _PROJECT_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
 # Interactive home-directory browser for project cwd. Off by default —
 # path typing + native folder picker (resolve-dir) remain available.
-SERVER_DIR_BROWSE_ENABLED = os.environ.get("ODYSSEUS_PROJECT_SERVER_DIR_BROWSE", "0") == "1"
+SERVER_DIR_BROWSE_ENABLED = (env_get("PROJECT_SERVER_DIR_BROWSE", "0") or "0") == "1"
 
 
 class ProjectCreateRequest(BaseModel):

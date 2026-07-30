@@ -60,19 +60,17 @@ function _menu() {
   return document.getElementById('project-active-chip-menu');
 }
 
-/** Position the slate at the sidebar header edge so it can slide into chat. */
+/** Position the slate so its leading edge and top align with the chip button. */
 function _positionSlate(menu) {
   const sidebar = document.getElementById('sidebar');
-  const header = sidebar?.querySelector('.sidebar-header');
-  if (!sidebar || !header || !menu) return;
+  const btn = _btn();
+  if (!sidebar || !btn || !menu) return;
 
-  const sideRect = sidebar.getBoundingClientRect();
-  const headRect = header.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
   const isRight = sidebar.classList.contains('right-side');
   const width = Math.min(320, Math.max(260, Math.min(window.innerWidth * 0.92, 360)));
-  // Align with the toolbar band so the sidebar/header covers the tuck;
-  // the panel emerges from under that row into the chat.
-  const top = Math.round(headRect.top);
+  // Match the chip button — not the taller header — so the shared top edge is flush.
+  const top = btnRect.top;
   const maxH = Math.max(160, Math.min(420, window.innerHeight - top - 12));
 
   menu.classList.add('is-slate');
@@ -84,13 +82,18 @@ function _positionSlate(menu) {
   menu.style.maxHeight = `${maxH}px`;
 
   if (!isRight) {
-    // Anchor at the sidebar’s chat edge; translateX(-100%) tucks fully under it.
-    menu.style.left = `${Math.round(sideRect.right)}px`;
+    // Overlap the toolbar divider by 1px; open slate is z-index above the
+    // sidebar so this paints over the seam instead of sitting under it.
+    menu.style.left = `${btnRect.right - 1}px`;
     menu.style.right = 'auto';
   } else {
     menu.style.left = 'auto';
-    menu.style.right = `${Math.round(window.innerWidth - sideRect.left)}px`;
+    menu.style.right = `${window.innerWidth - btnRect.left - 1}px`;
   }
+}
+
+function _setSlateChrome(open) {
+  document.body.classList.toggle('project-chip-menu-open', !!open);
 }
 
 function _clearSlateInline(menu) {
@@ -101,6 +104,7 @@ function _clearSlateInline(menu) {
   menu.style.right = '';
   menu.style.width = '';
   menu.style.maxHeight = '';
+  _setSlateChrome(false);
 }
 
 function _restoreMenuHome(menu) {
@@ -123,6 +127,7 @@ function _closeMenu() {
 
   if (!menu.classList.contains('is-slate') && !menu.classList.contains('open')) {
     menu.setAttribute('aria-hidden', 'true');
+    _setSlateChrome(false);
     return;
   }
 
@@ -163,11 +168,14 @@ function _openMenu() {
   menu.setAttribute('aria-hidden', 'false');
   btn.setAttribute('aria-expanded', 'true');
   _menuOpen = true;
+  // Drop the toolbar/sidebar divider between chip and slate while open.
+  _setSlateChrome(true);
 
   // Double rAF so the tucked transform paints before sliding open.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       if (!_menuOpen) return;
+      _positionSlate(menu);
       menu.classList.add('open');
     });
   });
@@ -210,7 +218,7 @@ function _paintChip() {
 
   // Activity strip optional badge via custom event consumers
   try {
-    window.dispatchEvent(new CustomEvent('odysseus-project-chip-painted', {
+    window.dispatchEvent(new CustomEvent('nobody-project-chip-painted', {
       detail: { projectId: id, title: _activeMeta?.title || null },
     }));
   } catch { /* ignore */ }

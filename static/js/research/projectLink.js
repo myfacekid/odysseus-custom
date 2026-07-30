@@ -6,7 +6,7 @@ import uiModule from '../ui.js';
 import { isProjectsUiEnabled, isProjectsContextLayerEnabled } from '../projects/featureFlag.js';
 import { getActiveProjectId } from '../projects/activeState.js';
 
-const SUGGEST_DISMISS_KEY = 'odysseus-research-project-suggest-dismissed';
+const SUGGEST_DISMISS_KEY = 'nobody-research-project-suggest-dismissed';
 const PROJECT_MODES = new Set(['compare', 'gap_analysis']);
 
 let _projectsCache = [];
@@ -157,7 +157,14 @@ export async function suggestLinkAfterComplete(job, apiBase) {
   if (!modeWantsProjectLink(mode)) return;
   if (_loadDismissed().has(job.id)) return;
 
-  const srcCount = job.sources?.length ?? job.sourceCount ?? 0;
+  const registryCount = Array.isArray(job.evidence_registry?.sources)
+    ? job.evidence_registry.sources.length
+    : 0;
+  const srcCount = Math.max(
+    job.sources?.length || 0,
+    typeof job.sourceCount === 'number' ? job.sourceCount : 0,
+    registryCount,
+  );
   if (srcCount === 0) return;
 
   let projectId = (job.settings?.project_id || '').trim();

@@ -14,6 +14,7 @@ import { mountEmptyState, showLoadingRow, showError, ZOTERO_SETUP_MSG } from './
 import { isZoteroCatalogReady } from './setupStatus.js';
 import { isProjectsUiEnabled, isProjectsContextLayerEnabled } from './projects/featureFlag.js';
 import { setActiveProjectFromId } from './projects/activeChip.js';
+import { edgeKind } from './edgeKinds.js';
 
 export { openGraphMergeReview };
 
@@ -786,6 +787,7 @@ function _showNextLinkSuggestion() {
   const fromTitle = data.from_title || data.from;
   const toTitle = data.to_title || data.to;
   const kind = data.kind || 'related';
+  const kd = edgeKind(kind);
   const reason = (data.reason || '').trim();
 
   const card = document.createElement('div');
@@ -813,7 +815,7 @@ function _showNextLinkSuggestion() {
       </div>
       ${reason ? `<p class="kg-link-suggest-reason">${esc(reason)}</p>` : ''}
       <div class="kg-link-suggest-foot">
-        <span class="kg-link-kind kg-link-suggest-kind">${esc(_edgeKindLabel(kind))}</span>
+        <span class="kg-link-kind kg-link-suggest-kind" style="--kg-kind-color:${esc(kd.color)}">${esc(kd.label)}</span>
         <div class="kg-link-suggest-actions kg-link-suggest-actions--triple">
           <button type="button" class="kg-link-suggest-reject">Reject</button>
           <button type="button" class="kg-link-suggest-later">Review later</button>
@@ -1313,7 +1315,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('message', (e) => {
     if (e.origin !== window.location.origin) return;
     const data = e.data;
-    if (!data || data.type !== 'odysseus-open-knowledge' || !data.nodeId) return;
+    if (!data || data.type !== 'nobody-open-knowledge' || !data.nodeId) return;
     openKnowledgeNode(data.nodeId);
   });
 }

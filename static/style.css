@@ -1,5 +1,5 @@
 /* ============================================ */
-/* Odysseus UI — Consolidated Stylesheet        */
+/* Nobody UI — Consolidated Stylesheet        */
 /* ============================================ */
 
 
@@ -570,13 +570,51 @@ body.bg-pattern-fog {
     .chat-meta-overlay > * {
       pointer-events: auto;
     }
-    .chat-meta-overlay #current-meta {
+    /* Title + chevron share one hit target and one hover state. */
+    .chat-meta-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      max-width: 100%;
+      margin: 0;
+      padding: 2px 3px 2px 5px;
+      border: none;
+      border-radius: var(--radius-tech, 2px);
+      background: none;
+      color: inherit;
+      font: inherit;
+      font-size: inherit;
+      line-height: 1;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      transition: color 0.08s, background 0.08s;
+    }
+    .chat-meta-btn:hover,
+    .chat-meta-btn[aria-expanded="true"] {
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+    }
+    .chat-meta-btn #current-meta {
       overflow: hidden;
       text-overflow: ellipsis;
-      cursor: pointer;
+      min-width: 0;
     }
-    .chat-meta-overlay:hover {
-      color: color-mix(in srgb, var(--fg) 75%, transparent);
+    /* Scale with the title so the chevron reads as part of the name. */
+    .chat-meta-chevron {
+      flex-shrink: 0;
+      width: 0.95em;
+      height: 0.95em;
+      opacity: 0.75;
+      transform: translateY(0.5px);
+      transition: opacity 0.08s;
+    }
+    .chat-meta-btn:hover .chat-meta-chevron,
+    .chat-meta-btn[aria-expanded="true"] .chat-meta-chevron {
+      opacity: 1;
+    }
+    .chat-meta-btn:has(.session-rename-input) .chat-meta-chevron {
+      display: none;
     }
     /* Offline model rows */
     .models-row-offline {
@@ -601,20 +639,29 @@ body.bg-pattern-fog {
       position: relative;
       display: inline-flex;
       flex-shrink: 0;
-      margin-left: -4px;
-      margin-right: -20px;
     }
+    /* Standalone chevron (e.g. project overflow) — match title control. */
     .export-dl-btn {
       background: none; border: none;
       color: inherit;
       cursor: pointer;
-      padding: 4px 5px; border-radius: var(--radius-tech, 2px);
-      display: flex; align-items: center;
+      padding: 2px 3px; border-radius: var(--radius-tech, 2px);
+      display: inline-flex; align-items: center;
       transition: color 0.08s, background 0.08s;
     }
     .export-dl-btn:hover {
       color: var(--accent);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
+    }
+    .export-dl-btn .chat-meta-chevron,
+    .export-dl-btn svg {
+      width: 0.95em;
+      height: 0.95em;
+      opacity: 0.75;
+    }
+    .export-dl-btn:hover .chat-meta-chevron,
+    .export-dl-btn:hover svg {
+      opacity: 1;
     }
     .export-dropdown-menu {
       display: none;
@@ -3303,6 +3350,12 @@ body.bg-pattern-fog {
       }
     }
     /* Overflow "+" menu */
+    .overflow-plus-btn {
+      border: 1px solid var(--border);
+      opacity: 1;
+      height: 28px;
+      box-sizing: border-box;
+    }
     .overflow-wrapper {
       position: relative;
       display: flex;
@@ -4524,6 +4577,7 @@ body.bg-pattern-fog {
       }
       .chat-top-bar .chat-new-btn { display: none; }
       .chat-meta-overlay { font-size: 0.65em; max-width: 55%; overflow: visible; left: 50%; top: 50%; transform: translate(-50%, -50%); position: absolute; }
+      .chat-meta-overlay .chat-meta-btn,
       .chat-meta-overlay .export-dl-btn { display: inline-flex; }
       /* Incognito — smaller on mobile */
       .incognito-btn {
@@ -4641,9 +4695,12 @@ body.bg-pattern-fog {
         height: 44px;
       }
       /* Touch-friendly targets for small buttons */
+      .chat-meta-btn,
+      .export-dl-btn {
+        min-height: 44px;
+      }
       .export-dl-btn {
         min-width: 44px;
-        min-height: 44px;
       }
       .section-header-btn {
         min-width: 44px;
@@ -6076,7 +6133,7 @@ body.bg-pattern-fog {
     /* (legacy toolbar-toggle styles removed — now using .vis-* classes) */
 
     /* Demo highlight pulse */
-    .odysseus-highlight,
+    .nobody-highlight,
     .nobody-highlight {
       outline: 2px solid var(--accent, var(--red)) !important;
       outline-offset: 1px;
@@ -6203,7 +6260,7 @@ body.bg-pattern-fog {
     @media (prefers-reduced-motion: reduce) {
       .th-cursor, .th-modal-group, .th-zone { animation: none !important; }
     }
-    .odysseus-hl-label {
+    .nobody-hl-label {
       position: absolute;
       top: -22px;
       left: 8px;
@@ -12204,20 +12261,92 @@ textarea.memory-add-input {
   background: #fff;
 }
 
-/* ---- Editor header ---- */
+/* ---- Editor header (legacy / email; normally hidden — actions on md-toolbar) ---- */
 .doc-editor-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  /* Moved to the bottom as a footer: flex order pushes it last in the pane
-     column, and the divider flips to the top edge. */
-  order: 99;
-  border-top: 1px solid var(--border);
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   flex-wrap: nowrap;
   min-height: 36px;
+  height: 36px;
   background: var(--bg);
+}
+#doc-editor-actions:empty,
+.doc-actions-footer:empty {
+  display: none;
+}
+
+/* Former footer actions sit inline on the format toolbar under the tabs */
+.md-toolbar-actions-sep {
+  margin-left: 4px;
+}
+.doc-md-toolbar .md-toolbar-doc-action {
+  flex-shrink: 0;
+}
+.doc-md-toolbar #doc-language-select {
+  height: 22px;
+  align-self: center;
+  flex-shrink: 0;
+  font-size: 10px;
+}
+.doc-md-toolbar .doc-action-icon-btn.md-toolbar-doc-action {
+  height: 22px;
+  min-height: 22px;
+  padding: 0 6px;
+  opacity: 0.55;
+}
+.doc-md-toolbar .doc-action-icon-btn.md-toolbar-doc-action:hover {
+  opacity: 1;
+}
+.doc-md-toolbar .doc-split-btn-group {
+  height: 22px;
+  align-self: center;
+  flex-shrink: 0;
+}
+/* Trailing doc ops: Undo | type | Copy — pinned as one cluster */
+.md-toolbar-right-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding-left: 6px;
+}
+.md-toolbar-right-cluster .doc-split-btn-group {
+  margin-left: 0;
+}
+.md-toolbar-right-cluster .doc-stream-indicator {
+  margin-right: 2px;
+}
+/* Stay-behind strip when the format toolbar is undocked as a palette. */
+.doc-md-toolbar-stay {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+  height: 36px;
+}
+.doc-md-toolbar-stay .md-toolbar-right-cluster {
+  margin-left: auto;
+  width: 100%;
+  justify-content: flex-end;
+}
+/* Drag handle — tab strip doubles as the window chrome titlebar. */
+.doc-tab-bar.tile-window-header {
+  cursor: grab;
+}
+.doc-tab-bar.tile-window-header:active {
+  cursor: grabbing;
+}
+.doc-tab-bar.tile-window-header .doc-tab,
+.doc-tab-bar.tile-window-header button {
+  cursor: pointer;
 }
 /* Version now lives in the document tab, not the footer. */
 #doc-version-badge { display: none !important; }
@@ -12319,8 +12448,24 @@ textarea.memory-add-input {
   100% { box-shadow: inset 0 0 0 2px transparent; }
 }
 
-/* In the doc footer the type picker sits next to the accent Copy/Export split —
-   match its 28px height and 6px radius so the right-hand controls line up. */
+/* Header type picker + Copy/Export (legacy path if still in #doc-editor-actions) */
+#doc-editor-actions #doc-language-select {
+  height: 22px;
+  border-radius: var(--radius-tech, 2px);
+  font-size: 10px;
+  top: 0;
+}
+#doc-editor-actions .doc-action-icon-btn {
+  height: 22px;
+  min-height: 22px;
+  padding: 0 6px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+#doc-editor-actions .doc-split-btn-group {
+  height: 22px;
+}
+/* Legacy footer path (email / older layouts) keeps the taller row. */
 .doc-actions-footer #doc-language-select {
   height: 28px;
   border-radius: var(--radius-tech, 2px);
@@ -12590,20 +12735,30 @@ textarea.memory-add-input {
   .doc-overflow-item svg { width: 16px; height: 16px; }
   .email-more-menu .dropdown-item-compact { padding: 9px 12px; font-size: 13px; }
 
-  /* The doc footer is tight once the run/preview toggle joins it, so on mobile
-     go icon-only for Close, Undo & Copy (their icons are clear).
+  /* The doc toolbar is tight once actions join it, so on mobile
+     go icon-only for Undo & Copy (their icons are clear).
      font-size:0 drops the text node next to the SVG (the SVG has fixed w/h, so
      it's unaffected). Slightly narrower type picker buys a little more room. */
+  #doc-md-toolbar #doc-undo-btn span,
+  #doc-editor-actions #doc-undo-btn span,
   #doc-actions-footer #doc-undo-btn span,
   #doc-actions-footer #doc-footer-close-btn span,
   #doc-email-actions #doc-email-discard-btn span { display: none; }
+  #doc-md-toolbar #doc-undo-btn,
+  #doc-editor-actions #doc-undo-btn,
   #doc-actions-footer #doc-undo-btn,
   #doc-actions-footer #doc-footer-close-btn,
   #doc-email-actions #doc-email-discard-btn { gap: 0; padding: 0 9px; }
+  #doc-md-toolbar #doc-footer-copy-btn,
+  #doc-editor-actions #doc-footer-copy-btn,
   #doc-actions-footer #doc-footer-copy-btn { gap: 0; padding: 0 13px; font-size: 0; }
   /* In reply mode the button carries a "Reply" label that should stay visible
      (the icon-only treatment above is only for the plain Copy action). */
+  #doc-md-toolbar #doc-footer-copy-btn[data-mode="reply"],
+  #doc-editor-actions #doc-footer-copy-btn[data-mode="reply"],
   #doc-actions-footer #doc-footer-copy-btn[data-mode="reply"] { gap: 5px; padding: 0 13px; font-size: 12px; }
+  #doc-md-toolbar #doc-language-select,
+  #doc-editor-actions #doc-language-select,
   #doc-actions-footer #doc-language-select { width: 80px; }
 }
 
@@ -12632,10 +12787,8 @@ textarea.memory-add-input {
   overflow: hidden;
   height: 36px;
   position: relative;
-  /* Same edge fade as the tab strip — toolbar buttons dissolve into the bar's
-     background at the edges instead of being hard-cut when they overflow. */
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
-          mask-image: linear-gradient(to right, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+  /* No full-bar edge mask — Undo/type/Copy live on this row and must stay crisp.
+     Format items scroll inside .md-toolbar-items instead. */
 }
 .doc-md-toolbar button {
   background: none;
@@ -13907,6 +14060,7 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
     padding: 6px 12px 6px 8px;
     gap: 6px;
     min-height: 40px;
+    height: 40px;
   }
   .doc-import-label,
   #doc-version-badge {
@@ -22159,7 +22313,7 @@ body.gallery-selecting .gallery-dl-btn,
 
 /* Welcome name — left-to-right wipe with a touch of horizontal stretch.
    Fires on initial render via the .welcome-name rule; restarts on Nobody⇄
-   Odysseus toggle via JS reflow trick. */
+   Nobody toggle via JS reflow trick. */
 .welcome-name {
   transform-origin: left center;
   animation: welcome-name-reveal 0.55s cubic-bezier(0.34, 1.32, 0.55, 1) both;
@@ -29739,8 +29893,7 @@ body.doc-find-active mark.doc-find-mark.current {
   border-top: 1px solid var(--border); background: var(--bg); flex-shrink: 0;
   align-items: center;
 }
-/* Documents footer — X + Undo stay on the LEFT, Copy/Export group pushed
-   to the RIGHT. Email composer keeps its original flex-end layout. */
+/* Documents footer — reserved for email send chrome; empty for normal docs. */
 #doc-actions-footer {
   justify-content: flex-start;
 }
@@ -32723,10 +32876,78 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   margin-top: 2px;
 }
 .one-thing-add {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   margin-bottom: 10px;
+}
+.one-thing-add-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.one-thing-add-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.one-thing-add-details,
+.one-thing-edit-details {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 8px;
+  border-radius: var(--radius-tech, 2px);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  box-sizing: border-box;
+}
+.one-thing-edit-optional {
+  font-weight: 400;
+  opacity: 0.65;
+}
+.one-thing-row-details {
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--fg) 68%, transparent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.one-thing-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.one-thing-skeleton-row {
+  height: 52px;
+  border-radius: var(--radius-tech, 2px);
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--fg) 4%, transparent) 0%,
+    color-mix(in srgb, var(--fg) 10%, transparent) 50%,
+    color-mix(in srgb, var(--fg) 4%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: notes-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.one-thing-skeleton-row.short { height: 36px; }
+.todo-complete-suggest-details {
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0 12px 10px;
+  opacity: 0.72;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 4.2em;
+  overflow: hidden;
 }
 .one-thing-add-links,
 .one-thing-edit-links {
@@ -33247,10 +33468,13 @@ button.one-thing-date-day {
   opacity: 0.55;
 }
 @media (max-width: 720px) {
-  .one-thing-add {
+  .one-thing-add-meta {
+    display: grid;
     grid-template-columns: 1fr 1fr;
   }
-  .one-thing-add-text { grid-column: 1 / -1; }
+  .one-thing-add-meta .one-thing-add-btn {
+    grid-column: 1 / -1;
+  }
 }
 
 .notes-empty {
@@ -39541,6 +39765,11 @@ body.theme-frosted .modal {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  color: var(--kg-kind-color, inherit);
+  background: color-mix(in srgb, var(--kg-kind-color, var(--fg)) 18%, transparent);
+  padding: 2px 6px;
+  border-radius: var(--radius-tech, 2px);
+  opacity: 1;
 }
 .kg-link-suggest-actions {
   display: inline-flex;
@@ -39819,6 +40048,9 @@ body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card.kg-link-suggest-o
   background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
   color: var(--fg) !important;
 }
+#doc-editor-actions .doc-split-btn-group { margin-left: 0; flex-shrink: 0; }
+.md-toolbar-right-cluster .doc-split-btn-group { margin-left: 0; }
+.doc-md-toolbar .doc-split-btn-group { margin-left: 0; }
 #doc-actions-footer .doc-split-btn-group { margin-left: auto; }
 
 /* ── Projects (Phase A) ── */
@@ -39840,10 +40072,26 @@ body.projects-ui-hidden #research-project-setting-wrap {
   align-items: center;
   gap: 0;
   margin-left: 0;
+  /* Fill leftover header width; header end padding is cleared via :has() below */
+  flex: 1 1 auto;
   flex-shrink: 1;
   min-width: 0;
+  margin-right: 0;
   height: 30px;
+  align-self: center;
   animation: project-chip-enter 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sidebar.right-side .project-active-chip {
+  margin-right: 0;
+  margin-left: 0;
+}
+/* When the chip is visible, pin it to the chat-side edge (no end padding). */
+.sidebar-header:has(#project-active-chip:not([hidden])) {
+  padding-right: 0;
+}
+.sidebar.right-side .sidebar-header:has(#project-active-chip:not([hidden])) {
+  padding-right: 42px;
+  padding-left: 0;
 }
 @keyframes project-chip-enter {
   from { opacity: 0; transform: translateY(-4px) scale(0.96); }
@@ -39854,11 +40102,14 @@ body.projects-ui-hidden #research-project-setting-wrap {
   align-items: center;
   gap: 6px;
   box-sizing: border-box;
+  width: 100%;
   height: 30px;
-  max-width: min(160px, 40vw);
+  max-width: none;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-tech, 2px);
+  /* Open side flush with the project slate / toolbar divider */
+  border-right: none;
+  border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
   background: color-mix(in srgb, var(--panel) 92%, var(--fg));
   color: color-mix(in srgb, var(--fg) 72%, transparent);
   font-family: var(--font-ui, 'Iosevka', monospace);
@@ -39870,16 +40121,31 @@ body.projects-ui-hidden #research-project-setting-wrap {
   box-shadow: none;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
+.sidebar.right-side .project-active-chip-btn {
+  border-right: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0;
+}
 .project-active-chip-btn:hover {
   color: var(--fg);
   border-color: color-mix(in srgb, var(--accent, var(--red)) 35%, var(--border));
+  border-right-color: transparent;
   background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+}
+.sidebar.right-side .project-active-chip-btn:hover {
+  border-right-color: color-mix(in srgb, var(--accent, var(--red)) 35%, var(--border));
+  border-left-color: transparent;
 }
 .project-active-chip.is-active .project-active-chip-btn {
   color: var(--fg);
   border-color: color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border));
+  border-right-color: transparent;
   background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
   box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+}
+.sidebar.right-side .project-active-chip.is-active .project-active-chip-btn {
+  border-right-color: color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border));
+  border-left-color: transparent;
 }
 .project-active-chip-btn:focus-visible {
   outline: 2px dotted var(--accent, var(--red));
@@ -39890,6 +40156,15 @@ body.projects-ui-hidden #research-project-setting-wrap {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+@media (max-width: 768px) {
+  .sidebar-header:has(#project-active-chip:not([hidden])) {
+    padding-right: 0;
+  }
+  .sidebar.right-side .sidebar-header:has(#project-active-chip:not([hidden])) {
+    padding-right: 42px;
+    padding-left: 0;
+  }
 }
 
 /* Project selector slate — same surface as the chip button */
@@ -39938,11 +40213,47 @@ body.projects-ui-hidden #research-project-setting-wrap {
   transform: translateX(100%);
   transform-origin: right center;
 }
+/* Join chip ↔ slate: no leading stroke; square the seam edge */
+.project-active-chip-menu.is-slate.slate-from-left.open,
+.project-active-chip-menu.is-slate.slate-from-left.closing {
+  border-left: none;
+  border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0;
+}
+.project-active-chip-menu.is-slate.slate-from-right.open,
+.project-active-chip-menu.is-slate.slate-from-right.closing {
+  border-right: none;
+  border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
+}
 .project-active-chip-menu.is-slate.open {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
   transform: translateX(0);
+}
+/* The toolbar divider sits above the slate (sidebar z-index 25 > slate 18).
+   Making border-color transparent is not enough: the sidebar background still
+   paints under the border (background-clip: border-box) and reads as a seam.
+   Clip the fill to the padding box and drop backdrop-filter so the 1px join
+   is a true hole onto the slate underneath. */
+body.project-chip-menu-open #sidebar:not(.right-side),
+body.project-chip-menu-open .sidebar:not(.right-side) {
+  border-right-color: transparent !important;
+  background-clip: padding-box !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body.project-chip-menu-open #sidebar.right-side,
+body.project-chip-menu-open .sidebar.right-side {
+  border-left-color: transparent !important;
+  background-clip: padding-box !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* Active chip shadow would cast into the seam while joined */
+body.project-chip-menu-open .project-active-chip-btn {
+  box-shadow: none !important;
 }
 .project-active-chip-menu.is-slate.closing {
   visibility: visible;
@@ -40826,6 +41137,11 @@ body.project-context-active .chat-top-bar {
   flex-shrink: 0;
 }
 .chat-container.project-active #export-dropdown-wrap {
+  display: none;
+}
+/* Session chevron lives on the unified title button — hide it in project
+   mode so the project overflow chevron can take its place. */
+.chat-container.project-active .chat-meta-btn .chat-meta-chevron {
   display: none;
 }
 .chat-container.project-active #project-overflow-wrap {
@@ -43309,7 +43625,11 @@ body.sidebar-collapsed.hamburger-right .chat-container.project-active .project-m
   text-transform: uppercase;
   letter-spacing: var(--tracking-label, 0.06em);
   font-family: var(--font-family, var(--font-ui, inherit));
-  border-radius: var(--radius-tech, 2px);
+  /* Asymmetric — open side is square so it meets the slate / divider */
+  border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
+}
+.sidebar.right-side .project-active-chip-btn {
+  border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0;
 }
 
 .badge,
@@ -43398,14 +43718,17 @@ pre, code, .hljs,
   outline-offset: 2px;
 }
 
-/* ── Toolbar palette (undocked tile window) ── */
+/* ── Toolbar palette (undocked floating window) ── */
 .toolbar-palette-window {
   position: fixed;
   z-index: 170;
   display: flex;
   flex-direction: column;
+  width: auto;
+  height: auto;
   min-width: 220px;
-  min-height: 72px;
+  min-height: 0;
+  max-width: min(420px, calc(100vw - 16px));
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-tech, 2px);
@@ -43432,11 +43755,20 @@ pre, code, .hljs,
   padding: 6px 8px;
   overflow: auto;
 }
-.toolbar-palette-body .doc-md-toolbar {
+.toolbar-palette-body .doc-md-toolbar,
+.toolbar-palette-body .md-toolbar-items {
   display: flex !important;
   flex-wrap: wrap;
   border: none;
   background: transparent;
+  height: auto;
+  min-height: 36px;
+  -webkit-mask-image: none;
+  mask-image: none;
+  overflow: visible;
+}
+.toolbar-palette-body .md-toolbar-undock-btn {
+  display: none !important;
 }
 .toolbar-undock-placeholder {
   display: flex;

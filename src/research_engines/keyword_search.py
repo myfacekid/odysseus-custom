@@ -75,7 +75,7 @@ def _http_json(url: str, *, headers: Optional[dict] = None, timeout: int = 20) -
 
 
 def preview_to_finding(preview: dict, engine_name: str) -> Optional[dict]:
-    """Map an LDR search preview dict to an Odysseus similar-paper finding."""
+    """Map an LDR search preview dict to an Nobody similar-paper finding."""
     if not preview:
         return None
     title = (preview.get("title") or "").strip()
@@ -199,9 +199,9 @@ def _engine_keyword_search(
     except Exception as e:
         logger.info("LDR engine %s keyword search failed, using native fallback: %s", engine_name, e)
 
-    from src.research_engines.settings_bridge import _odysseus_settings
+    from src.research_engines.settings_bridge import _nobody_settings
 
-    settings = _odysseus_settings()
+    settings = _nobody_settings()
     if engine_name == "openalex":
         email = (settings.get("openalex_email") or "").strip()
         return _openalex_keyword_native(query, limit=limit, email=email)

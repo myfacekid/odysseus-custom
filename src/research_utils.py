@@ -2,7 +2,7 @@
 """Shared utilities for the deep research system.
 
 Centralizes text cleaning, quality filtering, and other logic
-used across deep_research.py, research_handler.py, and visual_report.py.
+used across research_handler.py, ldr modules, and visual_report.py.
 """
 
 # ---------------------------------------------------------------------------

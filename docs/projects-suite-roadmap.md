@@ -393,7 +393,7 @@ Reframe hierarchy and presets (see layout model above).
 | `docs/projects-ui-roadmap.md` | G1–G8 tabbed workspace interior (complete) — prerequisite |
 | `docs/projects-roadmap.md` | Feature phases A–F; backend and agent tooling |
 | `docs/ui-simplification-roadmap.md` | U1–U8 harness-wide simplification — shared primitives and principles |
-| `README.md` | Feature overview and `static/` front-end map |
+| `README.md` / `docs/setup.md` | Feature overview; setup/architecture in the setup guide |
 
 ---
 

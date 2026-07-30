@@ -29,18 +29,18 @@ let _reminderTimer = null;
 // (previously leaked one per openPanel; on multi-open sessions this
 // stacked dozens of identical handlers).
 let _notesKeydownHandler = null;
-const REMINDER_FIRED_KEY = 'odysseus-notes-reminder-fired';
+const REMINDER_FIRED_KEY = 'nobody-notes-reminder-fired';
 // Note IDs already shown with the entry-glow once. Re-set when the user
 // reschedules the reminder so the new firing glows again on next open.
-const REMINDER_GLOWED_KEY = 'odysseus-notes-reminder-glowed';
+const REMINDER_GLOWED_KEY = 'nobody-notes-reminder-glowed';
 // IDs of notes whose reminders fired while the notes panel was closed. On the
 // next open of the panel we briefly glow those cards so the user can spot them.
-const REMINDER_PENDING_HIGHLIGHT_KEY = 'odysseus-notes-reminder-pending-highlight';
-const REMINDER_ACTIVE_HIGHLIGHT_KEY = 'odysseus-notes-reminder-active-highlight';
+const REMINDER_PENDING_HIGHLIGHT_KEY = 'nobody-notes-reminder-pending-highlight';
+const REMINDER_ACTIVE_HIGHLIGHT_KEY = 'nobody-notes-reminder-active-highlight';
 // Timestamp of the last time the user opened the notes panel — used to gate
 // the rail "fired" badge so old reminders don't re-fire on every page reload.
-const REMINDER_DISMISSED_AT_KEY = 'odysseus-notes-reminder-dismissed-at';
-const NOTES_FIRST_OPEN_HINT_KEY = 'odysseus-todos-first-open-hint-v1';
+const REMINDER_DISMISSED_AT_KEY = 'nobody-notes-reminder-dismissed-at';
+const NOTES_FIRST_OPEN_HINT_KEY = 'nobody-todos-first-open-hint-v1';
 
 const _TODOS_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2.5px;margin-right:6px"><rect x="3" y="5" width="6" height="6" rx="1"/><line x1="13" y1="8" x2="21" y2="8"/><rect x="3" y="13" width="6" height="6" rx="1"/><line x1="13" y1="16" x2="21" y2="16"/></svg>';
 
@@ -131,10 +131,11 @@ function _oneThingParentsFromIds(horizon, parentIds) {
   });
 }
 
-function _oneThingBuildOptimisticTask({ text, horizon, priority, due_date, parent_ids }) {
+function _oneThingBuildOptimisticTask({ text, horizon, priority, due_date, parent_ids, details }) {
   return {
     id: `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     text,
+    details: details || null,
     horizon,
     priority: priority || 'steady',
     due_date: due_date || null,
@@ -1235,6 +1236,7 @@ export function openPanel() {
         <span class="notes-header-btn-label">Archive</span>
       </button>
       <button id="notes-minimize-btn" class="modal-minimize-btn" title="Minimize" aria-label="Minimize Todos" style="position:relative;left:2px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="18" x2="18" y2="18"/></svg></button>
+      <button id="notes-close-btn" class="close-btn" type="button" title="Close" aria-label="Close Todos">✖</button>
     </div>
     <div class="notes-search-bar notes-todos-search-bar">
       <input type="text" id="notes-search" class="memory-search-input" placeholder="Search tasks…" autocomplete="off" />
@@ -1270,9 +1272,7 @@ export function openPanel() {
   _wireNotesWindow(pane);
   _restoreNotesSidebarDock(pane);
 
-  // Events
-  // (Close chevron removed — swipe down on mobile, tool-rail toggle on desktop.)
-
+  // Events — Minimize docks to chip; Close fully dismisses.
   // Mobile: swipe the grab handle / header down to dismiss (minimise to chip).
   // Mirrors the document sheet gesture — finger-following, velocity-based
   // dismiss, rubber-band on up-drag, spring snap-back.
@@ -1284,6 +1284,12 @@ export function openPanel() {
     e.preventDefault();
     e.stopPropagation();
     closePanel('down');
+  });
+  const closeBtn = document.getElementById('notes-close-btn');
+  if (closeBtn) closeBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closePanel();
   });
   // Search
   const searchEl = document.getElementById('notes-search');
@@ -1383,32 +1389,24 @@ export function openPanel() {
   };
   document.addEventListener('keydown', _notesKeydownHandler);
 
-  // Load — show skeleton immediately, then fetch
-  _renderLoadingSkeleton();
-  // Defer the highlight flush to the next frame so it runs *after* the cards
-  // are committed to the DOM (and any FLIP animations have settled), giving
-  // the querySelector lookups inside something to find.
-  _fetchNotes().then(() => {
-    _renderNotes();
-    requestAnimationFrame(() => _flushPendingHighlights());
-    _startReminderLoop();
+  // Load the Todos board only — never flash Keep-style Note/Draw quick-add.
+  const body = pane.querySelector('.notes-pane-body');
+  _renderOneThingLoadingSkeleton(body);
+  void _renderOneThingView(body, { refresh: 'full' }).then(() => {
     _showNotesFirstOpenHint(pane);
   });
 }
 
-function _renderLoadingSkeleton() {
-  const body = document.querySelector('#notes-pane .notes-pane-body');
+function _renderOneThingLoadingSkeleton(body) {
   if (!body) return;
   body.innerHTML = '';
   _renderLabelsInto(body);
-  _renderQuickAdd(body);
   const skel = document.createElement('div');
-  skel.className = 'notes-skeleton';
+  skel.className = 'one-thing-skeleton';
   skel.innerHTML = `
-    <div class="notes-skeleton-card"></div>
-    <div class="notes-skeleton-card"></div>
-    <div class="notes-skeleton-card short"></div>
-    <div class="notes-skeleton-card"></div>
+    <div class="one-thing-skeleton-row"></div>
+    <div class="one-thing-skeleton-row"></div>
+    <div class="one-thing-skeleton-row short"></div>
   `;
   body.appendChild(skel);
 }
@@ -1552,7 +1550,10 @@ function _filterOneThingTasks(tasks) {
   }
   if (_searchQuery) {
     const q = _searchQuery;
-    list = list.filter(t => (t.text || '').toLowerCase().includes(q));
+    list = list.filter(t =>
+      (t.text || '').toLowerCase().includes(q)
+      || (t.details || '').toLowerCase().includes(q)
+    );
   }
   return list.sort((a, b) => {
     if (!!a.done !== !!b.done) return a.done ? 1 : -1;
@@ -1790,8 +1791,10 @@ function _oneThingRenderEditPanel(task) {
     ? `<div class="one-thing-edit-links">${_oneThingRenderLinkPicker(_oneThingHorizon, task.parent_ids || [], { inputName: `edit-links-${task.id}` })}</div>`
     : '';
   return `<div class="one-thing-row-edit-panel" data-task-id="${_esc(task.id)}">
-    <label class="one-thing-edit-label">Description</label>
+    <label class="one-thing-edit-label">Title</label>
     <input type="text" class="one-thing-edit-text" data-task-id="${_esc(task.id)}" value="${_esc(task.text || '')}" maxlength="500" />
+    <label class="one-thing-edit-label">Details <span class="one-thing-edit-optional">(optional)</span></label>
+    <textarea class="one-thing-edit-details" data-task-id="${_esc(task.id)}" rows="3" maxlength="4000" placeholder="Extra context…">${_esc(task.details || '')}</textarea>
     <div class="one-thing-edit-fields">
       <button type="button" class="one-thing-date-trigger one-thing-edit-due-trigger one-thing-add-field" data-task-id="${_esc(task.id)}" title="Planned completion">Due date</button>
       <input type="hidden" class="one-thing-edit-due" data-task-id="${_esc(task.id)}" value="${_esc(dueValue)}" />
@@ -1963,9 +1966,10 @@ async function _handleOneThingEditSave(taskId, body, btn) {
   if (!panel) return;
   const text = panel.querySelector('.one-thing-edit-text')?.value?.trim();
   if (!text) {
-    uiModule.showToast?.('Description cannot be empty', 3000);
+    uiModule.showToast?.('Title cannot be empty', 3000);
     return;
   }
+  const details = panel.querySelector('.one-thing-edit-details')?.value?.trim() || '';
   const dueInput = panel.querySelector('.one-thing-edit-due');
   const linkRoot = panel.querySelector('.one-thing-edit-links');
   const parentIds = linkRoot ? _oneThingSelectedParentIds(linkRoot) : null;
@@ -1978,6 +1982,7 @@ async function _handleOneThingEditSave(taskId, body, btn) {
   try {
     const payload = {
       text,
+      details,
       due_date: dueInput?.value || null,
       priority: panel.querySelector('.one-thing-edit-priority')?.value || 'steady',
     };
@@ -2104,15 +2109,20 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
     </div>`;
   if (!_showingArchived) {
     html += `<div class="one-thing-add">
-      <input type="text" class="one-thing-add-text" placeholder="What needs your attention?" maxlength="500" />
-      <button type="button" class="one-thing-date-trigger one-thing-add-field" title="Planned completion">Due date</button>
-      <input type="hidden" class="one-thing-add-due" value="" />
-      <select class="one-thing-add-priority one-thing-add-field" title="Priority">
-        <option value="steady">Steady</option>
-        <option value="elevated">Elevated</option>
-        <option value="critical">Critical</option>
-      </select>
-      <button type="button" class="one-thing-add-btn">Add</button>
+      <div class="one-thing-add-main">
+        <input type="text" class="one-thing-add-text" placeholder="Title" maxlength="500" />
+        <textarea class="one-thing-add-details" placeholder="Details (optional)" rows="2" maxlength="4000"></textarea>
+      </div>
+      <div class="one-thing-add-meta">
+        <button type="button" class="one-thing-date-trigger one-thing-add-field" title="Planned completion">Due date</button>
+        <input type="hidden" class="one-thing-add-due" value="" />
+        <select class="one-thing-add-priority one-thing-add-field" title="Priority">
+          <option value="steady">Steady</option>
+          <option value="elevated">Elevated</option>
+          <option value="critical">Critical</option>
+        </select>
+        <button type="button" class="one-thing-add-btn">Add</button>
+      </div>
     </div>`;
     if (_TODO_LINKS_REQUIRED.has(_oneThingHorizon)) {
       html += `<div class="one-thing-add-links">${_oneThingRenderLinkPicker(_oneThingHorizon)}</div>`;
@@ -2160,6 +2170,7 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
           <div class="one-thing-row-head">
             <div class="one-thing-row-main">
               ${showEditPanel ? '' : `<div class="one-thing-row-title${task.done ? ' is-done' : ''}">${_esc(task.text || '')}</div>`}
+              ${showEditPanel || showLinksPanel || !task.details ? '' : `<div class="one-thing-row-details">${_esc(task.details)}</div>`}
               ${showEditPanel ? _oneThingRenderEditPanel(task) : ''}
               ${showLinksPanel ? `<div class="one-thing-row-links-panel">${_oneThingRenderLinkPicker(_oneThingHorizon, task.parent_ids || [], { inputName: `links-${task.id}` })}<button type="button" class="one-thing-link-save" data-task-id="${_esc(task.id)}">Save links</button><div class="one-thing-graph-links" data-graph-from="task:${_esc(task.id)}"></div></div>` : ''}
               ${!showEditPanel && !showLinksPanel ? `<div class="one-thing-row-meta">
@@ -2212,6 +2223,7 @@ function _wireOneThingView(body) {
 
   const addBtn = addForm.querySelector('.one-thing-add-btn');
   const addInput = addForm.querySelector('.one-thing-add-text');
+  const detailsInput = addForm.querySelector('.one-thing-add-details');
   const dueInput = addForm.querySelector('.one-thing-add-due');
   const dueTrigger = addForm.querySelector('.one-thing-date-trigger');
   const priInput = addForm.querySelector('.one-thing-add-priority');
@@ -2235,6 +2247,7 @@ function _wireOneThingView(body) {
   const submitAdd = async () => {
     const text = (addInput?.value || '').trim();
     if (!text) return;
+    const details = (detailsInput?.value || '').trim() || null;
     const linkRoot = body.querySelector('.one-thing-add-links');
     const parentIds = _oneThingSelectedParentIds(linkRoot);
     if (_TODO_LINKS_REQUIRED.has(_oneThingHorizon) && !parentIds.length) {
@@ -2246,6 +2259,7 @@ function _wireOneThingView(body) {
     const dueDate = dueInput?.value || null;
     const optimistic = _oneThingBuildOptimisticTask({
       text,
+      details,
       horizon: _oneThingHorizon,
       priority,
       due_date: dueDate,
@@ -2253,6 +2267,7 @@ function _wireOneThingView(body) {
     });
 
     addInput.value = '';
+    if (detailsInput) detailsInput.value = '';
     if (dueInput) dueInput.value = '';
     _syncOneThingDueTrigger(dueTrigger, dueInput);
     _upsertTaskInLocalBoard(optimistic);
@@ -2267,6 +2282,7 @@ function _wireOneThingView(body) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
+          details,
           horizon: _oneThingHorizon,
           priority,
           due_date: dueDate,
@@ -3518,7 +3534,7 @@ function _bindCardEvents(body) {
 // tab closes, or the page reloads before Save is hit, reopening that note
 // restores the unsaved text. Drafts are cleared on an explicit Save or
 // Cancel. Survives offline because it never touches the network.
-const _DRAFT_PREFIX = 'odysseus-note-draft-';
+const _DRAFT_PREFIX = 'nobody-note-draft-';
 function _draftKey(id) { return _DRAFT_PREFIX + (id || '__new__'); }
 function _loadDraft(id) {
   try { return JSON.parse(localStorage.getItem(_draftKey(id)) || 'null'); } catch { return null; }
@@ -5815,6 +5831,132 @@ async function _commitNoteReorder() {
 }
 
 
+// ---- Agent propose-complete toast (Links-style Confirm / Dismiss) ----
+
+const _todoCompleteQueue = [];
+let _todoCompleteShowing = false;
+let _todoCompleteShowingId = null;
+
+function _todoSuggestHost() {
+  let host = document.getElementById('kg-link-suggest-host');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'kg-link-suggest-host';
+    host.className = 'kg-link-suggest-host';
+    host.setAttribute('aria-live', 'polite');
+    document.body.appendChild(host);
+  }
+  return host;
+}
+
+function _dismissTodoCompleteCard(card, onDone) {
+  if (!card || card.dataset.kgDismissed === '1') return;
+  card.dataset.kgDismissed = '1';
+  card.classList.remove('kg-link-suggest-in');
+  card.classList.add('kg-link-suggest-out');
+  window.setTimeout(() => {
+    card.remove();
+    if (onDone) onDone();
+  }, 260);
+}
+
+function _finishTodoCompletePrompt() {
+  _todoCompleteShowing = false;
+  _todoCompleteShowingId = null;
+  _showNextTodoCompleteSuggestion();
+}
+
+function _showNextTodoCompleteSuggestion() {
+  if (_todoCompleteShowing) return;
+  const data = _todoCompleteQueue.shift();
+  if (!data) return;
+  if (!data.task_id) {
+    _showNextTodoCompleteSuggestion();
+    return;
+  }
+  _todoCompleteShowing = true;
+  _todoCompleteShowingId = String(data.task_id);
+
+  const title = data.text || 'Untitled task';
+  const horizon = data.horizon_label || data.horizon || '';
+  const details = (data.details || '').trim();
+
+  const card = document.createElement('div');
+  card.className = 'kg-link-suggest-card todo-complete-suggest-card';
+  card.innerHTML = `
+    <div class="kg-link-suggest-accent" aria-hidden="true"></div>
+    <div class="kg-link-suggest-inner">
+      <div class="kg-link-suggest-head">
+        <span class="kg-link-suggest-icon" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+        </span>
+        <div class="kg-link-suggest-copy">
+          <div class="kg-link-suggest-eyebrow">Mark todo complete?</div>
+          <div class="kg-link-suggest-sub">${horizon ? _esc(horizon) + ' · ' : ''}Confirm to mark done, or dismiss.</div>
+        </div>
+        <button type="button" class="kg-link-suggest-close" aria-label="Close">×</button>
+      </div>
+      <div class="kg-link-suggest-nodes">
+        <div class="kg-link-suggest-node">
+          <span class="kg-type kg-type-task">Todo</span>
+          <span class="kg-link-suggest-title">${_esc(title)}</span>
+        </div>
+      </div>
+      ${details ? `<div class="todo-complete-suggest-details">${_esc(details)}</div>` : ''}
+      <div class="kg-link-suggest-foot">
+        <div class="kg-link-suggest-actions">
+          <button type="button" class="kg-link-suggest-reject">Dismiss</button>
+          <button type="button" class="kg-link-suggest-accept">Confirm</button>
+        </div>
+      </div>
+    </div>`;
+
+  const host = _todoSuggestHost();
+  host.appendChild(card);
+  requestAnimationFrame(() => card.classList.add('kg-link-suggest-in'));
+
+  const finish = () => _dismissTodoCompleteCard(card, _finishTodoCompletePrompt);
+
+  card.querySelector('.kg-link-suggest-close')?.addEventListener('click', finish);
+  card.querySelector('.kg-link-suggest-reject')?.addEventListener('click', finish);
+  card.querySelector('.kg-link-suggest-accept')?.addEventListener('click', async () => {
+    const acceptBtn = card.querySelector('.kg-link-suggest-accept');
+    if (acceptBtn) acceptBtn.disabled = true;
+    card.classList.add('kg-link-suggest-saving');
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/one-thing/tasks/${encodeURIComponent(data.task_id)}/toggle`,
+        { method: 'POST', credentials: 'same-origin' },
+      );
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.detail || 'Could not mark done');
+      if (payload.task) _upsertTaskInLocalBoard(payload.task);
+      const body = document.querySelector('#notes-pane .notes-pane-body');
+      if (body && _open) {
+        await _renderOneThingView(body, { refresh: 'none' });
+        _renderLabels(body);
+      }
+      uiModule.showToast?.('Task marked done');
+      finish();
+    } catch (err) {
+      card.classList.remove('kg-link-suggest-saving');
+      if (acceptBtn) acceptBtn.disabled = false;
+      uiModule.showToast?.(err.message || 'Could not mark done', 3500);
+    }
+  });
+}
+
+function handleTodoCompleteSuggestion(data) {
+  if (!data?.task_id) return;
+  const key = String(data.task_id);
+  if (key === _todoCompleteShowingId) return;
+  if (_todoCompleteQueue.some((q) => String(q.task_id) === key)) return;
+  _todoCompleteQueue.push(data);
+  _showNextTodoCompleteSuggestion();
+}
+
 // Background reminder loop — runs whether panel is open or not
 async function _initReminders() {
   try {
@@ -5827,9 +5969,24 @@ async function _initReminders() {
   } catch {}
 }
 
-const notesModule = { openPanel, closePanel, togglePanel, isPanelOpen, openNotes: openPanel, closeNotes: closePanel, isNotesOpen: isPanelOpen, refreshDueBadge };
+const notesModule = {
+  openPanel,
+  closePanel,
+  togglePanel,
+  isPanelOpen,
+  openNotes: openPanel,
+  closeNotes: closePanel,
+  isNotesOpen: isPanelOpen,
+  refreshDueBadge,
+  handleTodoCompleteSuggestion,
+};
 export default notesModule;
-export { openPanel as openNotes, closePanel as closeNotes, isPanelOpen as isNotesOpen };
+export {
+  openPanel as openNotes,
+  closePanel as closeNotes,
+  isPanelOpen as isNotesOpen,
+  handleTodoCompleteSuggestion,
+};
 window.notesModule = notesModule;
 
 // Start reminder loop on module load (after a short delay so app loads first)

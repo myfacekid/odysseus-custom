@@ -4,8 +4,8 @@
  */
 import Storage from '../storage.js';
 
-const STATE_PREFIX = 'odysseus_project_workspace:';
-export const LAST_OPEN_PROJECT_KEY = 'odysseus_project_last_open';
+const STATE_PREFIX = 'nobody_project_workspace:';
+export const LAST_OPEN_PROJECT_KEY = 'nobody_project_last_open';
 
 function _key(projectId) {
   return `${STATE_PREFIX}${projectId || ''}`;

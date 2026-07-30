@@ -78,10 +78,11 @@ export const THEMES = {
 };
 
 export const DEFAULT_THEME = 'modus-operandi-tinted';
-// Canonical key is Storage.KEYS.THEME ('nobody-theme'); legacy odysseus-/oculus-
+// Canonical key is Storage.KEYS.THEME ('nobody-theme'); legacy oculus-
 // theme keys are migrated on read and cleared on write/remove.
+// Dark swatch label stays 'odysseus' (THEME_LABELS.dark) by design.
 const LS_KEY = Storage.KEYS.THEME;
-const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
+const CUSTOM_THEMES_KEY = 'nobody-custom-themes';
 // Alias keys that resolve in THEMES but are omitted from the swatch grid.
 const THEME_ALIAS_KEYS = new Set(['modus']);
 

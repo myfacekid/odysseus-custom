@@ -1,4 +1,4 @@
-# Odysseus UX Roadmap
+# Nobody UX Roadmap
 
 Living plan for **whole-app pleasantness**: fewer surfaces, clearer names, honest feedback, and one primary action per screen.
 
@@ -21,7 +21,7 @@ Living plan for **whole-app pleasantness**: fewer surfaces, clearer names, hones
 
 ## Problem (today)
 
-Odysseus is feature-rich but **chrome-heavy**. Users manage many coexisting modals (Library, Brain, Links, Research, Cookbook, Settings, Compare, Email, Tasks…), learn dual navigation (sidebar + icon rail), and encounter **the same concept under different names**.
+Nobody is feature-rich but **chrome-heavy**. Users manage many coexisting modals (Library, Brain, Links, Research, Cookbook, Settings, Compare, Email, Tasks…), learn dual navigation (sidebar + icon rail), and encounter **the same concept under different names**.
 
 | Symptom | Impact |
 |---------|--------|

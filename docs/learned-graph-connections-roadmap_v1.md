@@ -17,7 +17,7 @@
 | [`knowledge-graph-edge-taxonomy-roadmap_v3.md`](knowledge-graph-edge-taxonomy-roadmap_v3.md) | Schema, T2 `merge_subgraph`, conflict rules, producers |
 | [`paper-token-retrieval-roadmap_v1.md`](paper-token-retrieval-roadmap_v1.md) | `compare_papers` → `suggested_edges` |
 | [`deep-research-roadmap.md`](deep-research-roadmap.md) | Research complete → graph; must align with propose-not-write |
-| **[`deep-research-ldr-migration.md`](deep-research-ldr-migration.md)** | **Active DR backend** — LDR default; typed edges still post-run Odysseus; **L6** = selective enrich; **L7** = full-text escalation |
+| **[`deep-research-ldr-migration.md`](deep-research-ldr-migration.md)** | **Active DR backend** — LDR default; typed edges still post-run Nobody; **L6** = selective enrich; **L7** = full-text escalation |
 | [`projects-roadmap.md`](projects-roadmap.md) | Project Links rail as another surfacing point |
 
 ---

@@ -37,6 +37,15 @@ def test_untrusted_context_policy_marks_sources_as_data():
 
     assert "not instructions" in UNTRUSTED_CONTEXT_POLICY
     assert "overrides" in UNTRUSTED_CONTEXT_POLICY
+    assert "Never mention" in UNTRUSTED_CONTEXT_POLICY
+
+
+def test_untrusted_context_header_says_not_to_narrate_wrapper():
+    from src.prompt_security import UNTRUSTED_CONTEXT_HEADER, untrusted_context_message
+
+    assert "Do not mention" in UNTRUSTED_CONTEXT_HEADER
+    msg = untrusted_context_message("skills", "procedure: do the thing")
+    assert "Do not mention" in msg["content"]
 
 
 # ── secret_storage ─────────────────────────────────────────────
@@ -128,8 +137,8 @@ def test_readme_native_quickstart_uses_loopback():
 def test_ollama_cookbook_runner_does_not_force_public_bind():
     route = Path("routes/cookbook_routes.py").read_text(encoding="utf-8")
     cookbook_js = Path("static/js/cookbook.js").read_text(encoding="utf-8")
-    assert 'OLLAMA_HOST="0.0.0.0:${ODYSSEUS_OLLAMA_PORT}" ollama serve' not in route
-    assert 'OLLAMA_HOST="${ODYSSEUS_OLLAMA_HOST}:${ODYSSEUS_OLLAMA_PORT}" ollama serve' in route
+    assert 'OLLAMA_HOST="0.0.0.0:${NOBODY_OLLAMA_PORT}" ollama serve' not in route
+    assert 'OLLAMA_HOST="${NOBODY_OLLAMA_HOST}:${NOBODY_OLLAMA_PORT}" ollama serve' in route
     assert '_ollama_default_host = "0.0.0.0" if remote else "127.0.0.1"' in route
     assert "WARNING: remote Ollama will bind" in route
     assert "OLLAMA_HOST=0.0.0.0:${ollamaPort}" not in cookbook_js
@@ -688,7 +697,7 @@ def _load_search_content_for_test(monkeypatch, name="services.search.content_und
     analytics.RateLimitError = RuntimeError
     analytics.error_logger = _types.SimpleNamespace(error=lambda *a, **k: None)
     cache = _types.ModuleType("services.search.cache")
-    cache.CONTENT_CACHE_DIR = Path("/tmp/odysseus-test-content-cache")
+    cache.CONTENT_CACHE_DIR = Path("/tmp/nobody-test-content-cache")
     cache.content_cache_index = {}
     cache.generate_cache_key = lambda url: "test-cache-key"
     cache.cleanup_cache = lambda: None

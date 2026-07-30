@@ -104,76 +104,8 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "search_vault",
-            "description": "Read, search, write, and wikilink the user's markdown vault folder. Native [[wikilinks]] via follow/backlinks/link; no Obsidian app required. Write with create/append/patch/append_daily.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": [
-                            "search", "list", "read", "backlinks", "follow",
-                            "create", "append", "append_daily", "patch", "link",
-                            "get_daily", "list_tasks", "add_task", "toggle_task", "sync_tasks",
-                        ],
-                        "description": "Vault operation: read/search graph, write/edit notes, or One Thing tasks (get_daily/list_tasks/add_task).",
-                    },
-                    "query": {"type": "string", "description": "Search terms (filename, body, #tag)"},
-                    "folder": {
-                        "type": "string",
-                        "description": "Vault-relative folder for list/search/create",
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "Vault-relative note path for read/write/patch/backlinks/follow",
-                    },
-                    "from": {"type": "string", "description": "Source note for link action"},
-                    "to": {"type": "string", "description": "Target note title or path for link action"},
-                    "title": {"type": "string", "description": "Title for create (used if path omitted)"},
-                    "content": {"type": "string", "description": "Markdown body for create/append/append_daily"},
-                    "find": {"type": "string", "description": "Text to find for patch"},
-                    "replace": {"type": "string", "description": "Replacement text for patch (may include [[wikilinks]])"},
-                    "edits": {
-                        "type": "array",
-                        "description": "Multiple find/replace pairs for patch",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "find": {"type": "string"},
-                                "replace": {"type": "string"},
-                            },
-                        },
-                    },
-                    "tags": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "YAML tags for create",
-                    },
-                    "depth": {"type": "integer", "description": "Wikilink follow depth (0-3, default 1)"},
-                    "limit": {"type": "integer", "description": "Max search results (1-30, default 15)"},
-                    "max_chars": {"type": "integer", "description": "Max characters when reading/following notes"},
-                    "horizon": {
-                        "type": "string",
-                        "enum": ["focus", "build", "aim"],
-                        "description": "One Thing horizon: focus=this week, build=~3 months, aim=this year",
-                    },
-                    "priority": {
-                        "type": "string",
-                        "enum": ["critical", "elevated", "steady"],
-                        "description": "One Thing priority (critical/elevated/steady)",
-                    },
-                    "due_date": {"type": "string", "description": "Planned completion YYYY-MM-DD (One Thing tasks)"},
-                    "text": {"type": "string", "description": "Task text for add_task"},
-                    "id": {"type": "string", "description": "Task id for toggle_task"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "search_knowledge",
-            "description": "Search the unified knowledge graph: todos, documents, memories, skills, Zotero papers — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use types=[\"paper\"] for saved Zotero items. For papers: read returns abstract + cached Deep Research summary (when available) by default — set include_pdf=true only when full PDF text is needed. Use suggest_link (not link) when proposing connections the user should confirm. merge_subgraph preview queues batch proposals for UI review — apply only when the user explicitly asks to save links.",
+            "description": "Search the unified knowledge graph: todos, documents, memories, skills, Zotero papers — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use types=[\"paper\"] for saved Zotero items. For papers: read returns abstract + cached Deep Research summary (when available) by default — set include_pdf=true only when full PDF text is needed. User asks to 'suggest links' / 'set up links' / 'propose connections' / 'link these' → suggest_link (not link) so the user can confirm. merge_subgraph preview queues batch proposals for UI review — apply only when the user explicitly asks to save links.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -619,13 +551,13 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ui_control",
-            "description": "Control the user interface. Actions: toggle (turn tools on/off), open_panel (open a modal: documents/library, gallery, sessions, notes, memories/brain, skills, settings, cookbook), set_mode, switch_model, set_theme (presets: dark, light, midnight, paper, nord, monokai, gruvbox, dracula, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, vaporwave, lavender, gpt, coffee, claude), create_theme (CREATE any custom theme with a name + colors object — pick distinctive, evocative hex colors that match the requested aesthetic, NOT generic defaults. The theme auto-applies after creation). When a user asks for ANY theme not in the preset list, ALWAYS use create_theme.",
+            "description": "Control the user interface. Actions: toggle (turn tools on/off), open_panel (open a modal: documents/library, gallery, sessions, notes/todos, memories/brain, skills, settings, cookbook, calendar, research, compare, tasks, links/knowledge, theme), set_mode, switch_model, set_theme (presets: dark, light, midnight, paper, nord, monokai, gruvbox, dracula, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, vaporwave, lavender, gpt, coffee, claude), create_theme (CREATE any custom theme with a name + colors object — pick distinctive, evocative hex colors that match the requested aesthetic, NOT generic defaults. The theme auto-applies after creation). When a user asks for ANY theme not in the preset list, ALWAYS use create_theme.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["toggle", "open_panel", "set_mode", "switch_model", "set_theme", "create_theme", "get_toggles"],
                                "description": "The UI action. Use set_theme for presets, create_theme to build a custom theme with any hex colors"},
-                    "name": {"type": "string", "description": "For toggle: web, bash, research, incognito, document_editor (aliases: shell, search, deepresearch, documents). For open_panel: documents, gallery, sessions, notes, brain/memories, skills, settings, cookbook. For set_theme: a preset theme name. For create_theme: the custom theme name."},
+                    "name": {"type": "string", "description": "For toggle: web, bash, research, incognito, document_editor (aliases: shell, search, deepresearch, documents). For open_panel: documents, gallery, sessions, notes/todos, brain/memories, skills, settings, cookbook, calendar, research, compare, tasks, links/knowledge, theme. For set_theme: a preset theme name. For create_theme: the custom theme name."},
                     "value": {"type": "string", "description": "Value: on/off for toggle, agent/chat for set_mode, model name for switch_model, theme name for set_theme"},
                     "colors": {"type": "object", "description": "For create_theme: the theme colors",
                                "properties": {
@@ -727,16 +659,21 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_notes",
-            "description": "Manage notes and checklists (Google Keep-style): list, add, update, delete, toggle_item. IMPORTANT: For to-do lists / checklists, set note_type='checklist' and pass the items as the `checklist_items` array — do NOT serialize them into `content` as plain text. For freeform notes, use note_type='note' and put the body in `content`. `due_date` accepts natural language like 'tomorrow at 9am' (parsed in the user's timezone) and fires a notification — do not also create a calendar event for the same reminder.",
+            "description": "Manage notes/checklists AND the Todos board (One Thing horizons). For Keep-style notes: list/add/update/delete/toggle_item. For the Todos board (Immediate / Intermediate / Long Horizon): list_one_thing, add_one_thing, toggle_one_thing. Hierarchy focus→build→aim: add_one_thing for focus/build REQUIRES parent_ids (list parent horizon first). Marking complete via toggle_one_thing proposes a Confirm/Dismiss toast — do not claim done until confirmed. For checklists, set note_type='checklist' and pass checklist_items. due_date on notes accepts natural language; on One Thing tasks use YYYY-MM-DD.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string",
-                               "enum": ["list", "add", "update", "delete", "toggle_item"],
-                               "description": "The action to perform"},
-                    "id": {"type": "string", "description": "Note id (for update/delete/toggle_item); 8-char prefix is fine"},
-                    "title": {"type": "string", "description": "Note title (for add/update)"},
-                    "content": {"type": "string", "description": "Freeform body text. Use this for note_type='note'. Do NOT use this for checklists — pass `checklist_items` instead."},
+                               "enum": [
+                                   "list", "add", "update", "delete", "toggle_item",
+                                   "list_one_thing", "add_one_thing", "toggle_one_thing",
+                               ],
+                               "description": "Notes CRUD, or One Thing list_one_thing / add_one_thing / toggle_one_thing (aliases: list_tasks, add_task, toggle_task)"},
+                    "id": {"type": "string", "description": "Note or task id (for update/delete/toggle_item/toggle_one_thing); 8-char prefix is fine"},
+                    "title": {"type": "string", "description": "Note title, or One Thing task title for add_one_thing"},
+                    "text": {"type": "string", "description": "One Thing task title (alias of title) for add_one_thing"},
+                    "content": {"type": "string", "description": "Freeform note body, or optional One Thing details when title/text is also set"},
+                    "details": {"type": "string", "description": "Optional longer body for One Thing tasks (add_one_thing)"},
                     "note_type": {"type": "string", "enum": ["note", "checklist"],
                                   "description": "'note' = freeform text in `content`. 'checklist' = structured to-do items in `checklist_items`. Defaults to 'checklist' if checklist_items is supplied, else 'note'."},
                     "checklist_items": {"type": "array",
@@ -751,7 +688,17 @@ FUNCTION_TOOL_SCHEMAS = [
                     "label": {"type": "string", "description": "Optional category label (also used as a list filter)"},
                     "pinned": {"type": "boolean", "description": "Pin the note to the top"},
                     "archived": {"type": "boolean", "description": "For update: archive/unarchive. For list: show archived notes when true."},
-                    "due_date": {"type": "string", "description": "Reminder time. Accepts natural language ('tomorrow at 9am', '11pm today') or ISO 8601. Fires a notification at that time."},
+                    "due_date": {"type": "string", "description": "Reminder time for notes (natural language or ISO), or YYYY-MM-DD for One Thing tasks"},
+                    "horizon": {"type": "string", "enum": ["focus", "build", "aim", "misc"],
+                                "description": "One Thing horizon: focus=Immediate, build=Intermediate, aim=Long Horizon, misc"},
+                    "priority": {"type": "string", "enum": ["critical", "elevated", "steady"],
+                                 "description": "One Thing priority for add_one_thing"},
+                    "parent_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Required for focus/build Todos: ids of parent goals (8-char prefixes OK). Hierarchy focus→build→aim. list_one_thing on the parent horizon first. Omit for aim/misc.",
+                    },
+                    "confirmed": {"type": "boolean", "description": "For toggle_one_thing: set true only after the user already confirmed completing the task (skips the Confirm toast)"},
                     "index": {"type": "integer", "description": "Checklist item index (for toggle_item, 0-based)"}
                 },
                 "required": ["action"]
@@ -1379,7 +1326,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
     elif tool_type in ("manage_tasks", "manage_skills", "api_call",
                         "manage_endpoints", "manage_mcp", "manage_webhooks",
                         "manage_tokens", "manage_documents", "manage_settings",
-                        "search_vault", "search_knowledge", "search_zotero", "compare_papers", "manage_research", "trigger_research"):
+                        "search_knowledge", "search_zotero", "compare_papers", "manage_research", "trigger_research"):
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")

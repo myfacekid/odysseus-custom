@@ -3,17 +3,17 @@
 
 // ── Key constants ──
 const LEGACY_KEY_MAP = {
-  'nobody-theme': ['oculus-theme', 'odysseus-theme'],
-  'nobody-toggles': ['oculus-toggles', 'odysseus-toggles'],
-  'nobody-model-expanded': ['oculus-model-expanded', 'odysseus-model-expanded'],
-  'nobody-model-endpoints': ['oculus-model-endpoints', 'odysseus-model-endpoints'],
-  'nobody-selected-model': ['oculus-selected-model', 'odysseus-selected-model'],
-  'nobody-sessions-sort': ['oculus-sessions-sort', 'odysseus-sessions-sort'],
-  'nobody-search-scope': ['oculus-search-scope', 'odysseus-search-scope'],
-  'nobody-incognito': ['oculus-incognito', 'odysseus-incognito'],
-  'nobody-rag-active': ['oculus-rag-active', 'odysseus-rag-active'],
-  'nobody-mcp-active': ['oculus-mcp-active', 'odysseus-mcp-active'],
-  'nobody-density': ['oculus-density', 'odysseus-density'],
+  'nobody-theme': ['oculus-theme'],
+  'nobody-toggles': ['oculus-toggles'],
+  'nobody-model-expanded': ['oculus-model-expanded'],
+  'nobody-model-endpoints': ['oculus-model-endpoints'],
+  'nobody-selected-model': ['oculus-selected-model'],
+  'nobody-sessions-sort': ['oculus-sessions-sort'],
+  'nobody-search-scope': ['oculus-search-scope'],
+  'nobody-incognito': ['oculus-incognito'],
+  'nobody-rag-active': ['oculus-rag-active'],
+  'nobody-mcp-active': ['oculus-mcp-active'],
+  'nobody-density': ['oculus-density'],
 };
 
 function _readKey(key) {
