@@ -1,6 +1,4 @@
 """Paper Token Retrieval (Phase R0–R1) — tier defaults, caps, and section constants.
-
-See docs/paper-token-retrieval-roadmap_v1.md.
 """
 
 from __future__ import annotations

@@ -780,6 +780,13 @@ export function stripToolBlocks(text) {
   return cleaned.trim();
 }
 
+/** Remove ```plan / ```json fences that become the blueprint plan card. */
+const PLAN_FENCE_RE = /```\s*(?:plan|json)\s*\r?\n[\s\S]*?(?:\r?\n)?```/gi;
+export function stripPlanFence(text) {
+  if (!text) return text || '';
+  return String(text).replace(PLAN_FENCE_RE, '').replace(/\n{3,}/g, '\n\n').trimEnd();
+}
+
 const SOURCE_KIND_LABELS = {
   research: 'Research sources',
   web: 'Web sources',
@@ -935,6 +942,177 @@ export function buildFindingsBox(findings, expanded) {
 export function appendReportButton(container, sessionId) {
   _appendReportButton(container, sessionId);
   _appendContinuePrompt(container);
+}
+
+/** Format approved plan text for the execute turn. */
+export function formatPlanForExecution(plan) {
+  if (!plan || typeof plan !== 'object') return 'Execute the approved plan.';
+  const title = String(plan.title || 'Plan').trim();
+  const lines = [
+    'Execute this approved plan now. Follow the steps in order. Use tools as needed.',
+    '',
+    '# ' + title,
+  ];
+  const overview = String(plan.overview || '').trim();
+  if (overview) lines.push('', overview);
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
+  if (steps.length) {
+    lines.push('', '## Steps');
+    steps.forEach((step, i) => {
+      if (step && typeof step === 'object') {
+        const t = String(step.title || '').trim();
+        const d = String(step.detail || '').trim();
+        lines.push((i + 1) + '. ' + t + (d ? ' — ' + d : ''));
+      } else {
+        lines.push((i + 1) + '. ' + String(step));
+      }
+    });
+  }
+  const risks = Array.isArray(plan.risks) ? plan.risks : [];
+  if (risks.length) {
+    lines.push('', '## Risks / assumptions');
+    risks.forEach((r) => lines.push('- ' + String(r)));
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Build an inline blueprint plan card (View details left, Start right).
+ * @param {object} plan
+ * @param {{ onStart?: function }} [opts]
+ */
+export function buildPlanCard(plan, opts) {
+  const card = document.createElement('div');
+  card.className = 'plan-card' + (plan && plan.status === 'started' ? ' is-started' : '');
+  card.dataset.planStatus = (plan && plan.status) || 'ready';
+
+  const kicker = document.createElement('span');
+  kicker.className = 'plan-card-kicker';
+  kicker.textContent = 'Plan';
+  card.appendChild(kicker);
+
+  const title = document.createElement('h3');
+  title.className = 'plan-card-title';
+  title.textContent = (plan && plan.title) ? String(plan.title) : 'Plan';
+  card.appendChild(title);
+
+  if (plan && plan.overview) {
+    const ov = document.createElement('p');
+    ov.className = 'plan-card-overview';
+    ov.textContent = String(plan.overview);
+    card.appendChild(ov);
+  }
+
+  const steps = (plan && Array.isArray(plan.steps)) ? plan.steps : [];
+  const risks = (plan && Array.isArray(plan.risks)) ? plan.risks : [];
+  const details = document.createElement('details');
+  details.className = 'plan-card-details';
+  details.hidden = true;
+  const summary = document.createElement('summary');
+  summary.textContent = 'Details';
+  details.appendChild(summary);
+  if (steps.length) {
+    const ol = document.createElement('ol');
+    ol.className = 'plan-card-steps';
+    steps.forEach((step) => {
+      const li = document.createElement('li');
+      if (step && typeof step === 'object') {
+        li.appendChild(document.createTextNode(String(step.title || '')));
+        if (step.detail) {
+          const d = document.createElement('span');
+          d.className = 'plan-card-step-detail';
+          d.textContent = String(step.detail);
+          li.appendChild(d);
+        }
+      } else {
+        li.textContent = String(step || '');
+      }
+      ol.appendChild(li);
+    });
+    details.appendChild(ol);
+  }
+  if (risks.length) {
+    const ul = document.createElement('ul');
+    ul.className = 'plan-card-risks';
+    risks.forEach((r) => {
+      const li = document.createElement('li');
+      li.textContent = String(r);
+      ul.appendChild(li);
+    });
+    details.appendChild(ul);
+  }
+  if (steps.length || risks.length) card.appendChild(details);
+
+  const actions = document.createElement('div');
+  actions.className = 'plan-card-actions';
+
+  const detailsBtn = document.createElement('button');
+  detailsBtn.type = 'button';
+  detailsBtn.className = 'btn btn-secondary plan-card-details-btn';
+  detailsBtn.textContent = 'View details';
+  detailsBtn.disabled = !(steps.length || risks.length);
+  detailsBtn.addEventListener('click', () => {
+    if (!details.parentNode) return;
+    details.hidden = false;
+    details.open = !details.open;
+    detailsBtn.textContent = details.open ? 'Hide details' : 'View details';
+  });
+
+  const startBtn = document.createElement('button');
+  startBtn.type = 'button';
+  startBtn.className = 'btn btn-primary plan-card-start';
+  startBtn.textContent = plan && plan.status === 'started' ? 'Started' : 'Start';
+  startBtn.disabled = plan && plan.status === 'started';
+  startBtn.addEventListener('click', () => {
+    if (startBtn.disabled) return;
+    const handler = opts && opts.onStart;
+    if (typeof handler === 'function') handler(plan, card);
+  });
+
+  // View details (left) then Start (right)
+  actions.appendChild(detailsBtn);
+  actions.appendChild(startBtn);
+  card.appendChild(actions);
+
+  // Keep plan payload for Start / replay
+  try { card._plan = plan; } catch (_) {}
+  card.dataset.planJson = JSON.stringify(plan || {});
+  return card;
+}
+
+export function appendPlanCard(container, plan, opts) {
+  if (!container || !plan) return null;
+  const card = buildPlanCard(plan, opts);
+  container.appendChild(card);
+  return card;
+}
+
+/**
+ * Mount a plan card as a sibling under the AI bubble, left-aligned with it.
+ */
+export function mountPlanCardOnMessage(msgEl, plan, opts) {
+  if (!msgEl || !plan) return null;
+  const bubble = (msgEl.classList && msgEl.classList.contains('msg-ai'))
+    ? msgEl
+    : (msgEl.closest && msgEl.closest('.msg-ai')) || msgEl;
+  if (!bubble || !bubble.parentNode) return null;
+  scrubPlanJsonFromBubble(bubble);
+  // Prefer existing card already attached after this bubble
+  const next = bubble.nextElementSibling;
+  if (next && next.classList && next.classList.contains('plan-card')) return next;
+  // Or one incorrectly nested from an older build
+  const nested = bubble.querySelector('.plan-card');
+  if (nested) nested.remove();
+  const card = buildPlanCard(plan, opts || {
+    onStart: function(p, cardEl) {
+      if (typeof window.startApprovedPlan === 'function') {
+        window.startApprovedPlan(p, cardEl);
+      }
+    },
+  });
+  if (bubble.nextSibling) bubble.parentNode.insertBefore(card, bubble.nextSibling);
+  else bubble.parentNode.appendChild(card);
+  return card;
 }
 
 function _appendContinuePrompt(container) {
@@ -1893,6 +2071,30 @@ export function displayMetrics(messageElement, metrics) {
 /**
  * Add a message to the chat history.
  */
+
+function _mountPlanCard(afterEl, plan) {
+  if (!afterEl || !plan || typeof plan !== 'object') return;
+  mountPlanCardOnMessage(afterEl, plan);
+}
+
+/** Remove rendered ```plan / plan-shaped JSON code blocks once the card exists. */
+export function scrubPlanJsonFromBubble(el) {
+  if (!el || !el.querySelectorAll) return 0;
+  let removed = 0;
+  el.querySelectorAll('pre').forEach((pre) => {
+    const t = (pre.textContent || '').trim();
+    if (!t) return;
+    const looksPlan =
+      (/^\s*\{[\s\S]*\}\s*$/.test(t) && /"title"\s*:/.test(t) && (/"steps"\s*:/.test(t) || /"overview"\s*:/.test(t)))
+      || (/^plan\b/i.test(t) && /"title"\s*:/.test(t));
+    if (looksPlan) {
+      pre.remove();
+      removed += 1;
+    }
+  });
+  return removed;
+}
+
 export function addMessage(role, content, modelName, metadata) {
   try {
     hideWelcomeScreen();
@@ -2017,6 +2219,9 @@ export function addMessage(role, content, modelName, metadata) {
         box.querySelectorAll('pre code:not(.hljs)').forEach(b => window.hljs.highlightElement(b));
       }
       if (markdownModule.renderMermaid) markdownModule.renderMermaid(box);
+      if (metadata && metadata.plan) {
+        _mountPlanCard(lastMsgAi || lastWrap, metadata.plan);
+      }
       return lastWrap;
     }
 
@@ -2048,6 +2253,9 @@ export function addMessage(role, content, modelName, metadata) {
     b.className = 'body';
 
     let text = markdownModule.squashOutsideCode(stripToolBlocks(textRaw || ''));
+    if (role === 'assistant' && metadata && metadata.plan) {
+      text = stripPlanFence(text);
+    }
 
     // For user messages, pull out vision-model image descriptions ([Image: name]\n
     // <multi-line desc>) into a collapsible "image description" section. Done for
@@ -2297,6 +2505,9 @@ export function addMessage(role, content, modelName, metadata) {
     if (role === 'assistant' && markdownModule.renderMermaid) {
       markdownModule.renderMermaid(wrap);
     }
+    if (role === 'assistant' && metadata && metadata.plan) {
+      _mountPlanCard(wrap, metadata.plan);
+    }
     return wrap;
   } catch (error) {
     console.error('Error in addMessage:', error);
@@ -2315,10 +2526,16 @@ const chatRenderer = {
   updateSessionCostUI,
   roleTimestamp,
   stripToolBlocks,
+  stripPlanFence,
+  scrubPlanJsonFromBubble,
   buildSourcesBox,
   inferSourcesDisplayType,
   buildFindingsBox,
   appendReportButton,
+  buildPlanCard,
+  appendPlanCard,
+  mountPlanCardOnMessage,
+  formatPlanForExecution,
   buildImageBubble,
   hideWelcomeScreen,
   showWelcomeScreen,

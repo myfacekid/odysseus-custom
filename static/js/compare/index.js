@@ -173,9 +173,17 @@ async function deactivate(teardown) {
   const _ts = Storage.loadToggleState();
   _ts.mode = state._savedMode;
   Storage.saveToggleState(_ts);
-  const _ab2 = document.getElementById('mode-agent-btn'), _cb2 = document.getElementById('mode-chat-btn');
-  if (_ab2 && _cb2) { _ab2.classList.toggle('active', state._savedMode === 'agent'); _cb2.classList.toggle('active', state._savedMode === 'chat'); }
-  document.querySelectorAll('[data-mode-tool]').forEach(b => { b.style.display = state._savedMode === 'agent' ? '' : 'none'; });
+  if (typeof window.setChatMode === 'function') {
+    window.setChatMode(state._savedMode === 'agent' || state._savedMode === 'plan' || state._savedMode === 'chat' ? state._savedMode : 'chat');
+  } else {
+    const _ab2 = document.getElementById('mode-agent-btn'), _pb2 = document.getElementById('mode-plan-btn'), _cb2 = document.getElementById('mode-chat-btn');
+    if (_ab2 && _cb2) {
+      _ab2.classList.toggle('active', state._savedMode === 'agent');
+      if (_pb2) _pb2.classList.toggle('active', state._savedMode === 'plan');
+      _cb2.classList.toggle('active', state._savedMode === 'chat');
+    }
+    document.querySelectorAll('[data-mode-tool]').forEach(b => { b.style.display = (state._savedMode === 'agent' || state._savedMode === 'plan') ? '' : 'none'; });
+  }
 
   // Delete unsaved sessions, then reload
   if (teardown) {
@@ -262,10 +270,15 @@ async function _buildCompareUI() {
   const _targetMode = (state._compareMode === 'agent') ? 'agent' : 'chat';
   _toggleState.mode = _targetMode;
   Storage.saveToggleState(_toggleState);
-  const _ab = document.getElementById('mode-agent-btn'), _cb = document.getElementById('mode-chat-btn');
-  if (_ab && _cb) {
-    _ab.classList.toggle('active', _targetMode === 'agent');
-    _cb.classList.toggle('active', _targetMode === 'chat');
+  if (typeof window.setChatMode === 'function') {
+    window.setChatMode(_targetMode);
+  } else {
+    const _ab = document.getElementById('mode-agent-btn'), _pb = document.getElementById('mode-plan-btn'), _cb = document.getElementById('mode-chat-btn');
+    if (_ab && _cb) {
+      _ab.classList.toggle('active', _targetMode === 'agent');
+      if (_pb) _pb.classList.toggle('active', false);
+      _cb.classList.toggle('active', _targetMode === 'chat');
+    }
   }
   const _modeToggle = document.querySelector('.mode-toggle');
   if (_modeToggle) { _modeToggle.style.pointerEvents = 'none'; _modeToggle.style.opacity = '0.4'; }

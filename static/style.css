@@ -1539,7 +1539,7 @@ body.bg-pattern-fog {
       flex: 1; cursor: pointer; user-select: none;
       display: flex; align-items: center; gap: 6px;
       margin: 0; padding: 0; border: none;
-      font-size: 10px; font-weight: 400; font-family: inherit;
+      font-size: 11px; font-weight: 400; font-family: inherit;
       /* 1.3 (not 1) so Fira Code's tall glyph box isn't vertically clipped in
          Chromium/Edge — mirrors the .list-item fix. The title is flex-centred
          in a fixed-height (29px) header, so this adds headroom without reflow. */
@@ -1560,7 +1560,7 @@ body.bg-pattern-fog {
        shift and never misaligns the other tool rows. */
     /* U7: readable section header instead of a tiny uppercase micro-label. */
     .tool-subgroup-label {
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
       letter-spacing: 0.01em;
       opacity: 0.55;
@@ -2114,7 +2114,7 @@ body.bg-pattern-fog {
     }
     .list-item span {
       color: var(--fg);
-      font-size: 9.75px;
+      font-size: 11px;
     }
     .grow {
       flex: 1;
@@ -2144,7 +2144,7 @@ body.bg-pattern-fog {
     }
     input[type="text"] { height:32px; width:100%; }
     textarea { width:100%; min-height:32px; height:auto; max-height:30lh; overflow-y:auto; resize:none; }
-    button { height:32px; padding:0 10px; }
+    button { min-height:32px; height:auto; padding:0 10px; }
     #chat-form button[type="submit"] { height:38px; }
     select {
       height:32px;
@@ -2936,9 +2936,9 @@ body.bg-pattern-fog {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.7; }
     }
-    /* Mode toggle — Agent / Chat */
+    /* Mode toggle — Agent / Plan / Chat */
     .mode-toggle {
-      display: flex;
+      display: inline-flex;
       flex-shrink: 0;
       height: 28px;
       border: 1px solid var(--border);
@@ -2951,20 +2951,18 @@ body.bg-pattern-fog {
       position: absolute;
       top: 0;
       left: 0;
-      width: 50%;
+      width: var(--mode-pill-w, 33.333%);
       height: 100%;
       background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
       border-radius: 0;
-      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      transform: translateX(var(--mode-pill-x, 0px));
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
       z-index: 0;
     }
-    .mode-toggle.mode-chat::before {
-      transform: translateX(100%);
-    }
-    #mode-agent-btn {
+    .mode-toggle-btn:first-child {
       border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
     }
-    #mode-chat-btn {
+    .mode-toggle-btn:last-child {
       border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0;
     }
     .mode-toggle-btn {
@@ -2976,15 +2974,18 @@ body.bg-pattern-fog {
       font-size: 11px;
       font-weight: 500;
       font-family: var(--font-ui, 'Iosevka', monospace);
-      letter-spacing: var(--tracking-label, 0.06em);
+      letter-spacing: 0;
       text-transform: uppercase;
+      line-height: 1;
       transition: color 0.2s;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      min-width: 0;
-      flex: 1 1 0;
+      flex: 0 0 auto;
       height: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       position: relative;
       z-index: 1;
     }
@@ -12306,7 +12307,7 @@ textarea.memory-add-input {
   align-self: center;
   flex-shrink: 0;
 }
-/* Trailing doc ops: Undo | type | Copy — pinned as one cluster */
+/* Trailing doc ops: Undo | Redo | type | ⋯ — pinned as one cluster */
 .md-toolbar-right-cluster {
   display: inline-flex;
   align-items: center;
@@ -12315,11 +12316,17 @@ textarea.memory-add-input {
   flex-shrink: 0;
   padding-left: 6px;
 }
-.md-toolbar-right-cluster .doc-split-btn-group {
-  margin-left: 0;
-}
 .md-toolbar-right-cluster .doc-stream-indicator {
   margin-right: 2px;
+}
+#doc-redo-btn.is-disabled,
+#doc-redo-btn:disabled {
+  opacity: 0.2;
+  cursor: default;
+  pointer-events: none;
+}
+#doc-actions-menu-btn {
+  flex-shrink: 0;
 }
 /* Stay-behind strip when the format toolbar is undocked as a palette. */
 .doc-md-toolbar-stay {
@@ -12639,6 +12646,45 @@ textarea.memory-add-input {
   opacity: 1;
 }
 .doc-fontsize-levels i.active { opacity: 1; }
+.doc-fontsize-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 132px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tech, 2px);
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+}
+.doc-fontsize-popover-ticks {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+.doc-fontsize-popover-ticks button {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--fg);
+  opacity: 0.4;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.doc-fontsize-popover-ticks button.active,
+.doc-fontsize-popover-ticks button:hover {
+  opacity: 1;
+  color: var(--accent-primary, var(--red));
+}
+.doc-fontsize-popover input[type="range"] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent-primary, var(--red));
+  cursor: pointer;
+}
 /* Collapsed buttons hidden in header, shown in overflow menu */
 .doc-collapsible-btn.doc-collapsed { display: none !important; }
 .doc-overflow-wrapper { order: -1; }
@@ -12764,12 +12810,11 @@ textarea.memory-add-input {
 
 /* Markdown formatting toolbar */
 /* In code-mode the toolbar only hosts the view toggles + utility buttons
-   (font-size, diff). Hide markdown-only formatting controls — bold,
-   italic, headings, list, link, attach, code-dropdown, emoji, hr, and
-   the PDF-only buttons. The view toggles + fontsize + diff stay. */
+   (font-size, diff). Hide markdown-only formatting controls — Format
+   popover, emoji, and the PDF-only buttons. The view toggles + fontsize
+   + diff stay. */
 .doc-md-toolbar[data-mode="code"] [data-md],
 .doc-md-toolbar[data-mode="code"] .md-dd-toggle,
-.doc-md-toolbar[data-mode="code"] #md-toolbar-attach-btn,
 .doc-md-toolbar[data-mode="code"] #md-toolbar-emoji-slot,
 .doc-md-toolbar[data-mode="code"] .md-toolbar-pdf-only,
 .doc-md-toolbar[data-mode="code"] .md-toolbar-sep {
@@ -23746,6 +23791,112 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
 .view-report-btn.chat-about-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
+
+/* ── Inline plan card (Plan mode → Start) ── */
+/* Sibling of .msg-ai: same left edge (8px), full AI column width, normal type size */
+.plan-card {
+  display: block;
+  align-self: flex-start;
+  margin: 6px 0 14px 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tech, 2px);
+  background: var(--panel);
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  font-family: var(--font-ui, 'Iosevka', monospace);
+  font-size: 13px;
+  width: 85%;
+  max-width: 85%;
+  box-sizing: border-box;
+}
+/* Legacy nested cards (older streams) — still readable if present */
+.msg-ai > .plan-card,
+.msg-ai .body > .plan-card {
+  margin: 12px 0 0;
+  width: 100%;
+  max-width: none;
+}
+.plan-card-kicker {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label, 0.06em);
+  color: var(--accent-primary, var(--red));
+  margin-bottom: 6px;
+}
+.plan-card-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.3;
+}
+.plan-card-overview {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+}
+.plan-card-details {
+  margin: 0 0 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.plan-card-details[hidden] { display: none !important; }
+.plan-card-details summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label, 0.06em);
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  list-style: none;
+}
+.plan-card-details summary::-webkit-details-marker { display: none; }
+.plan-card-steps {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+.plan-card-steps li { margin-bottom: 4px; }
+.plan-card-step-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+.plan-card-risks {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
+}
+.plan-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+}
+.plan-card-actions .btn {
+  min-height: 30px;
+  padding: 4px 12px;
+}
+.plan-card-actions .btn-primary {
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+}
+.plan-card.is-started .plan-card-start,
+.plan-card.is-started .plan-card-details-btn {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.plan-card.is-started .plan-card-kicker::after {
+  content: ' · started';
+  color: color-mix(in srgb, var(--fg) 45%, transparent);
+  font-weight: 500;
+}
 .view-report-btn:disabled {
   opacity: 0.6;
   cursor: progress;
@@ -29613,15 +29764,6 @@ body.doc-find-active mark.doc-find-mark.current {
     filter: blur(3px);
   }
 }
-
-/* MD toolbar attach button — matches other toolbar buttons */
-.md-toolbar-attach-btn {
-  background: none; border: none; color: var(--fg); opacity: 0.35;
-  padding: 4px 7px; cursor: pointer; min-height: 28px;
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: opacity 0.1s;
-}
-.md-toolbar-attach-btn:hover { opacity: 1; }
 
 /* Email reader icon buttons — vertical icon + label stack. */
 .memory-toolbar-btn.reader-icon-btn {
@@ -39247,6 +39389,11 @@ body.theme-frosted .modal {
   box-sizing: border-box;
   text-align: left;
   padding: 10px 12px;
+  /* Global `button { height:32px }` collapses multi-line rows so kind/meta
+     overflow and paint over the next row’s title. */
+  height: auto !important;
+  min-height: 32px;
+  overflow: visible;
   border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   background: transparent;
@@ -39366,6 +39513,94 @@ body.theme-frosted .modal {
   text-transform: uppercase;
 }
 .kg-link-kind { font-size: 10px; opacity: 0.6; flex-shrink: 0; }
+/* Detail panel link rows — title on its own line, kind + type below.
+ * Avoid flex-on-<button> height quirks: size as a block, stack via inner main.
+ * Remove sits on the title row (not a lonely far-right column). */
+.kg-detail .kg-link-row-wrap.kg-detail-link-wrap {
+  position: relative;
+  display: block;
+  align-items: stretch;
+}
+.kg-detail .kg-link-row-wrap.kg-detail-link-wrap .kg-link-row.kg-detail-link-row {
+  flex: none;
+  width: 100%;
+  display: block !important;
+  height: auto !important;
+  min-height: fit-content;
+  overflow: visible;
+}
+.kg-detail .kg-link-row-wrap.kg-detail-link-wrap .kg-link-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  font-size: 13px;
+  z-index: 2;
+}
+.kg-link-row.kg-detail-link-row {
+  display: block !important;
+  height: auto !important;
+  min-height: fit-content;
+  overflow: visible;
+  text-align: left;
+}
+.kg-detail-link-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  min-width: 0;
+  width: 100%;
+}
+.kg-detail-link-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding-right: 26px; /* room for absolute remove */
+  box-sizing: border-box;
+}
+.kg-detail-link-title-row .kg-node-title {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+.kg-detail-link-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+  padding-right: 26px;
+  box-sizing: border-box;
+}
+.kg-detail-link-meta .kg-link-kind.kg-link-suggest-kind {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 1;
+}
+.kg-detail-link-main > .kg-link-reason {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  white-space: normal;
+  padding: 0;
+  padding-right: 26px;
+  margin: 0;
+  box-sizing: border-box;
+}
 .kg-loading, .kg-empty, .kg-error { padding: 16px; font-size: 12px; opacity: 0.75; }
 
 /* U1 — shared empty / setup feedback */
@@ -39771,6 +40006,79 @@ body.theme-frosted .modal {
   border-radius: var(--radius-tech, 2px);
   opacity: 1;
 }
+.kg-link-suggest-settled {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.72;
+  flex-shrink: 0;
+}
+/* In-chat timeline mount — same card chrome, agent-thread-like frame */
+.kg-link-suggest-chat {
+  position: relative;
+  margin: 8px 0 8px 28px;
+  max-width: calc(85% - 20px);
+  box-sizing: border-box;
+}
+.kg-link-suggest-card--chat {
+  width: 100%;
+  max-width: 420px;
+  transform: none;
+  opacity: 1;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 12%, transparent));
+}
+.kg-link-suggest-card--chat.kg-link-suggest-in {
+  transform: none;
+  opacity: 1;
+}
+.kg-link-suggest-card--chat.kg-link-suggest-out {
+  transform: none;
+  opacity: 0;
+}
+.kg-link-suggest-card--chat .kg-link-suggest-head {
+  flex-wrap: wrap;
+}
+.kg-link-suggest-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: 4px;
+}
+.kg-link-suggest-pager-prev,
+.kg-link-suggest-pager-next {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tech, 2px);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.kg-link-suggest-pager-prev:hover:not(:disabled),
+.kg-link-suggest-pager-next:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.kg-link-suggest-pager-prev:disabled,
+.kg-link-suggest-pager-next:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.kg-link-suggest-pager-count {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  opacity: 0.65;
+  min-width: 3.5em;
+  text-align: center;
+}
+.kg-link-suggest-card--settled .kg-link-suggest-sub {
+  opacity: 0.75;
+  font-style: normal;
+}
 .kg-link-suggest-actions {
   display: inline-flex;
   gap: 8px;
@@ -39904,17 +40212,22 @@ body:has(.notes-pane.modal-right-docked) .kg-link-suggest-host {
   right: auto;
   left: 16px;
 }
-body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card {
+body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card:not(.kg-link-suggest-card--chat) {
   transform: translateX(-115%);
 }
-body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card.kg-link-suggest-in {
+body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card:not(.kg-link-suggest-card--chat).kg-link-suggest-in {
   transform: translateX(0);
 }
-body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card.kg-link-suggest-out {
+body:has(.notes-pane.modal-right-docked) .kg-link-suggest-card:not(.kg-link-suggest-card--chat).kg-link-suggest-out {
   transform: translateX(115%);
 }
 @media (max-width: 768px) {
   .kg-link-suggest-host { top: 12px; right: 12px; }
+  .kg-link-suggest-chat {
+    margin-left: 12px;
+    max-width: calc(100% - 24px);
+  }
+  .kg-link-suggest-card--chat { max-width: 100%; }
   .kg-link-suggest-flow {
     grid-template-columns: 1fr;
     gap: 6px;
@@ -43627,6 +43940,19 @@ body.sidebar-collapsed.hamburger-right .chat-container.project-active .project-m
   font-family: var(--font-family, var(--font-ui, inherit));
   /* Asymmetric — open side is square so it meets the slate / divider */
   border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
+}
+/* Mode toggle labels: no tracking (short uppercase words look stretched),
+   content-sized segments, first/last radii only. */
+.mode-toggle-btn {
+  letter-spacing: 0 !important;
+  font-family: var(--font-ui, 'Iosevka', monospace) !important;
+  border-radius: 0 !important;
+}
+.mode-toggle-btn:first-child {
+  border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px) !important;
+}
+.mode-toggle-btn:last-child {
+  border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0 !important;
 }
 .sidebar.right-side .project-active-chip-btn {
   border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0;

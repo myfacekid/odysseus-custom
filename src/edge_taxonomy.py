@@ -1,6 +1,6 @@
 """Knowledge graph semantic edge taxonomy (T0/T3).
 
-Five cognitive edge types plus legacy aliases. See docs/knowledge-graph-edge-taxonomy-roadmap_v3.md.
+Five cognitive edge types plus legacy aliases.
 """
 
 from __future__ import annotations

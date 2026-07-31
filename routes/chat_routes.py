@@ -348,6 +348,14 @@ def setup_chat_routes(
     # ------------------------------------------------------------------ #
     @router.post("/api/chat_stream")
     async def chat_stream(request: Request) -> StreamingResponse:
+        # #region agent log
+        try:
+            import time as _dbg_time
+            with open("/home/kincaidr/Documents/GitHub/odysseus-custom/.cursor/debug-8a946c.log", "a", encoding="utf-8") as _dbg_f:
+                _dbg_f.write(json.dumps({"sessionId": "8a946c", "runId": "post-fix", "hypothesisId": "H4", "location": "chat_routes.py:chat_stream:entry", "message": "chat_stream request received", "data": {"ct": (request.headers.get("content-type") or "")[:80]}, "timestamp": int(_dbg_time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         body = None
         try:
             if request.headers.get("content-type", "").startswith("application/json"):
@@ -387,7 +395,7 @@ def setup_chat_routes(
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
         incognito = str(form_data.get("incognito", "")).lower() == "true"
-        chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
+        chat_mode = str(form_data.get("mode", "")).lower()  # 'chat', 'agent', or 'plan'
         # Did the USER explicitly pick agent mode? (vs. us auto-escalating
         # below). Skill extraction should only learn from real agent sessions,
         # not chats we quietly promoted for a notes/calendar intent.
@@ -398,7 +406,7 @@ def setup_chat_routes(
         # This is a LIGHT promotion — see the disabled_tools block below, which
         # withholds shell/code/file tools so the model doesn't try to `bash`
         # its way through a plain chat request (and fail, especially with the
-        # shell disabled).
+        # shell disabled). Plan mode stays as-is (already has tools, write-gated).
         auto_escalated = False
         if chat_mode == "chat" and isinstance(message, str) and _message_needs_tools(message):
             chat_mode = "agent"
@@ -473,9 +481,9 @@ def setup_chat_routes(
                 do_research = True
                 logger.info(f"Session {session} in research_pending — auto-triggering research")
 
-        # Persist session mode (research > agent > chat)
+        # Persist session mode (research > agent/plan > chat)
         _effective_mode = 'research' if do_research else (chat_mode or 'chat')
-        if _effective_mode in ('agent', 'research', 'chat'):
+        if _effective_mode in ('agent', 'plan', 'research', 'chat'):
             set_session_mode(session, _effective_mode)
 
         att_ids = []
@@ -510,7 +518,7 @@ def setup_chat_routes(
             # Skills index only ships when the model can actually call
             # manage_skills (agent mode). In plain chat or incognito the
             # index would be useless / unwanted noise.
-            agent_mode=(chat_mode == "agent"),
+            agent_mode=(chat_mode in ("agent", "plan")),
         )
 
         _research_flags = {"do": do_research}  # Mutable container for generator scope
@@ -620,6 +628,12 @@ def setup_chat_routes(
         # Project workspace chats: deny cwd escape hatches (Phase 0e).
         from src.project_tool_policy import apply_session_tool_policy
         disabled_tools = apply_session_tool_policy(disabled_tools, session)
+
+        # Plan mode: explore with read/search tools only; Start runs agent.
+        _plan_mode = (chat_mode == "plan")
+        if _plan_mode:
+            from src.plan_mode import PLAN_WRITE_DENYLIST
+            disabled_tools.update(PLAN_WRITE_DENYLIST)
 
         # Light auto-escalation: the user is in chat mode and just expressed a
         # notes/calendar/email intent. Grant the relevant managers but withhold
@@ -996,6 +1010,7 @@ def setup_chat_routes(
                         owner=_user,
                         fallbacks=_fallback_candidates,
                         active_project_file=active_project_file,
+                        plan_mode=_plan_mode,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
@@ -1037,19 +1052,36 @@ def setup_chat_routes(
                         elif chunk.startswith("event: "):
                             yield chunk
                         elif chunk == "data: [DONE]\n\n":
+                            _plan_meta = None
+                            _save_content = full_response
+                            if _plan_mode and full_response:
+                                from src.plan_mode import parse_plan_from_text, strip_plan_fence
+                                _plan_meta = parse_plan_from_text(full_response)
+                                if _plan_meta:
+                                    _save_content = strip_plan_fence(full_response) or full_response
+                                    # #region agent log
+                                    try:
+                                        import time as _dbg_time
+                                        with open("/home/kincaidr/Documents/GitHub/odysseus-custom/.cursor/debug-8a946c.log", "a", encoding="utf-8") as _dbg_f:
+                                            _dbg_f.write(json.dumps({"sessionId": "8a946c", "runId": "post-fix", "hypothesisId": "H1", "location": "chat_routes.py:plan_card", "message": "emitting plan_card with stripped content", "data": {"fullLen": len(full_response or ""), "strippedLen": len(_save_content or ""), "didStrip": (full_response or "") != (_save_content or ""), "planTitle": (_plan_meta or {}).get("title"), "fenceStillInSave": "```plan" in (_save_content or "").lower() or "```json" in (_save_content or "").lower()}, "timestamp": int(_dbg_time.time() * 1000)}) + "\n")
+                                    except Exception:
+                                        pass
+                                    # #endregion
+                                    yield f'data: {json.dumps({"type": "plan_card", "plan": _plan_meta, "content": _save_content})}\n\n'
                             if full_response:
                                 _saved_id = save_assistant_response(
-                                    sess, session_manager, session, full_response, last_metrics,
+                                    sess, session_manager, session, _save_content, last_metrics,
                                     character_name=ctx.preset.character_name,
                                     web_sources=web_sources,
                                     rag_sources=ctx.rag_sources,
                                     used_memories=ctx.used_memories,
                                     incognito=incognito,
+                                    plan=_plan_meta,
                                 )
                                 if _saved_id:
                                     yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id})}\n\n'
                                 run_post_response_tasks(
-                                    sess, session_manager, session, message, full_response,
+                                    sess, session_manager, session, message, _save_content,
                                     last_metrics, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
                                     incognito=incognito, compare_mode=compare_mode,
                                     character_name=ctx.preset.character_name,

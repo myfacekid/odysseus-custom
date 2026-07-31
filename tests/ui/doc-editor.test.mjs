@@ -35,8 +35,9 @@ test('loose markdown format buttons were removed from the toolbar template', () 
   }
 });
 
-test('Attach files button is preserved in the toolbar', () => {
-  assert.ok(docJs.includes('id="md-toolbar-attach-btn"'));
+test('dead Attach files button was removed from the toolbar', () => {
+  assert.ok(!docJs.includes('id="md-toolbar-attach-btn"'));
+  assert.ok(!docJs.includes("data-action=\"undock-format\""));
 });
 
 test('the Format dropdown group covers the full markdown action set', () => {
@@ -57,4 +58,19 @@ test('keyboard shortcuts for bold/italic/link remain wired', () => {
   assert.match(docJs, /applyMdFormat\('bold'\)/);
   assert.match(docJs, /applyMdFormat\('italic'\)/);
   assert.match(docJs, /applyMdFormat\('link'\)/);
+});
+
+test('right cluster is Undo | Redo | type | actions menu', () => {
+  assert.ok(docJs.includes('id="doc-undo-btn"'));
+  assert.ok(docJs.includes('id="doc-redo-btn"'));
+  assert.ok(docJs.includes('id="doc-actions-menu-btn"'));
+  assert.ok(!docJs.includes('doc-copy-export-split'));
+  assert.ok(!docJs.includes('doc-header-preview-btn'));
+  assert.ok(!docJs.includes('doc-footer-copy-btn'));
+});
+
+test('font size opens a stepped slider popover', () => {
+  assert.ok(docJs.includes('doc-fontsize-popover'));
+  assert.match(docJs, /function showDocActionsMenu/);
+  assert.ok(docJs.includes('_pdfRedoStackByDoc'));
 });

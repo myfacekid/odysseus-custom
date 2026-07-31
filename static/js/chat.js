@@ -8,7 +8,7 @@
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
-import chatRenderer from './chatRenderer.js';
+import chatRenderer from './chatRenderer.js?v=20260730q';
 import chatStream from './chatStream.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule, { THINK_TAG } from './markdown.js';
@@ -32,7 +32,7 @@ function _dispatchLinkSuggestion(data) {
   if (!data?.from || !data?.to) return;
   import('./knowledge.js').then((kg) => {
     const handler = kg.handleLinkSuggestion || kg.default?.handleLinkSuggestion;
-    if (handler) handler(data);
+    if (handler) handler(data, { mount: 'chat' });
   }).catch(() => {});
 }
 
@@ -52,7 +52,7 @@ function _dispatchGraphMergeProposals(data) {
       handler({
         ...data,
         source: data.source || (data.rows?.length ? 'merge_subgraph' : 'compare_papers'),
-      });
+      }, { mount: 'chat' });
       return;
     }
     const open = kg.openGraphMergeReview || kg.default?.openGraphMergeReview;
@@ -276,6 +276,12 @@ import createResearchSynapse from './researchSynapse.js';
    * Handle chat form submission
    */
   export async function handleChatSubmit(e) {
+    // #region agent log
+    try {
+      const _ts = (typeof Storage !== 'undefined' && Storage.loadToggleState) ? Storage.loadToggleState() : {};
+      fetch('/api/_debug_agent_log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'8a946c',runId:'post-fix',hypothesisId:'H4',location:'chat.js:handleChatSubmit:entry',message:'chat submit started',data:{mode:_ts.mode||null,hasAbort:!!currentAbort},timestamp:Date.now()})}).catch(()=>{});
+    } catch (_) {}
+    // #endregion
     e.preventDefault();
     // Cancel research clarification timeout if active
     if (window._researchTimeoutTimer) {
@@ -750,7 +756,7 @@ import createResearchSynapse from './researchSynapse.js';
       }
 
       // Auto-save document editor content before sending so the AI sees latest text
-      if (documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
+      if (documentModule && typeof documentModule.isPanelOpen === 'function' && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
         try { await documentModule.saveDocument(); } catch(e) { console.warn('doc auto-save failed', e); }
       }
 
@@ -795,28 +801,30 @@ import createResearchSynapse from './researchSynapse.js';
       fd.append('session', streamSessionId);
       if (ids.length) fd.append('attachments', JSON.stringify(ids));
       // Auto-save & send active doc ID so the backend sees latest content
-      if (documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
+      if (documentModule && typeof documentModule.isPanelOpen === 'function' && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
         try { await documentModule.saveDocument({ silent: true }); } catch (_e) { /* best-effort */ }
         fd.append('active_doc_id', documentModule.getCurrentDocId());
       }
       if (_activeProjectFile) {
         fd.append('active_project_file', _activeProjectFile);
       }
-      // Web toggle: pre-search in Chat mode, tool permission in Agent mode
+      // Mode: agent | plan | chat. Document/project open escalates to agent.
       const toggleState = Storage.loadToggleState();
-      let isAgentMode = (toggleState.mode || 'chat') === 'agent';
+      let chatMode = toggleState.mode || 'chat';
+      if (chatMode !== 'agent' && chatMode !== 'plan' && chatMode !== 'chat') chatMode = 'chat';
       // Auto-escalate to agent mode when a document is open — the user expects
       // the AI to see the document and have tools to edit it
-      if (!isAgentMode && documentModule && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
-        isAgentMode = true;
+      if (chatMode !== 'agent' && documentModule && typeof documentModule.isPanelOpen === 'function' && documentModule.isPanelOpen() && documentModule.getCurrentDocId()) {
+        chatMode = 'agent';
       }
       // Same for project cwd file open in workspace chat
-      if (!isAgentMode && _inProjectWs && _activeProjectFile) {
-        isAgentMode = true;
+      if (chatMode !== 'agent' && _inProjectWs && _activeProjectFile) {
+        chatMode = 'agent';
       }
-      fd.append('mode', isAgentMode ? 'agent' : 'chat');
+      const isToolMode = (chatMode === 'agent' || chatMode === 'plan');
+      fd.append('mode', chatMode);
       if (el('web-toggle').checked) {
-        if (isAgentMode) {
+        if (isToolMode) {
           fd.append('allow_web_search', 'true');
         } else {
           fd.append('use_web', 'true');
@@ -824,7 +832,7 @@ import createResearchSynapse from './researchSynapse.js';
       }
       if (el('research-toggle').checked) {
         fd.append('use_research', 'true');
-        // Research always runs in chat mode — override agent if set
+        // Research always runs in chat mode — override agent/plan if set
         fd.set('mode', 'chat');
       }
       if (el('bash-toggle').checked) {
@@ -856,10 +864,11 @@ import createResearchSynapse from './researchSynapse.js';
       currentAbort = abortCtrl;
 
       const _tState = Storage.loadToggleState();
-      const _isAgent = (_tState.mode || 'chat') === 'agent';
+      const _modeNow = _tState.mode || 'chat';
+      const _isToolMode = (_modeNow === 'agent' || _modeNow === 'plan');
 
-      // Timeout: 6 min for research and agent mode, 3 min otherwise
-      const timeoutMs = el('research-toggle').checked || _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+      // Timeout: 6 min for research / agent / plan, 3 min otherwise
+      const timeoutMs = el('research-toggle').checked || _isToolMode ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
       const timeoutId = setTimeout(() => {
         if (!abortCtrl.signal.aborted) {
           timedOut = true;
@@ -880,7 +889,7 @@ import createResearchSynapse from './researchSynapse.js';
 
       let loadingText = 'Initializing...';
 
-      if (el('web-toggle').checked && !_isAgent) {
+      if (el('web-toggle').checked && !_isToolMode) {
         const _searchLabel = searchModule ? searchModule.getProviderLabel() : 'web';
         loadingText = `Searching via ${_searchLabel}...<br>
                        <span style="font-size: 0.9em; opacity: 0.8;">
@@ -908,7 +917,7 @@ import createResearchSynapse from './researchSynapse.js';
       spinner.start();
       
       // Update spinner message based on mode
-      if (el('web-toggle').checked && !_isAgent) {
+      if (el('web-toggle').checked && !_isToolMode) {
         spinner.updateMessage('Searching web with ' + (searchModule ? searchModule.getProviderLabel() : 'SearXNG'));
         setTimeout(() => spinner.updateMessage('Processing results'), 1500);
       } else if (el('research-toggle').checked) {
@@ -1019,13 +1028,19 @@ import createResearchSynapse from './researchSynapse.js';
         // Auto-switch to chat mode for tool-related errors
         if (errText.includes('tool') || errText.includes('auto')) {
           errText = 'This model doesn\'t support agent tools — switched to Chat mode. Try again.';
-          const _ab = document.getElementById('mode-agent-btn');
-          const _cb = document.getElementById('mode-chat-btn');
-          if (_ab && _cb) {
-            _ab.classList.remove('active');
-            _cb.classList.add('active');
-            const _toggle = _ab.closest('.mode-toggle');
-            if (_toggle) _toggle.classList.add('mode-chat');
+          if (typeof window.setChatMode === 'function') {
+            window.setChatMode('chat');
+          } else {
+            const _ab = document.getElementById('mode-agent-btn');
+            const _pb = document.getElementById('mode-plan-btn');
+            const _cb = document.getElementById('mode-chat-btn');
+            if (_ab && _cb) {
+              _ab.classList.remove('active');
+              if (_pb) _pb.classList.remove('active');
+              _cb.classList.add('active');
+              const _toggle = _ab.closest('.mode-toggle');
+              if (_toggle) { _toggle.classList.add('mode-chat'); _toggle.classList.remove('mode-plan'); }
+            }
           }
           if (typeof Storage !== 'undefined' && Storage.KEYS) {
             const _st = Storage.getJSON(Storage.KEYS.TOGGLES, {});
@@ -2183,14 +2198,10 @@ import createResearchSynapse from './researchSynapse.js';
                 if (json.ui_event) {
                   chatStream.handleUIControl(json);
                 }
-                if (json.link_suggestion) {
-                  _dispatchLinkSuggestion(json.link_suggestion);
-                }
+                // link_suggestion / graph_merge_proposals arrive as standalone
+                // SSE events (not embedded on tool_output) to avoid double UI.
                 if (json.todo_complete_suggestion) {
                   _dispatchTodoCompleteSuggestion(json.todo_complete_suggestion);
-                }
-                if (json.graph_merge_proposals) {
-                  _dispatchGraphMergeProposals(json.graph_merge_proposals);
                 }
 
                 // Schedule a thinking spinner between tool rounds (short delay so
@@ -2253,6 +2264,64 @@ import createResearchSynapse from './researchSynapse.js';
               } else if (json.type === 'ui_control') {
                 if (_isBg) continue;
                 chatStream.handleUIControl(json.data || {});
+
+              } else if (json.type === 'plan_card') {
+                if (_isBg) continue;
+                const plan = json.plan || json.data;
+                // Card replaces the structured fence — strip it from the live bubble
+                // so the user does not see raw ```plan JSON above the blueprint card.
+                const _beforePlan = roundText || '';
+                if (typeof json.content === 'string' && json.content.length) {
+                  // Server already stripped; prefer that for the visible bubble.
+                  // Prefer round-local strip when multi-round, but plan mode is usually one reply.
+                  if (chatRenderer && typeof chatRenderer.stripPlanFence === 'function') {
+                    roundText = chatRenderer.stripPlanFence(roundText);
+                    accumulated = chatRenderer.stripPlanFence(accumulated);
+                  }
+                  // If round still looks fenced, replace with server content (last-round case).
+                  if (/```\s*(?:plan|json)/i.test(roundText || '')) {
+                    roundText = json.content;
+                    accumulated = json.content;
+                  }
+                } else if (chatRenderer && typeof chatRenderer.stripPlanFence === 'function') {
+                  roundText = chatRenderer.stripPlanFence(roundText);
+                  accumulated = chatRenderer.stripPlanFence(accumulated);
+                }
+                currentAccumulated = accumulated;
+                // #region agent log
+                fetch('/api/_debug_agent_log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'8a946c',runId:'post-fix',hypothesisId:'H1',location:'chat.js:plan_card',message:'stripped plan fence from live bubble',data:{beforeLen:_beforePlan.length,afterLen:(roundText||'').length,hadFence:_beforePlan!==(roundText||''),stillHasFence:/```\s*(?:plan|json)/i.test(roundText||''),usedServerContent:typeof json.content==='string',planTitle:(plan&&plan.title)||null,hasStripFn:!!(chatRenderer&&chatRenderer.stripPlanFence)},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
+                _renderStream();
+                if (roundHolder && chatRenderer && typeof chatRenderer.scrubPlanJsonFromBubble === 'function') {
+                  const _scrubbed = chatRenderer.scrubPlanJsonFromBubble(roundHolder);
+                  // #region agent log
+                  fetch('/api/_debug_agent_log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'8a946c',runId:'post-fix',hypothesisId:'H5',location:'chat.js:plan_card:scrub',message:'DOM scrub after plan card',data:{removed:_scrubbed,anchorClass:roundHolder&&roundHolder.className},timestamp:Date.now()})}).catch(()=>{});
+                  // #endregion
+                }
+                if (plan && chatRenderer && (chatRenderer.mountPlanCardOnMessage || chatRenderer.buildPlanCard)) {
+                  const anchor = roundHolder || currentHolder;
+                  if (anchor && chatRenderer.mountPlanCardOnMessage) {
+                    chatRenderer.mountPlanCardOnMessage(anchor, plan, {
+                      onStart: function(p, cardEl) {
+                        if (typeof window.startApprovedPlan === 'function') {
+                          window.startApprovedPlan(p, cardEl);
+                        }
+                      },
+                    });
+                  } else if (anchor && chatRenderer.buildPlanCard) {
+                    // Fallback: sibling after bubble (left-aligned via CSS)
+                    const card = chatRenderer.buildPlanCard(plan, {
+                      onStart: function(p, cardEl) {
+                        if (typeof window.startApprovedPlan === 'function') {
+                          window.startApprovedPlan(p, cardEl);
+                        }
+                      },
+                    });
+                    if (anchor.nextSibling) anchor.parentNode.insertBefore(card, anchor.nextSibling);
+                    else if (anchor.parentNode) anchor.parentNode.appendChild(card);
+                  }
+                  if (uiModule) uiModule.scrollHistory();
+                }
 
               } else if (json.type === 'agent_step') {
                 if (_isBg) continue;
@@ -2438,7 +2507,11 @@ import createResearchSynapse from './researchSynapse.js';
         if (_streamContent) _streamContent.style.minHeight = '';
 
         // Finalize the last round's bubble — flatten stream-content wrapper for clean DOM
-        const finalDisplay = stripToolBlocks(roundText);
+        let _finalRound = roundText;
+        if (chatMode === 'plan' && chatRenderer && typeof chatRenderer.stripPlanFence === 'function') {
+          _finalRound = chatRenderer.stripPlanFence(roundText);
+        }
+        const finalDisplay = stripToolBlocks(_finalRound);
         if (finalDisplay.trim()) {
           var _body4 = roundHolder.querySelector('.body');
           // Preserve sources expanded state before final render
@@ -2671,7 +2744,7 @@ import createResearchSynapse from './researchSynapse.js';
           const abortReason = currentAbort._reason || '';
           // Timeout-triggered aborts should remain visible instead of disappearing.
           if (timedOut || abortReason === 'timeout') {
-            const timeoutMsg = _isAgent
+            const timeoutMsg = _isToolMode
               ? 'Agent response timed out. Try again, switch to a faster model, or reduce tool usage.'
               : 'Response timed out. Try again.';
 
@@ -4639,4 +4712,37 @@ import createResearchSynapse from './researchSynapse.js';
   }
 
   export default chatModule;
+
+  /** Switch to Agent and send the approved plan for execution. */
+  function startApprovedPlan(plan, cardEl) {
+    if (!plan) return;
+    try {
+      if (cardEl) {
+        cardEl.classList.add('is-started');
+        cardEl.dataset.planStatus = 'started';
+        const btn = cardEl.querySelector('.plan-card-start');
+        if (btn) { btn.disabled = true; btn.textContent = 'Started'; }
+        plan = Object.assign({}, plan, { status: 'started' });
+        try { cardEl.dataset.planJson = JSON.stringify(plan); } catch (_) {}
+      }
+    } catch (_) {}
+    if (typeof window.setChatMode === 'function') {
+      window.setChatMode('agent');
+    }
+    const input = document.getElementById('message') || document.querySelector('textarea#message, textarea.chat-input');
+    const msg = (chatRenderer && chatRenderer.formatPlanForExecution)
+      ? chatRenderer.formatPlanForExecution(plan)
+      : ('Execute this approved plan:\n\n' + (plan.title || 'Plan'));
+    if (input) {
+      input.value = msg;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const submitBtn = document.querySelector('.send-btn');
+    if (submitBtn) {
+      // Defer so mode toggle prefs apply before FormData is built
+      setTimeout(() => submitBtn.click(), 60);
+    }
+  }
+  window.startApprovedPlan = startApprovedPlan;
+
   window.chatModule = chatModule;

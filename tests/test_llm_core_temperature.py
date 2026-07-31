@@ -85,7 +85,7 @@ def _anthropic_payload(temperature):
 
 
 def test_anthropic_payload_clamps_above_one():
-    # Anthropic rejects temperature > 1.0 (e.g. the Nietzsche preset's 1.2).
+    # Anthropic rejects temperature > 1.0 (UI slider allows up to 2.0).
     assert _anthropic_payload(1.2)["temperature"] == 1.0
 
 

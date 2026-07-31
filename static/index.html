@@ -265,9 +265,9 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="modulepreload" href="/static/app.js">
-  <link rel="modulepreload" href="/static/js/chat.js">
+  <link rel="stylesheet" href="/static/style.css?v=20260730-tools-type">
+  <link rel="modulepreload" href="/static/app.js?v=20260730q">
+  <link rel="modulepreload" href="/static/js/chat.js?v=20260730q">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
   <link rel="modulepreload" href="/static/js/markdown.js">
@@ -1503,10 +1503,11 @@
           </button>
         </div>
         <div class="chat-input-right">
-          <!-- Agent / Chat mode toggle -->
-          <div class="mode-toggle">
-            <button type="button" class="mode-toggle-btn active" id="mode-agent-btn" aria-pressed="true">Agent</button>
-            <button type="button" class="mode-toggle-btn" id="mode-chat-btn" aria-pressed="false">Chat</button>
+          <!-- Agent / Plan / Chat mode toggle -->
+          <div class="mode-toggle" data-mode="chat">
+            <button type="button" class="mode-toggle-btn" id="mode-agent-btn" aria-pressed="false">Agent</button>
+            <button type="button" class="mode-toggle-btn" id="mode-plan-btn" aria-pressed="false">Plan</button>
+            <button type="button" class="mode-toggle-btn active" id="mode-chat-btn" aria-pressed="true">Chat</button>
           </div>
           <button type="submit" form="chat-form" class="send-btn newchat-mode" data-mode="newchat" aria-label="New chat">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span class="send-btn-label">+ New</span>
@@ -2744,10 +2745,10 @@
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
-<script type="module" src="/static/js/chatRenderer.js"></script>
+<script type="module" src="/static/js/chatRenderer.js?v=20260730q"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=20260520m"></script>
+<script type="module" src="/static/js/chat.js?v=20260730q"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
 <script type="module" src="/static/js/compare/index.js"></script>
@@ -2756,9 +2757,9 @@
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260730q"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
-<script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
+<script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js?v=20260730-tools-type').catch(()=>{});}</script>
 </body>
 </html>

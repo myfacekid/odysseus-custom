@@ -9,7 +9,7 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js';
+import chatModule from './js/chat.js?v=20260730q';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js';
 import searchChatModule from './js/search-chat.js';
@@ -1593,7 +1593,9 @@ function initializeEventListeners() {
     const state = loadToggleState();
     const key = _modeKey(stateKey, mode);
     if (Object.prototype.hasOwnProperty.call(state, key)) return !!state[key];
-    return mode === 'agent'; // default: ON in agent, OFF in chat
+    // Defaults: web ON in agent/plan; bash ON only in agent (plan is read-only).
+    if (mode === 'plan') return stateKey === 'web';
+    return mode === 'agent';
   }
 
   function saveToolPref(stateKey, mode, value) {
@@ -1615,45 +1617,88 @@ function initializeEventListeners() {
 
   function applyModeToToggles(mode) {
     MODE_TOOLS.forEach(({ btnId, checkboxId, stateKey }) => {
-      const btn = el(btnId);
-      if (!btn || btn.style.display === 'none') return;
       const on = loadToolPref(stateKey, mode);
+      // Always sync the hidden checkbox — submit reads it even when the
+      // toolbar button is display:none (Chat mode hides [data-mode-tool]).
+      if (checkboxId) {
+        const chk = el(checkboxId);
+        if (chk) chk.checked = on;
+      }
+      const btn = el(btnId);
+      if (!btn) return;
       btn.classList.toggle('active', on);
-      if (checkboxId) { const chk = el(checkboxId); if (chk) chk.checked = on; }
     });
   }
 
-  // ── Agent / Chat mode toggle ──
+  // ── Agent / Plan / Chat mode toggle ──
   (function initModeToggle() {
     const agentBtn = el('mode-agent-btn');
+    const planBtn = el('mode-plan-btn');
     const chatBtn = el('mode-chat-btn');
     if (!agentBtn || !chatBtn) return;
     const state = loadToggleState();
     let currentMode = state.mode || 'chat';
+    if (currentMode !== 'agent' && currentMode !== 'plan' && currentMode !== 'chat') {
+      currentMode = 'chat';
+    }
+
+    function updateModePill(mode) {
+      const toggle = agentBtn.closest('.mode-toggle');
+      if (!toggle) return;
+      toggle.dataset.mode = mode;
+      toggle.classList.toggle('mode-chat', mode === 'chat');
+      toggle.classList.toggle('mode-plan', mode === 'plan');
+      const activeBtn = mode === 'agent' ? agentBtn
+        : mode === 'plan' ? planBtn
+        : chatBtn;
+      if (!activeBtn || activeBtn.style.display === 'none') return;
+      // Measure after layout so content-sized buttons get an accurate pill.
+      requestAnimationFrame(() => {
+        toggle.style.setProperty('--mode-pill-x', `${activeBtn.offsetLeft}px`);
+        toggle.style.setProperty('--mode-pill-w', `${activeBtn.offsetWidth}px`);
+      });
+    }
 
     function setMode(mode) {
+      if (mode !== 'agent' && mode !== 'plan' && mode !== 'chat') mode = 'chat';
       currentMode = mode;
       const st = loadToggleState();
       st.mode = mode;
       saveToggleState(st);
       agentBtn.classList.toggle('active', mode === 'agent');
+      if (planBtn) planBtn.classList.toggle('active', mode === 'plan');
       chatBtn.classList.toggle('active', mode === 'chat');
       agentBtn.setAttribute('aria-pressed', String(mode === 'agent'));
+      if (planBtn) planBtn.setAttribute('aria-pressed', String(mode === 'plan'));
       chatBtn.setAttribute('aria-pressed', String(mode === 'chat'));
-      // Slide the pill to the active button
-      const toggle = agentBtn.closest('.mode-toggle');
-      if (toggle) toggle.classList.toggle('mode-chat', mode === 'chat');
-      // Delay tool glow-up for a staggered effect
-      setTimeout(() => applyModeToToggles(mode), 500);
+      updateModePill(mode);
+      // Sync web/bash prefs immediately (before hiding chrome) so Chat never
+      // keeps Agent's checked web-toggle and silently sends use_web=true.
+      applyModeToToggles(mode);
+      // Mode-tool chrome (web/bash) visible for agent and plan
+      document.querySelectorAll('[data-mode-tool]').forEach((b) => {
+        b.style.display = (mode === 'agent' || mode === 'plan') ? '' : 'none';
+      });
     }
+
+    window.setChatMode = setMode;
+    window.updateModeTogglePill = () => updateModePill(currentMode);
+
     agentBtn.addEventListener('click', () => {
-      // Agent mode turns off research if active
       const resChk = el('research-toggle');
       if (resChk && resChk.checked) _syncResearchIndicator(false);
       setMode('agent');
     });
+    if (planBtn) {
+      planBtn.addEventListener('click', () => {
+        const resChk = el('research-toggle');
+        if (resChk && resChk.checked) _syncResearchIndicator(false);
+        setMode('plan');
+      });
+    }
     chatBtn.addEventListener('click', () => setMode('chat'));
     setMode(currentMode);
+    window.addEventListener('resize', () => updateModePill(currentMode));
   })();
 
   // ── Tool splash explainer messages (shown first 2 times per tool) ──
@@ -2058,15 +2103,19 @@ function initializeEventListeners() {
             if (webBtn) webBtn.classList.remove('active');
             saveToolPref('web', (loadToggleState().mode || 'chat'), false);
           }
-          // Research requires chat mode — force switch from agent
+          // Research requires chat mode — force switch from agent/plan
           const rs = loadToggleState();
-          if (rs.mode === 'agent') {
-            rs.mode = 'chat';
-            saveToggleState(rs);
-            const ab = el('mode-agent-btn'), cb = el('mode-chat-btn');
-            if (ab) ab.classList.remove('active');
-            if (cb) cb.classList.add('active');
-            applyModeToToggles('chat');
+          if (rs.mode === 'agent' || rs.mode === 'plan') {
+            if (typeof window.setChatMode === 'function') window.setChatMode('chat');
+            else {
+              rs.mode = 'chat';
+              saveToggleState(rs);
+              const ab = el('mode-agent-btn'), pb = el('mode-plan-btn'), cb = el('mode-chat-btn');
+              if (ab) ab.classList.remove('active');
+              if (pb) pb.classList.remove('active');
+              if (cb) cb.classList.add('active');
+              applyModeToToggles('chat');
+            }
           }
         }
       });
@@ -2291,13 +2340,17 @@ function initializeEventListeners() {
         }
         // Research requires chat mode
         const rs2 = loadToggleState();
-        if (rs2.mode === 'agent') {
-          rs2.mode = 'chat';
-          saveToggleState(rs2);
-          const ab2 = el('mode-agent-btn'), cb2 = el('mode-chat-btn');
-          if (ab2) ab2.classList.remove('active');
-          if (cb2) cb2.classList.add('active');
-          applyModeToToggles('chat');
+        if (rs2.mode === 'agent' || rs2.mode === 'plan') {
+          if (typeof window.setChatMode === 'function') window.setChatMode('chat');
+          else {
+            rs2.mode = 'chat';
+            saveToggleState(rs2);
+            const ab2 = el('mode-agent-btn'), pb2 = el('mode-plan-btn'), cb2 = el('mode-chat-btn');
+            if (ab2) ab2.classList.remove('active');
+            if (pb2) pb2.classList.remove('active');
+            if (cb2) cb2.classList.add('active');
+            applyModeToToggles('chat');
+          }
         }
       }
     });

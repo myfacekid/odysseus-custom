@@ -1,6 +1,6 @@
 """Project session tool policy (Phase 0e).
 
-Two-boundary model (see docs/projects-roadmap.md):
+Two-boundary model:
 
 - **Depth (cwd):** mutate/read computation files only via scoped project tools.
 - **Breadth (graph):** research, Zotero, knowledge graph, documents — unchanged.

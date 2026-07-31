@@ -2,7 +2,7 @@
  * Projects feature flags.
  *
  * Context layer (chip, scope, promote) is on. The IDE-style workspace shell
- * stays off — see docs/projects-context-layer-roadmap.md.
+ * stays off.
  */
 export const PROJECTS_UI_ENABLED = false;
 export const PROJECTS_CONTEXT_LAYER_ENABLED = true;

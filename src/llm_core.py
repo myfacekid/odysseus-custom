@@ -514,8 +514,8 @@ def _build_anthropic_payload(model, messages, temperature, max_tokens, stream=Fa
             chat_messages.append({"role": m["role"], "content": content})
     # Anthropic only accepts temperature in [0.0, 1.0] and 400s on anything above
     # 1.0. Clamp here (in the Anthropic builder only) so presets/sliders that use
-    # the wider OpenAI 0.0-2.0 range — e.g. the shipped "Nietzsche" preset at 1.2
-    # — don't hard-break every Claude request. OpenAI's own path is left untouched.
+    # the wider OpenAI 0.0-2.0 range don't hard-break every Claude request.
+    # OpenAI's own path is left untouched.
     if temperature is not None:
         temperature = max(0.0, min(temperature, 1.0))
     payload = {
@@ -1377,6 +1377,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                             yield f'data: {json.dumps({"delta": content})}\n\n'
                                         # Native tool calls — accumulate across chunks
                                         for tc in delta.get("tool_calls") or []:
+                                            if not isinstance(tc, dict):
+                                                continue
                                             func = tc.get("function") or {}
                                             raw_idx = tc.get("index")
                                             if raw_idx is None:

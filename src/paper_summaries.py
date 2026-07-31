@@ -1,7 +1,6 @@
 """Paper summary notes from Deep Research (Paper Token Retrieval R2).
 
 Creates Library documents linked to papers via ``summarizes`` pipeline edges.
-See docs/paper-token-retrieval-roadmap_v1.md.
 """
 
 from __future__ import annotations

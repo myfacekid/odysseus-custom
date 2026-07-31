@@ -78,7 +78,7 @@ def main() -> int:
         has_pypdf = False
         print("\nNote: pypdf not installed — skipping full-text pass gate")
 
-    # Initial L7 pass criteria (see docs/deep-research-ldr-migration.md Phase L7)
+    # Initial L7 pass criteria
     if abstract_hits < max(1, (n * 2) // 3):
         print("\nWARN: abstract hit rate below 2/3 threshold")
         return 1

@@ -1,7 +1,7 @@
 """Typed graph edges from completed Deep Research sessions (T3).
 
 Replaces flat research→paper ``related`` stars with stance-aware edges when the
-report text supports inference. See docs/knowledge-graph-edge-taxonomy-roadmap_v3.md.
+report text supports inference.
 """
 
 from __future__ import annotations

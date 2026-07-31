@@ -1,7 +1,6 @@
 """Batch merge of proposed graph edges (Edge Taxonomy T2).
 
 Preview validates proposals and detects conflicts; apply writes accepted rows only.
-See docs/knowledge-graph-edge-taxonomy-roadmap_v3.md.
 """
 
 from __future__ import annotations

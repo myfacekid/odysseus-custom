@@ -105,7 +105,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_knowledge",
-            "description": "Search the unified knowledge graph: todos, documents, memories, skills, Zotero papers — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use types=[\"paper\"] for saved Zotero items. For papers: read returns abstract + cached Deep Research summary (when available) by default — set include_pdf=true only when full PDF text is needed. User asks to 'suggest links' / 'set up links' / 'propose connections' / 'link these' → suggest_link (not link) so the user can confirm. merge_subgraph preview queues batch proposals for UI review — apply only when the user explicitly asks to save links.",
+            "description": "Search the unified knowledge graph: todos, documents, memories, skills, Zotero papers — with link neighborhoods. Prefer this for 'what do I know about X', connected tasks/goals, and cross-entity context. Use types=[\"paper\"] for saved Zotero items. For papers: read returns abstract + cached Deep Research summary (when available) by default — set include_pdf=true only when full PDF text is needed. User asks to 'suggest links' / 'set up links' / 'propose connections' / 'link these' → suggest_link for 1–2 edges (all in one tool round) or one merge_subgraph preview for 3+ (not link) so the user can confirm in-chat. Do not dribble suggestions across rounds. Apply only when the user explicitly asks to save links.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1049,7 +1049,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "app_api",
-            "description": "Generic loopback to ANY internal Nobody endpoint. Use this when there's no named tool for what the user wants. Hits the same routes the UI buttons hit (cookbook, gallery, library/documents, memory, notes, calendar, tasks, settings, themes, research, compare, etc.). action='endpoints' returns the OpenAPI surface (use `filter` to narrow). action='call' (default) takes method+path+body. Auth/user/admin paths are blocked for safety.",
+            "description": "Generic loopback to ANY internal Nobody endpoint. Use this when there's no named tool for what the user wants. Hits the same routes the UI buttons hit (cookbook, gallery, memory, notes, calendar, tasks, settings, themes, research, compare, etc.). NOT for documents/library — use create_document, manage_documents, and search_knowledge (suggest_link). action='endpoints' returns the OpenAPI surface (use `filter` to narrow). action='call' (default) takes method+path+body. Auth/user/admin paths are blocked for safety.",
             "parameters": {
                 "type": "object",
                 "properties": {

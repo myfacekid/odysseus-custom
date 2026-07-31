@@ -121,7 +121,7 @@ class Session(TimestampMixin, Base):
     message_count = Column(Integer, default=0)
     total_input_tokens = Column(Integer, default=0)
     total_output_tokens = Column(Integer, default=0)
-    mode = Column(String, nullable=True)  # 'agent', 'chat', 'research', or 'project'
+    mode = Column(String, nullable=True)  # 'agent', 'plan', 'chat', 'research', or 'project'
     crew_member_id = Column(String, nullable=True)  # links to crew_members.id
     project_id = Column(String, nullable=True, index=True)  # links to project workspace
 

@@ -255,7 +255,8 @@ function _renderLinkSection(title, rows, { nodeId, direction = 'out' } = {}) {
     if (!n) return '';
     const kind = (row.edge && row.edge.kind) || 'relates';
     const reasonInfo = _compactLinkReason(row.edge || {});
-    const kindLabel = _edgeKindLabel(kind);
+    const kd = edgeKind(kind);
+    const kindLabel = kd.label || _edgeKindLabel(kind);
     const removable = _isManualEdgeKind(kind);
     let removeBtn = '';
     if (removable && nodeId) {
@@ -263,14 +264,20 @@ function _renderLinkSection(title, rows, { nodeId, direction = 'out' } = {}) {
       const to = direction === 'out' ? n.id : nodeId;
       removeBtn = `<button type="button" class="kg-link-remove" data-from="${esc(from)}" data-to="${esc(to)}" data-kind="${esc(kind)}" title="Remove link" aria-label="Remove link">×</button>`;
     }
-    return `<div class="kg-link-row-wrap">
-      <button type="button" class="kg-link-row" data-node-id="${esc(n.id)}">
-        <span class="kg-link-kind" title="${esc(kind)}">${esc(kindLabel)}</span>
-        ${_typeBadge(n)}
-        <span class="kg-node-title">${esc(_nodeTitle(n))}</span>
-        ${reasonInfo?.chip ? `<span class="kg-link-source-chip" title="${esc(reasonInfo.title)}">${esc(reasonInfo.text)}</span>` : ''}
+    return `<div class="kg-link-row-wrap kg-detail-link-wrap">
+      <button type="button" class="kg-link-row kg-detail-link-row" data-node-id="${esc(n.id)}">
+        <span class="kg-detail-link-main">
+          <span class="kg-detail-link-title-row">
+            <span class="kg-node-title">${esc(_nodeTitle(n))}</span>
+          </span>
+          <span class="kg-detail-link-meta">
+            <span class="kg-link-kind kg-link-suggest-kind" style="--kg-kind-color:${esc(kd.color)}" title="${esc(kind)}">${esc(kindLabel)}</span>
+            ${_typeBadge(n)}
+            ${reasonInfo?.chip ? `<span class="kg-link-source-chip" title="${esc(reasonInfo.title)}">${esc(reasonInfo.text)}</span>` : ''}
+          </span>
+          ${reasonInfo && !reasonInfo.chip ? `<span class="kg-link-reason"${reasonInfo.title ? ` title="${esc(reasonInfo.title)}"` : ''}>${esc(reasonInfo.text)}</span>` : ''}
+        </span>
       </button>
-      ${reasonInfo && !reasonInfo.chip ? `<div class="kg-link-reason"${reasonInfo.title ? ` title="${esc(reasonInfo.title)}"` : ''}>${esc(reasonInfo.text)}</div>` : ''}
       ${removeBtn}
     </div>`;
   }).join('');
@@ -733,6 +740,13 @@ let _linkSuggestionShowing = false;
 // The batch connection card currently on screen (if any). Tracked so callers
 // (e.g. the research "Review graph connections" button) can toggle it closed.
 let _currentBatchCard = null;
+/** Active in-chat pager: one timeline slot that pages through burst suggestions. */
+let _activeChatPager = null;
+
+const _LINK_ICON_SVG = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+</svg>`;
 
 function _linkSuggestHost() {
   let host = document.getElementById('kg-link-suggest-host');
@@ -754,6 +768,116 @@ function _linkSuggestNode(type, title) {
   </div>`;
 }
 
+function _normalizeSuggestItem(data) {
+  const fromTitle = data.from_title || data.from;
+  const toTitle = data.to_title || data.to;
+  const kind = data.kind || 'related';
+  const reason = (data.reason || '').trim();
+  const kd = edgeKind(kind);
+  return {
+    data,
+    status: 'pending',
+    fromTitle,
+    toTitle,
+    kind,
+    reason,
+    kd,
+    proposal: {
+      from: data.from,
+      to: data.to,
+      kind,
+      reason: data.reason || reason,
+      from_title: fromTitle,
+      to_title: toTitle,
+      source: data.source || 'suggest_link',
+      suggestion_id: data.suggestion_id,
+      project_id: data.project_id,
+    },
+  };
+}
+
+function _suggestStatusLabel(status) {
+  if (status === 'accepted') return 'Accepted';
+  if (status === 'rejected') return 'Rejected';
+  if (status === 'later') return 'Saved for later';
+  if (status === 'dismissed') return 'Dismissed';
+  return '';
+}
+
+function _singleSuggestCardHtml(item, opts = {}) {
+  const {
+    eyebrow = item.data.eyebrow || 'Learned connection',
+    subtitle = item.data.subtitle || 'Add this connection to Links?',
+    showPager = false,
+    index = 0,
+    total = 1,
+    closeLabel = 'Close',
+  } = opts;
+  const settled = item.status !== 'pending';
+  const statusLabel = _suggestStatusLabel(item.status);
+  const pager = showPager
+    ? `<div class="kg-link-suggest-pager" role="navigation" aria-label="Suggested connections">
+        <button type="button" class="kg-link-suggest-pager-prev" aria-label="Previous suggestion" ${index <= 0 ? 'disabled' : ''}>‹</button>
+        <span class="kg-link-suggest-pager-count">${index + 1} of ${total}</span>
+        <button type="button" class="kg-link-suggest-pager-next" aria-label="Next suggestion" ${index >= total - 1 ? 'disabled' : ''}>›</button>
+      </div>`
+    : '';
+  const footRight = settled
+    ? `<span class="kg-link-suggest-settled">${esc(statusLabel)}</span>`
+    : `<div class="kg-link-suggest-actions kg-link-suggest-actions--triple">
+        <button type="button" class="kg-link-suggest-reject">Reject</button>
+        <button type="button" class="kg-link-suggest-later">Review later</button>
+        <button type="button" class="kg-link-suggest-accept">Accept</button>
+      </div>`;
+  return `
+    <div class="kg-link-suggest-accent" aria-hidden="true"></div>
+    <div class="kg-link-suggest-inner">
+      <div class="kg-link-suggest-head">
+        <span class="kg-link-suggest-icon" aria-hidden="true">${_LINK_ICON_SVG}</span>
+        <div class="kg-link-suggest-copy">
+          <div class="kg-link-suggest-eyebrow">${esc(eyebrow)}</div>
+          <div class="kg-link-suggest-sub">${esc(subtitle)}</div>
+        </div>
+        ${pager}
+        <button type="button" class="kg-link-suggest-close" aria-label="${esc(closeLabel)}">×</button>
+      </div>
+      <div class="kg-link-suggest-flow">
+        ${_linkSuggestNode(item.data.from_type, item.fromTitle)}
+        <span class="kg-link-suggest-arrow" aria-hidden="true">→</span>
+        ${_linkSuggestNode(item.data.to_type, item.toTitle)}
+      </div>
+      ${item.reason ? `<p class="kg-link-suggest-reason">${esc(item.reason)}</p>` : ''}
+      <div class="kg-link-suggest-foot">
+        <span class="kg-link-kind kg-link-suggest-kind" style="--kg-kind-color:${esc(item.kd.color)}">${esc(item.kd.label)}</span>
+        ${footRight}
+      </div>
+    </div>`;
+}
+
+function _chatPagerSummaryHtml(items) {
+  const counts = { accepted: 0, rejected: 0, later: 0, dismissed: 0 };
+  for (const it of items) {
+    if (counts[it.status] != null) counts[it.status] += 1;
+  }
+  const parts = [];
+  if (counts.accepted) parts.push(`${counts.accepted} accepted`);
+  if (counts.later) parts.push(`${counts.later} saved for later`);
+  if (counts.rejected) parts.push(`${counts.rejected} rejected`);
+  if (counts.dismissed) parts.push(`${counts.dismissed} dismissed`);
+  const summary = parts.length ? parts.join(' · ') : 'Done';
+  return `
+    <div class="kg-link-suggest-accent" aria-hidden="true"></div>
+    <div class="kg-link-suggest-inner">
+      <div class="kg-link-suggest-head">
+        <span class="kg-link-suggest-icon" aria-hidden="true">${_LINK_ICON_SVG}</span>
+        <div class="kg-link-suggest-copy">
+          <div class="kg-link-suggest-eyebrow">Connections reviewed</div>
+          <div class="kg-link-suggest-sub">${esc(summary)}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function _dismissLinkSuggestionCard(card, onDone) {
   if (!card || card.dataset.kgDismissed === '1') return;
   card.dataset.kgDismissed = '1';
@@ -770,6 +894,172 @@ function _finishLinkSuggestionPrompt() {
   _showNextLinkSuggestion();
 }
 
+function _chatPagerItemKey(data) {
+  if (!data) return '';
+  if (data.suggestion_id) return `s:${data.suggestion_id}`;
+  if (data.proposal_id) return `p:${data.proposal_id}`;
+  if (data.id) return `i:${data.id}`;
+  if (data.from && data.to) {
+    return `e:${data.from}|${data.to}|${data.kind || 'relates'}`;
+  }
+  return '';
+}
+
+function _chatPagerHasKey(key) {
+  if (!key || !_activeChatPager?.items?.length) return false;
+  return _activeChatPager.items.some((it) => _chatPagerItemKey(it.data) === key);
+}
+
+function _advanceChatPagerToUnsettled() {
+  const pager = _activeChatPager;
+  if (!pager) return;
+  const next = pager.items.findIndex(
+    (it, i) => i > pager.index && it.status === 'pending',
+  );
+  if (next >= 0) {
+    pager.index = next;
+    return;
+  }
+  const any = pager.items.findIndex((it) => it.status === 'pending');
+  if (any >= 0) pager.index = any;
+}
+
+function _wireChatPagerNav(card) {
+  card.querySelector('.kg-link-suggest-pager-prev')?.addEventListener('click', () => {
+    if (!_activeChatPager || _activeChatPager.index <= 0) return;
+    _activeChatPager.index -= 1;
+    _renderChatPager();
+  });
+  card.querySelector('.kg-link-suggest-pager-next')?.addEventListener('click', () => {
+    if (!_activeChatPager) return;
+    if (_activeChatPager.index >= _activeChatPager.items.length - 1) return;
+    _activeChatPager.index += 1;
+    _renderChatPager();
+  });
+}
+
+function _renderChatPager() {
+  const pager = _activeChatPager;
+  if (!pager?.card?.isConnected) {
+    _activeChatPager = null;
+    return;
+  }
+  const { card, items } = pager;
+  if (!items.length) return;
+
+  const pendingLeft = items.some((it) => it.status === 'pending');
+  if (!pendingLeft) {
+    card.innerHTML = _chatPagerSummaryHtml(items);
+    card.classList.add('kg-link-suggest-card--settled');
+    return;
+  }
+
+  if (pager.index < 0) pager.index = 0;
+  if (pager.index >= items.length) pager.index = items.length - 1;
+
+  const item = items[pager.index];
+  const total = items.length;
+  card.classList.remove('kg-link-suggest-card--settled');
+  card.innerHTML = _singleSuggestCardHtml(item, {
+    eyebrow: total > 1 ? 'Learned connections' : (item.data.eyebrow || 'Learned connection'),
+    subtitle: total > 1
+      ? 'Review each connection — use the arrows to switch.'
+      : (item.data.subtitle || 'Add this connection to Links?'),
+    showPager: total > 1,
+    index: pager.index,
+    total,
+  });
+
+  _wireChatPagerNav(card);
+
+  const settle = (status, after) => {
+    item.status = status;
+    if (item.data.suggestion_id) _dismissedLinkSuggestions.add(item.data.suggestion_id);
+    after?.();
+    _advanceChatPagerToUnsettled();
+    _renderChatPager();
+  };
+
+  card.querySelector('.kg-link-suggest-close')?.addEventListener('click', () => {
+    if (item.status !== 'pending') {
+      _advanceChatPagerToUnsettled();
+      _renderChatPager();
+      return;
+    }
+    settle('dismissed');
+  });
+
+  if (item.status !== 'pending') return;
+
+  card.querySelector('.kg-link-suggest-reject')?.addEventListener('click', () => {
+    settle('rejected', () => {
+      void _rejectPendingProposal(item.proposal).catch((e) => {
+        uiModule.showToast?.(e.message || 'Reject failed', 4000);
+      });
+    });
+  });
+
+  card.querySelector('.kg-link-suggest-later')?.addEventListener('click', () => {
+    settle('later', () => {
+      // Chat card settled state replaces the success toast.
+      void _enqueuePendingProposals([item.proposal], item.proposal.source, {
+        project_id: item.data.project_id,
+      }).catch((e) => uiModule.showToast?.(e.message || 'Save failed', 4000));
+    });
+  });
+
+  card.querySelector('.kg-link-suggest-accept')?.addEventListener('click', (ev) => {
+    const btn = ev.currentTarget;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    card.classList.add('kg-link-suggest-saving');
+    settle('accepted', () => {
+      void createGraphLink(
+        item.data.from,
+        item.data.to,
+        item.kind,
+        item.data.reason || item.reason,
+      ).catch((e) => {
+        uiModule.showToast?.(e.message || 'Link failed', 4000);
+      });
+    });
+  });
+}
+
+function _pushChatLinkSuggestion(data, chatBox) {
+  const key = _chatPagerItemKey(data);
+  if (key && _chatPagerHasKey(key)) return;
+  if (data.suggestion_id && _dismissedLinkSuggestions.has(data.suggestion_id)) return;
+
+  const item = _normalizeSuggestItem(data);
+  if (
+    _activeChatPager?.wrap?.isConnected
+    && !_activeChatPager.card?.classList.contains('kg-link-suggest-card--settled')
+  ) {
+    _activeChatPager.items.push(item);
+    if (_activeChatPager.items[_activeChatPager.index]?.status !== 'pending') {
+      _activeChatPager.index = _activeChatPager.items.length - 1;
+    }
+    _renderChatPager();
+    return;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'kg-link-suggest-chat';
+  wrap.setAttribute('aria-live', 'polite');
+  const card = document.createElement('div');
+  card.className = 'kg-link-suggest-card kg-link-suggest-card--chat';
+  wrap.appendChild(card);
+  chatBox.appendChild(wrap);
+  try {
+    wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  } catch { /* ignore */ }
+
+  _activeChatPager = { wrap, card, items: [item], index: 0 };
+  _renderChatPager();
+  requestAnimationFrame(() => card.classList.add('kg-link-suggest-in'));
+}
+
 function _showNextLinkSuggestion() {
   if (_linkSuggestionShowing) return;
   const data = _linkSuggestionQueue.shift();
@@ -784,45 +1074,10 @@ function _showNextLinkSuggestion() {
   }
   _linkSuggestionShowing = true;
 
-  const fromTitle = data.from_title || data.from;
-  const toTitle = data.to_title || data.to;
-  const kind = data.kind || 'related';
-  const kd = edgeKind(kind);
-  const reason = (data.reason || '').trim();
-
+  const item = _normalizeSuggestItem(data);
   const card = document.createElement('div');
   card.className = 'kg-link-suggest-card';
-  card.innerHTML = `
-    <div class="kg-link-suggest-accent" aria-hidden="true"></div>
-    <div class="kg-link-suggest-inner">
-      <div class="kg-link-suggest-head">
-        <span class="kg-link-suggest-icon" aria-hidden="true">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-          </svg>
-        </span>
-        <div class="kg-link-suggest-copy">
-          <div class="kg-link-suggest-eyebrow">${esc(data.eyebrow || 'Learned connection')}</div>
-          <div class="kg-link-suggest-sub">${esc(data.subtitle || 'Add this connection to Links?')}</div>
-        </div>
-        <button type="button" class="kg-link-suggest-close" aria-label="Close">×</button>
-      </div>
-      <div class="kg-link-suggest-flow">
-        ${_linkSuggestNode(data.from_type, fromTitle)}
-        <span class="kg-link-suggest-arrow" aria-hidden="true">→</span>
-        ${_linkSuggestNode(data.to_type, toTitle)}
-      </div>
-      ${reason ? `<p class="kg-link-suggest-reason">${esc(reason)}</p>` : ''}
-      <div class="kg-link-suggest-foot">
-        <span class="kg-link-kind kg-link-suggest-kind" style="--kg-kind-color:${esc(kd.color)}">${esc(kd.label)}</span>
-        <div class="kg-link-suggest-actions kg-link-suggest-actions--triple">
-          <button type="button" class="kg-link-suggest-reject">Reject</button>
-          <button type="button" class="kg-link-suggest-later">Review later</button>
-          <button type="button" class="kg-link-suggest-accept">Accept</button>
-        </div>
-      </div>
-    </div>`;
+  card.innerHTML = _singleSuggestCardHtml(item);
 
   const host = _linkSuggestHost();
   host.appendChild(card);
@@ -833,30 +1088,18 @@ function _showNextLinkSuggestion() {
     _dismissLinkSuggestionCard(card, _finishLinkSuggestionPrompt);
   };
 
-  const proposalPayload = {
-    from: data.from,
-    to: data.to,
-    kind,
-    reason: data.reason || reason,
-    from_title: fromTitle,
-    to_title: toTitle,
-    source: data.source || 'suggest_link',
-    suggestion_id: data.suggestion_id,
-    project_id: data.project_id,
-  };
-
   card.querySelector('.kg-link-suggest-close')?.addEventListener('click', dismiss);
 
   card.querySelector('.kg-link-suggest-reject')?.addEventListener('click', () => {
     _dismissLinkSuggestionCard(card, _finishLinkSuggestionPrompt);
-    void _rejectPendingProposal(proposalPayload).catch((e) => {
+    void _rejectPendingProposal(item.proposal).catch((e) => {
       uiModule.showToast?.(e.message || 'Reject failed', 4000);
     });
   });
 
   card.querySelector('.kg-link-suggest-later')?.addEventListener('click', () => {
     _dismissLinkSuggestionCard(card, _finishLinkSuggestionPrompt);
-    void _enqueuePendingProposals([proposalPayload], proposalPayload.source, {
+    void _enqueuePendingProposals([item.proposal], item.proposal.source, {
       project_id: data.project_id,
     }).then((out) => {
       uiModule.showToast?.(
@@ -875,7 +1118,7 @@ function _showNextLinkSuggestion() {
     card.classList.add('kg-link-suggest-saving');
     _dismissLinkSuggestionCard(card, _finishLinkSuggestionPrompt);
     uiModule.showToast?.('Added to Links', { duration: 1100, leadingIcon: 'check' });
-    void createGraphLink(data.from, data.to, kind, data.reason || reason).catch((e) => {
+    void createGraphLink(data.from, data.to, item.kind, data.reason || item.reason).catch((e) => {
       uiModule.showToast?.(e.message || 'Link failed', 4000);
     });
   });
@@ -1065,23 +1308,69 @@ export function closeConnectionBatchCard() {
   return true;
 }
 
-/** Batch learned connections from compare_papers / merge preview. */
-export function handleConnectionProposals(data) {
-  if (!data?.rows?.length && !data?.proposals?.length) return;
-  _showConnectionBatchCard({
-    ...data,
-    source: data.source || (data.rows?.length ? 'merge_subgraph' : 'compare_papers'),
-  });
+/** Expand batch proposals into chat-timeline pager items (no floating toast). */
+function _pushChatConnectionProposals(data, chatBox) {
+  const source = data.source || (data.rows?.length ? 'merge_subgraph' : 'compare_papers');
+  const proposals = _normalizeProposalRows(data);
+  if (!proposals.length) return;
+  for (const p of proposals) {
+    if (!p?.from || !p?.to) continue;
+    _pushChatLinkSuggestion({
+      from: p.from,
+      to: p.to,
+      from_title: p.from_title,
+      to_title: p.to_title,
+      from_type: p.from_type,
+      to_type: p.to_type,
+      kind: p.kind || 'relates',
+      reason: p.reason || '',
+      suggestion_id: p.suggestion_id || p.proposal_id || p.id,
+      proposal_id: p.proposal_id || p.id,
+      id: p.id || p.proposal_id,
+      project_id: p.project_id || data.project_id,
+      source,
+    }, chatBox);
+  }
 }
 
-/** Show approval toast when the agent suggests connecting two graph nodes. */
-export function handleLinkSuggestion(data) {
+/** Batch learned connections from compare_papers / merge preview.
+ *  opts.mount === 'chat' expands into the in-timeline pager; else overlay toast. */
+export function handleConnectionProposals(data, opts = {}) {
+  if (!data?.rows?.length && !data?.proposals?.length) return;
+  const payload = {
+    ...data,
+    source: data.source || (data.rows?.length ? 'merge_subgraph' : 'compare_papers'),
+  };
+  if (opts.mount === 'chat') {
+    const chatBox = document.getElementById('chat-history');
+    if (chatBox) {
+      _pushChatConnectionProposals(payload, chatBox);
+      return;
+    }
+  }
+  _showConnectionBatchCard(payload);
+}
+
+/** Show approval UI when the agent suggests connecting two graph nodes.
+ *  opts.mount === 'chat' prefers an in-timeline pager; falls back to overlay. */
+export function handleLinkSuggestion(data, opts = {}) {
   if (!data?.from || !data?.to) return;
   if (data._batch) {
-    handleConnectionProposals(data);
+    handleConnectionProposals(data, opts);
     return;
   }
   if (data.suggestion_id && _dismissedLinkSuggestions.has(data.suggestion_id)) return;
+  const key = _chatPagerItemKey(data);
+  if (key && _chatPagerHasKey(key)) return;
+
+  if (opts.mount === 'chat') {
+    const chatBox = document.getElementById('chat-history');
+    if (chatBox) {
+      _pushChatLinkSuggestion(data, chatBox);
+      return;
+    }
+  }
+
   if (data.suggestion_id) {
     const dup = _linkSuggestionQueue.some((q) => q.suggestion_id === data.suggestion_id);
     if (dup) return;

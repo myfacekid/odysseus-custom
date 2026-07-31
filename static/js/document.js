@@ -247,7 +247,6 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       const isActive = id === activeDocId;
       const title = doc.title || 'Untitled';
       const shortTitle = title.length > 24 ? title.slice(0, 22) + '...' : title;
-      const menuBtn = `<button class="doc-tab-menu-btn" data-doc-id="${id}" title="Document actions"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2.5"/><circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="19" r="2.5"/></svg></button>`;
       const ver = doc.version || doc.version_count || 1;
       const verChip = `<span class="doc-tab-version" data-doc-id="${id}" title="Version history">v${ver}</span>`;
       // Language icon before the title — same family as the meta-line / picker
@@ -258,7 +257,6 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       const langChip = `<span class="doc-tab-lang">${lic}</span>`;
       html += `<div class="doc-tab${isActive ? ' active' : ''}" draggable="true" data-doc-id="${id}" title="${title}">
         ${verChip}${langChip}<span class="doc-tab-title">${shortTitle}</span>
-        ${menuBtn}
         <button class="doc-tab-close" data-doc-id="${id}" title="Unlink from chat (kept in the Library)">&times;</button>
       </div>`;
     }
@@ -309,7 +307,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     tabBar.querySelectorAll('.doc-tab').forEach(tab => {
       tab.addEventListener('click', (e) => {
         // Check if click was on or inside the close/play button
-        if (e.target.closest('.doc-tab-close') || e.target.closest('.doc-tab-play') || e.target.closest('.doc-tab-menu-btn') || e.target.closest('.doc-tab-version')) return;
+        if (e.target.closest('.doc-tab-close') || e.target.closest('.doc-tab-play') || e.target.closest('.doc-tab-version')) return;
         if (_isEditingTabTitle) return;
         // If clicking the title span, delay to allow dblclick
         if (e.target.classList.contains('doc-tab-title')) {
@@ -351,13 +349,6 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
           if (docId !== activeDocId) switchToDoc(docId);
           toggleHtmlPreview();
         }
-        return;
-      }
-      const menuBtnEl = e.target.closest('.doc-tab-menu-btn');
-      if (menuBtnEl) {
-        e.stopPropagation();
-        const docId = menuBtnEl.dataset.docId;
-        if (docId) showDocTabMenu(menuBtnEl, docId);
         return;
       }
       const closeBtn = e.target.closest('.doc-tab-close');
@@ -884,6 +875,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
   const _pdfPaneFieldsByDoc = new Map(); // docId -> [{name, type, inputEl, ...}]
   const _pdfPaneAnnotationsByDoc = new Map(); // docId -> [{id, page, x, y, w, h, el, wrap}]
   const _pdfUndoStackByDoc = new Map(); // docId -> markdown snapshots
+  const _pdfRedoStackByDoc = new Map(); // docId -> redo frames
   let _pdfPaneSaveTimer = null;
 
   // Match a freeform-annotation bullet line in the markdown source.
@@ -981,6 +973,36 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     stack.push(md);
     if (stack.length > 50) stack.shift();
     _pdfUndoStackByDoc.set(docId, stack);
+    // New edits invalidate redo.
+    _pdfRedoStackByDoc.set(docId, []);
+    _syncUndoRedoButtons();
+  }
+
+  async function _applyPdfContentSnapshot(docId, content, statusVerb) {
+    if (_pdfPaneSaveTimer) {
+      clearTimeout(_pdfPaneSaveTimer);
+      _pdfPaneSaveTimer = null;
+    }
+    const doc = docs.get(docId);
+    if (!doc) return false;
+    doc.content = content;
+    const ta = document.getElementById('doc-editor-textarea');
+    if (ta) ta.value = content;
+    _setPdfSaveStatus('saving');
+    try {
+      const res = await fetch(`${API_BASE}/api/document/${docId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) throw new Error(res.statusText || String(res.status));
+      _setPdfSaveStatus('saved');
+      _renderPdfPane();
+      return true;
+    } catch (e) {
+      _setPdfSaveStatus('error', e.message || (statusVerb + ' failed'));
+      return true;
+    }
   }
 
   async function _undoPdfPaneAction() {
@@ -989,30 +1011,59 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     const prev = stack.pop();
     if (!prev) return false;
     _pdfUndoStackByDoc.set(docId, stack);
-    if (_pdfPaneSaveTimer) {
-      clearTimeout(_pdfPaneSaveTimer);
-      _pdfPaneSaveTimer = null;
+    const current = _pdfMarkdownFromLive(docId);
+    if (current != null) {
+      const redo = _pdfRedoStackByDoc.get(docId) || [];
+      redo.push(current);
+      if (redo.length > 50) redo.shift();
+      _pdfRedoStackByDoc.set(docId, redo);
     }
-    const doc = docs.get(docId);
-    if (!doc) return false;
-    doc.content = prev;
-    const ta = document.getElementById('doc-editor-textarea');
-    if (ta) ta.value = prev;
-    _setPdfSaveStatus('saving');
-    try {
-      const res = await fetch(`${API_BASE}/api/document/${docId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: prev }),
-      });
-      if (!res.ok) throw new Error(res.statusText || String(res.status));
-      _setPdfSaveStatus('saved');
-      _renderPdfPane();
-      return true;
-    } catch (e) {
-      _setPdfSaveStatus('error', e.message || 'Undo failed');
-      return true;
+    const ok = await _applyPdfContentSnapshot(docId, prev, 'Undo');
+    _syncUndoRedoButtons();
+    return ok;
+  }
+
+  async function _redoPdfPaneAction() {
+    const docId = activeDocId;
+    const redo = _pdfRedoStackByDoc.get(docId) || [];
+    const next = redo.pop();
+    if (!next) return false;
+    _pdfRedoStackByDoc.set(docId, redo);
+    const current = _pdfMarkdownFromLive(docId);
+    if (current != null) {
+      const stack = _pdfUndoStackByDoc.get(docId) || [];
+      stack.push(current);
+      if (stack.length > 50) stack.shift();
+      _pdfUndoStackByDoc.set(docId, stack);
     }
+    const ok = await _applyPdfContentSnapshot(docId, next, 'Redo');
+    _syncUndoRedoButtons();
+    return ok;
+  }
+
+  function _syncUndoRedoButtons() {
+    const redoBtn = document.getElementById('doc-redo-btn');
+    if (!redoBtn) return;
+    const pdfPane = document.getElementById('doc-pdf-view');
+    const pdfVisible = pdfPane && pdfPane.style.display !== 'none';
+    let canRedo = false;
+    if (pdfVisible) {
+      canRedo = (_pdfRedoStackByDoc.get(activeDocId) || []).length > 0;
+    } else {
+      const ta = document.getElementById('doc-editor-textarea');
+      if (ta) {
+        const prev = document.activeElement;
+        try {
+          ta.focus({ preventScroll: true });
+          canRedo = !!document.queryCommandEnabled('redo');
+        } catch (_) { canRedo = false; }
+        if (prev && prev !== ta && typeof prev.focus === 'function') {
+          try { prev.focus({ preventScroll: true }); } catch (_) {}
+        }
+      }
+    }
+    redoBtn.disabled = !canRedo;
+    redoBtn.classList.toggle('is-disabled', !canRedo);
   }
 
   // Active drop mode for the PDF toolbar — toolbar buttons set this; the
@@ -1969,7 +2020,6 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
   }
 
   function _syncHeaderActions() {
-    const actionBtn = document.getElementById('doc-header-preview-btn');
     const exportBtn = document.getElementById('doc-export-pdf-btn');
     const pdfViewBtn = document.getElementById('doc-pdf-view-btn');
     const pdfPane = document.getElementById('doc-pdf-view');
@@ -1978,30 +2028,12 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       || docs.get(activeDocId)?.content
       || '';
     const isForm = _isFormBackedDoc(live);
-    // Footer main button: for a doc opened from an email attachment, morph the
-    // Copy button into "Reply" (send the filled file back to the sender via the
-    // signed-reply flow). Otherwise it's the normal Copy action. The click
-    // handler branches on data-mode.
-    const _copyBtn = document.getElementById('doc-footer-copy-btn');
-    if (_copyBtn) {
-      const _ad = docs.get(activeDocId);
-      const _replyable = !!(_ad && _ad.sourceEmailUid && _ad.sourceEmailFolder);
-      if (_replyable && _copyBtn.dataset.mode !== 'reply') {
-        _copyBtn.dataset.mode = 'reply';
-        _copyBtn.title = 'Reply to the sender with this filled file attached';
-        _copyBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>Attach';
-      } else if (!_replyable && _copyBtn.dataset.mode !== 'copy') {
-        _copyBtn.dataset.mode = 'copy';
-        _copyBtn.title = 'Copy document';
-        _copyBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy';
-      }
-    }
     // Standalone Export PDF / PDF-toggle icon buttons are retired — for a
     // form-backed doc the language selector itself toggles between
     // "pdf" (rendered view) and "markdown" (source view).
     if (exportBtn) exportBtn.style.display = 'none';
     if (pdfViewBtn) pdfViewBtn.style.display = 'none';
-    if (true) {
+    {
       const explicit = _pdfViewState.get(activeDocId);
       const active = isForm && explicit !== false;
       // Sync the language select's displayed value to the current view.
@@ -2025,18 +2057,8 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
         }
       }
     }
-    if (!actionBtn) return;
 
     const lang = (document.getElementById('doc-language-select')?.value || '').toLowerCase();
-    const canPreview = ['markdown', 'csv'].includes(lang) || _isRenderLang(lang);
-    const canRun = ['javascript', 'js', 'python', 'py', 'bash', 'sh', 'shell', 'zsh'].includes(lang);
-
-    const _eyeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-    const _penIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
-    const _playIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
-    const _codeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
-
-    // Check active states
     const _mdPreview = document.getElementById('doc-md-preview');
     const _csvPreview = document.getElementById('doc-csv-preview');
     const _htmlPreview = document.getElementById('doc-html-preview');
@@ -2046,20 +2068,11 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     const _htmlActive = _htmlPreview && _htmlPreview.style.display !== 'none';
     const _outputActive = _outputPanel && _outputPanel.style.display !== 'none';
 
-    let show = false;
-    actionBtn.classList.remove('active');
-
-    // The markdown Edit/Preview toggle is a two-icon switch; other modes use
-    // the single dynamic preview button.
     const mdToggle = document.getElementById('doc-md-view-toggle');
     if (mdToggle) mdToggle.style.display = (lang === 'markdown') ? 'inline-flex' : 'none';
     const renderToggle = document.getElementById('doc-render-view-toggle');
     if (renderToggle) {
       renderToggle.style.display = _hasViewToggle(lang) ? 'inline-flex' : 'none';
-      // Swap the "run" side's icon to match what the language actually does:
-      //   CSV → 4-quadrant grid (table view)
-      //   HTML / SVG / XML → eye (rendered preview)
-      //   Python / JS / TS / bash → play triangle (run code)
       const runBtn = renderToggle.querySelector('[data-renderview="run"]');
       if (runBtn) {
         let icon, title;
@@ -2079,9 +2092,6 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
           runBtn.dataset.lastIcon = lang;
         }
       }
-      // Swap the "code" side's icon too — CSV's "code" really means "edit
-      // the underlying spreadsheet text", so a pencil reads better than the
-      // </> brackets used for actual code.
       const codeBtn = renderToggle.querySelector('[data-renderview="code"]');
       if (codeBtn) {
         const codeIco = (lang === 'csv')
@@ -2094,55 +2104,20 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
           codeBtn.dataset.lastIcon = lang;
         }
       }
-      // Reflect which side is currently active so the toggle shows the same
-      // visual feedback markdown's Edit/Preview switch does (background tint
-      // + the "punch" pop animation from .md-view-toggle .md-view-opt.active).
-      // For CSV the run side = table view; for HTML/SVG/XML = iframe preview;
-      // for runnable langs = output panel open.
       let _viewActive = false;
       if (lang === 'csv') _viewActive = _csvActive;
       else if (_isRenderLang(lang)) _viewActive = _htmlActive;
       else _viewActive = _outputActive;
-      const _codeBtn2 = renderToggle.querySelector('[data-renderview="code"]');
-      const _runBtn2 = renderToggle.querySelector('[data-renderview="run"]');
-      _codeBtn2?.classList.toggle('active', !_viewActive);
-      _runBtn2?.classList.toggle('active', _viewActive);
+      renderToggle.querySelector('[data-renderview="code"]')?.classList.toggle('active', !_viewActive);
+      renderToggle.querySelector('[data-renderview="run"]')?.classList.toggle('active', _viewActive);
     }
 
-    if (lang === 'markdown') {
-      show = false;
-      if (mdToggle) {
-        mdToggle.querySelector('[data-mdview="edit"]')?.classList.toggle('active', !_mdActive);
-        mdToggle.querySelector('[data-mdview="preview"]')?.classList.toggle('active', _mdActive);
-      }
-    } else if (lang === 'csv') {
-      show = true;
-      actionBtn.innerHTML = _csvActive ? _penIco : '<span style="font-size:12px;font-weight:600;">⊞</span>';
-      actionBtn.title = _csvActive ? 'Edit' : 'Table View';
-      if (_csvActive) actionBtn.classList.add('active');
-    } else if (_isRenderLang(lang)) {
-      // SVG/HTML/XML use the segmented Code </> | Run ▶ light-switch toggle
-      // (like markdown's edit/preview switch) instead of the single button.
-      show = false;
-      if (renderToggle) {
-        renderToggle.querySelector('[data-renderview="code"]')?.classList.toggle('active', !_htmlActive);
-        renderToggle.querySelector('[data-renderview="run"]')?.classList.toggle('active', _htmlActive);
-      }
-    } else if (canRun) {
-      show = true;
-      actionBtn.innerHTML = _outputActive ? _codeIco : _playIco;
-      actionBtn.title = _outputActive ? 'Hide output' : 'Run';
-      if (_outputActive) actionBtn.classList.add('active');
+    if (lang === 'markdown' && mdToggle) {
+      mdToggle.querySelector('[data-mdview="edit"]')?.classList.toggle('active', !_mdActive);
+      mdToggle.querySelector('[data-mdview="preview"]')?.classList.toggle('active', _mdActive);
     }
 
-    // The unified segmented Code/Run-or-View toggle (`#doc-render-view-toggle`)
-    // covers CSV / Python / JS / bash / HTML / SVG / XML. When it's shown,
-    // suppress the single morph button to avoid two redundant controls.
-    if (_hasViewToggle(lang)) show = false;
-    actionBtn.style.display = show ? '' : 'none';
-
-    // Now that the contextual buttons' visibility is settled, collapse the bar
-    // if it ended up empty (the common plain-doc-on-mobile case).
+    _syncUndoRedoButtons();
     _syncHeaderBarVisibility();
   }
 
@@ -2516,8 +2491,6 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
                under the format group. -->
           <button type="button" class="md-dd-toggle" data-dd="format" title="Format"><b style="font-style:italic;">A</b><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
           <span class="md-toolbar-sep"></span>
-          <button type="button" id="md-toolbar-attach-btn" class="md-toolbar-attach-btn" title="Attach files"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-          <span class="md-toolbar-sep"></span>
           <span id="md-toolbar-emoji-slot"></span>
           <span class="md-toolbar-sep md-toolbar-pdf-only" style="display:none"></span>
           <button type="button" id="doc-pdf-add-text-btn" class="md-toolbar-pdf-only" title="Add text box (then click on PDF)" style="display:none"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></button>
@@ -2533,8 +2506,8 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
         <button type="button" class="md-scroll-arrow md-scroll-right" id="md-scroll-right" title="Scroll right" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
         <div class="md-toolbar-right-cluster" id="md-toolbar-right-cluster">
           <span id="doc-stream-indicator" class="doc-stream-indicator md-toolbar-doc-action" style="display:none"><span class="doc-stream-dot"></span> editing</span>
-          <button id="doc-undo-btn" class="doc-action-icon-btn md-toolbar-doc-action" title="Undo (Ctrl+Z)" style="gap:4px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span style="font-size:11px;">Undo</span></button>
-          <button id="doc-header-preview-btn" class="doc-action-icon-btn md-toolbar-doc-action" title="Run / Preview" style="display:none;opacity:0.85;gap:4px;"></button>
+          <button type="button" id="doc-undo-btn" class="doc-action-icon-btn md-toolbar-doc-action" title="Undo (Ctrl+Z)" aria-label="Undo"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+          <button type="button" id="doc-redo-btn" class="doc-action-icon-btn md-toolbar-doc-action is-disabled" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
           <select id="doc-language-select" class="doc-language-select md-toolbar-doc-action">
             <option value="">type</option>
             <option value="python">python</option>
@@ -2562,10 +2535,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
             <option value="csv">csv</option>
             <option value="pdf">pdf</option>
           </select>
-          <span class="doc-split-btn-group md-toolbar-doc-action" id="doc-copy-export-split">
-            <button type="button" id="doc-footer-copy-btn" class="doc-split-btn doc-split-main" title="Copy document"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button>
-            <button type="button" id="doc-footer-export-btn" class="doc-split-btn doc-split-caret" title="Export as…" aria-label="Export options"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></button>
-          </span>
+          <button type="button" id="doc-actions-menu-btn" class="doc-action-icon-btn md-toolbar-doc-action" title="Document actions" aria-label="Document actions" aria-haspopup="menu"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
         </div>
       </div>
       <div id="doc-find-bar" class="doc-find-bar" style="display:none">
@@ -2753,11 +2723,10 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     document.getElementById('doc-close-btn')?.addEventListener('click', () => closePanel('down'));
     document.getElementById('doc-footer-close-btn')?.addEventListener('click', () => { if (activeDocId) closeTab(activeDocId); });
     document.getElementById('doc-import-btn')?.addEventListener('click', () => openLibrary({ tab: 'documents' }));
-    document.getElementById('doc-footer-copy-btn')?.addEventListener('click', (e) => {
-      if (e.currentTarget.dataset.mode === 'reply') { if (activeDocId) _sendSignedReply(activeDocId); }
-      else copyDocument();
+    document.getElementById('doc-actions-menu-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showDocActionsMenu(e.currentTarget);
     });
-    document.getElementById('doc-footer-export-btn')?.addEventListener('click', (e) => showExportMenu(null, e.currentTarget.getBoundingClientRect()));
     // Mobile footer: Close the current doc + Copy its content (replaces the
     // per-tab × on small screens, mirroring the email reader's Close footer).
     document.getElementById('doc-mobile-close')?.addEventListener('click', () => { if (activeDocId) closeTab(activeDocId); });
@@ -2957,24 +2926,6 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     });
 
 
-    // Header unified action button (preview or run depending on language)
-    document.getElementById('doc-header-preview-btn').addEventListener('click', () => {
-      const lang = (document.getElementById('doc-language-select')?.value || '').toLowerCase();
-      if (lang === 'markdown') toggleMarkdownPreview();
-      else if (lang === 'csv') toggleCsvPreview();
-      else if (_isRenderLang(lang)) toggleHtmlPreview();
-      else {
-        // Runnable language — toggle output
-        const outputPanel = document.getElementById('doc-run-output');
-        if (outputPanel && outputPanel.style.display !== 'none') {
-          outputPanel.style.display = 'none';
-        } else {
-          runDocument();
-        }
-      }
-      _syncHeaderActions();
-    });
-
     // Markdown Edit/Preview two-icon switch — click a side to go to that view.
     document.getElementById('doc-md-view-toggle')?.addEventListener('click', (e) => {
       const opt = e.target.closest('.md-view-opt');
@@ -3006,7 +2957,12 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
         // Runnable language (python / js / ts / bash …) — clicking Run is
         // a one-shot execute; clicking Code dismisses the output pane.
         if (wantRun) {
-          document.getElementById('doc-header-preview-btn')?.click();
+          const outputPanel = document.getElementById('doc-run-output');
+          if (outputPanel && outputPanel.style.display !== 'none') {
+            outputPanel.style.display = 'none';
+          } else {
+            runDocument();
+          }
         } else {
           const out = document.getElementById('doc-run-output');
           if (out) out.style.display = 'none';
@@ -3015,13 +2971,14 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       _syncHeaderActions();
     });
 
-    // Font size toggle (S → M → L)
+    // Font size: Aa opens a stepped S/M/L slider popover (no cycle-on-click).
     const fontBtn = document.getElementById('doc-fontsize-btn');
     const editorWrap = document.getElementById('doc-editor-wrap');
     const _fontSizes = ['s', 'm', 'l'];
     const _iconSizes = [12, 14, 16];
     let _fontIdx = parseInt(localStorage.getItem('nobody-doc-fontsize') || '0', 10);
     if (!(_fontIdx >= 0 && _fontIdx < 3)) _fontIdx = 0;
+    let _fontPopover = null;
     function _applyDocFont() {
       if (editorWrap) {
         editorWrap.classList.remove('doc-font-s', 'doc-font-m', 'doc-font-l');
@@ -3029,27 +2986,104 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       }
       if (fontBtn) {
         fontBtn.dataset.size = _fontSizes[_fontIdx];
-        // Keep the original behaviour: the icon itself grows with the size.
         const svg = fontBtn.querySelector('svg');
         if (svg) { const sz = _iconSizes[_fontIdx]; svg.setAttribute('width', sz); svg.setAttribute('height', sz); }
-        // Show only the active size letter (just S, or just M, or just L).
         fontBtn.querySelectorAll('.doc-fontsize-levels [data-sz]').forEach(el => {
           const active = el.dataset.sz === _fontSizes[_fontIdx];
           el.classList.toggle('active', active);
           el.style.display = active ? '' : 'none';
         });
       }
+      if (_fontPopover) {
+        const range = _fontPopover.querySelector('input[type="range"]');
+        if (range && Number(range.value) !== _fontIdx) range.value = String(_fontIdx);
+        _fontPopover.querySelectorAll('[data-font-tick]').forEach(el => {
+          el.classList.toggle('active', Number(el.dataset.fontTick) === _fontIdx);
+        });
+      }
       localStorage.setItem('nobody-doc-fontsize', _fontIdx);
     }
-    _applyDocFont();
-    // Click cycles through the sizes (S → M → L → S).
-    if (fontBtn) fontBtn.addEventListener('click', () => {
-      _fontIdx = (_fontIdx + 1) % 3;
+    function _closeFontPopover() {
+      if (!_fontPopover) return;
+      _fontPopover.remove();
+      _fontPopover = null;
+      document.removeEventListener('click', _fontOutside, true);
+      document.removeEventListener('keydown', _fontEsc, true);
+      fontBtn?.setAttribute('aria-expanded', 'false');
+    }
+    function _fontOutside(e) {
+      if (!_fontPopover) return;
+      if (_fontPopover.contains(e.target) || fontBtn?.contains(e.target)) return;
+      _closeFontPopover();
+    }
+    function _fontEsc(e) {
+      if (e.key !== 'Escape' || !_fontPopover) return;
+      e.preventDefault();
+      e.stopPropagation();
+      _closeFontPopover();
+    }
+    function _openFontPopover() {
+      if (_fontPopover) { _closeFontPopover(); return; }
+      if (!fontBtn) return;
+      _fontPopover = document.createElement('div');
+      _fontPopover.id = 'doc-fontsize-popover';
+      _fontPopover.className = 'doc-fontsize-popover';
+      _fontPopover.setAttribute('role', 'dialog');
+      _fontPopover.setAttribute('aria-label', 'Font size');
+      _fontPopover.innerHTML =
+        '<div class="doc-fontsize-popover-ticks">' +
+          '<button type="button" data-font-tick="0" title="Small">S</button>' +
+          '<button type="button" data-font-tick="1" title="Medium">M</button>' +
+          '<button type="button" data-font-tick="2" title="Large">L</button>' +
+        '</div>' +
+        '<input type="range" min="0" max="2" step="1" value="' + _fontIdx + '" aria-label="Font size">' ;
+      document.body.appendChild(_fontPopover);
+      const r = fontBtn.getBoundingClientRect();
+      _fontPopover.style.position = 'fixed';
+      _fontPopover.style.left = Math.max(8, r.left) + 'px';
+      _fontPopover.style.top = (r.bottom + 4) + 'px';
+      _fontPopover.style.zIndex = '10000';
+      requestAnimationFrame(() => {
+        if (!_fontPopover) return;
+        const mr = _fontPopover.getBoundingClientRect();
+        if (mr.right > window.innerWidth - 8) {
+          _fontPopover.style.left = Math.max(8, window.innerWidth - mr.width - 8) + 'px';
+        }
+        if (mr.bottom > window.innerHeight - 8) {
+          _fontPopover.style.top = Math.max(8, r.top - mr.height - 4) + 'px';
+        }
+      });
+      const range = _fontPopover.querySelector('input[type="range"]');
+      const setIdx = (idx) => {
+        _fontIdx = Math.max(0, Math.min(2, idx | 0));
+        _applyDocFont();
+        syncHighlighting();
+      };
+      range?.addEventListener('input', () => setIdx(Number(range.value)));
+      _fontPopover.querySelectorAll('[data-font-tick]').forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          setIdx(Number(btn.dataset.fontTick));
+        });
+      });
+      fontBtn.setAttribute('aria-expanded', 'true');
       _applyDocFont();
-      syncHighlighting();
-    });
+      setTimeout(() => {
+        document.addEventListener('click', _fontOutside, true);
+        document.addEventListener('keydown', _fontEsc, true);
+      }, 0);
+    }
+    _applyDocFont();
+    if (fontBtn) {
+      fontBtn.setAttribute('aria-haspopup', 'dialog');
+      fontBtn.setAttribute('aria-expanded', 'false');
+      fontBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _openFontPopover();
+      });
+    }
 
-    // Undo button in header
+    // Undo / Redo in the right cluster
     const docUndoBtn = document.getElementById('doc-undo-btn');
     if (docUndoBtn) docUndoBtn.addEventListener('click', async () => {
       const pdfPane = document.getElementById('doc-pdf-view');
@@ -3057,9 +3091,32 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       if (pdfVisible && await _undoPdfPaneAction()) return;
       const ta = document.getElementById('doc-editor-textarea');
       if (ta) {
-        ta.focus();   // execCommand('undo') needs the textarea focused
+        ta.focus();
         document.execCommand('undo');
-        _dismissDocKb();   // then force the keyboard back down on touch
+        _dismissDocKb();
+      }
+      _syncUndoRedoButtons();
+    });
+    const docRedoBtn = document.getElementById('doc-redo-btn');
+    if (docRedoBtn) docRedoBtn.addEventListener('click', async () => {
+      if (docRedoBtn.disabled) return;
+      const pdfPane = document.getElementById('doc-pdf-view');
+      const pdfVisible = pdfPane && pdfPane.style.display !== 'none';
+      if (pdfVisible && await _redoPdfPaneAction()) return;
+      const ta = document.getElementById('doc-editor-textarea');
+      if (ta) {
+        ta.focus();
+        document.execCommand('redo');
+        _dismissDocKb();
+      }
+      _syncUndoRedoButtons();
+    });
+    document.getElementById('doc-editor-textarea')?.addEventListener('input', () => {
+      _syncUndoRedoButtons();
+    });
+    document.getElementById('doc-editor-textarea')?.addEventListener('keyup', (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'y' || e.key === 'Z')) {
+        _syncUndoRedoButtons();
       }
     });
 
@@ -6307,31 +6364,29 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     if (_docTabMenu) { _docTabMenu.style.display = 'none'; }
   }
 
-  function showDocTabMenu(btnEl, docId) {
-    // Toggle off if already open for this doc
+  function showDocActionsMenu(anchorEl) {
+    const docId = activeDocId;
+    if (!docId || !docs.has(docId)) return;
+
+    // Toggle off if already open
     if (_docTabMenu && _docTabMenu.style.display === 'block' && _docTabMenu._docId === docId) {
       _closeDocTabMenu();
       return;
     }
 
-    // Capture button position before any DOM changes
+    const btnEl = anchorEl || document.getElementById('doc-actions-menu-btn');
+    if (!btnEl) return;
     const _menuAnchorRect = btnEl.getBoundingClientRect();
-
-    // Switch to this doc if not already active
-    if (docId !== activeDocId) switchToDoc(docId);
-
     const doc = docs.get(docId);
     if (!doc) return;
 
-    // Create singleton menu container once
     if (!_docTabMenu) {
       _docTabMenu = document.createElement('div');
       _docTabMenu.className = 'doc-tab-dropdown';
       _docTabMenu.style.cssText = 'position:fixed;z-index:1000;min-width:0;width:max-content;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:2px;box-shadow:2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);backdrop-filter:blur(12px);font-size:12px;display:none;';
       document.body.appendChild(_docTabMenu);
-      // Close on outside click
       document.addEventListener('click', (e) => {
-        if (_docTabMenu && !_docTabMenu.contains(e.target) && !e.target.closest('.doc-tab-menu-btn')) {
+        if (_docTabMenu && !_docTabMenu.contains(e.target) && !e.target.closest('#doc-actions-menu-btn')) {
           _closeDocTabMenu();
         }
       });
@@ -6344,49 +6399,54 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       }, true);
     }
 
-    const lang = (doc.language || '').toLowerCase();
-    const canRun = _isRenderLang(lang) || ['javascript', 'js', 'python', 'py', 'bash', 'sh', 'shell', 'zsh'].includes(lang);
-
-    let previewIcon = '', previewLabel = '';
-    const _mdPreview = document.getElementById('doc-md-preview');
-    const _csvPreview = document.getElementById('doc-csv-preview');
-    const _htmlPreview = document.getElementById('doc-html-preview');
-    const _mdActive = _mdPreview && _mdPreview.style.display !== 'none';
-    const _csvActive = _csvPreview && _csvPreview.style.display !== 'none';
-    const _htmlActive = _htmlPreview && _htmlPreview.style.display !== 'none';
-    if (lang === 'markdown') { previewIcon = 'MD'; previewLabel = _mdActive ? 'Edit' : 'Preview'; }
-    else if (lang === 'csv') { previewIcon = '⊞'; previewLabel = _csvActive ? 'Edit' : 'Table View'; }
-    else if (_isRenderLang(lang)) { previewIcon = '▶'; previewLabel = _htmlActive ? 'Edit' : 'Run / Preview'; }
+    const lang = (document.getElementById('doc-language-select')?.value || doc.language || '').toLowerCase();
+    const canRun = ['javascript', 'js', 'python', 'py', 'bash', 'sh', 'shell', 'zsh'].includes(lang);
+    const showRun = canRun && !_hasViewToggle(lang);
+    const replyable = !!(doc.sourceEmailUid && doc.sourceEmailFolder);
+    const liveContent = document.getElementById('doc-editor-textarea')?.value || doc.content || '';
+    const isForm = _isFormBackedDoc(liveContent);
 
     const _di = (svg) => `<span class="dropdown-icon">${svg}</span>`;
     const _saveIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
     const _copyIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    const _attachIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
     const _runIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
-    const _previewIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
     const _deleteIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
+    const _mdIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+    const _pdfIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>';
+    const _wordIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 13l1.5 5L12 13l1.5 5L15 13"/></svg>';
+    const _importIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    const _deviceIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+    const _closeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
     let items = '';
+    // 1. Copy / Attach
+    if (replyable) {
+      items += `<div class="dropdown-item-compact doc-tab-action" data-action="signed-reply">${_di(_attachIco)}<span>Attach</span></div>`;
+    } else {
+      items += `<div class="dropdown-item-compact doc-tab-action" data-action="copy">${_di(_copyIco)}<span>Copy</span></div>`;
+    }
+    // 2. Export options
+    if (isForm) {
+      items += `<div class="dropdown-item-compact doc-tab-action" data-action="export-filled-pdf">${_di(_pdfIco)}<span>Filled PDF</span></div>`;
+    }
+    items += `<div class="dropdown-item-compact doc-tab-action" data-action="export-md">${_di(_mdIco)}<span>Export Markdown</span></div>`;
+    items += `<div class="dropdown-item-compact doc-tab-action" data-action="export-pdf">${_di(_pdfIco)}<span>Print as PDF</span></div>`;
+    items += `<div class="dropdown-item-compact doc-tab-action" data-action="export-docx">${_di(_wordIco)}<span>Export as Word</span></div>`;
+    // 3. Import
+    items += `<div class="dropdown-divider"></div>`;
+    items += `<div class="dropdown-item-compact doc-tab-action" data-action="import-library">${_di(_importIco)}<span>Import from library</span></div>`;
+    items += `<div class="dropdown-item-compact doc-tab-action" data-action="import-device">${_di(_deviceIco)}<span>Import from device</span></div>`;
+    // 4. Save
+    items += `<div class="dropdown-divider"></div>`;
     items += `<div class="dropdown-item-compact doc-tab-action" data-action="save">${_di(_saveIco)}<span>Save</span></div>`;
-    items += `<div class="dropdown-item-compact doc-tab-action" data-action="copy">${_di(_copyIco)}<span>Copy</span></div>`;
-    if (canRun) {
+    // 5. Run when useful and not covered by view toggle
+    if (showRun) {
       items += `<div class="dropdown-item-compact doc-tab-action" data-action="run">${_di(_runIco)}<span>Run</span></div>`;
     }
-    if (previewLabel) {
-      items += `<div class="dropdown-item-compact doc-tab-action" data-action="preview"><span class="dropdown-icon">${previewIcon}</span><span>${previewLabel}</span></div>`;
-    }
-    const _downloadIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
-    items += `<div class="dropdown-item-compact doc-tab-action" data-action="download">${_di(_downloadIco)}<span>Download</span></div>`;
-    // "Send signed reply" — only if this doc was opened from an email attachment
-    if (doc.sourceEmailUid && doc.sourceEmailFolder) {
-      const _sendBackIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
-      items += `<div class="dropdown-item-compact doc-tab-action" data-action="signed-reply">${_di(_sendBackIco)}<span>Send signed reply</span></div>`;
-    }
-    const _closeIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-    const _undockIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 17h7M17.5 14v6"/></svg>';
-    if (window.innerWidth > 768) {
-      items += `<div class="dropdown-item-compact doc-tab-action" data-action="undock-format">${_di(_undockIco)}<span>Undock format toolbar</span></div>`;
-    }
+    // 6. Close
     items += `<div class="dropdown-item-compact doc-tab-action" data-action="close">${_di(_closeIco)}<span>Close</span></div>`;
+    // 7. Delete
     items += `<div class="dropdown-divider"></div>`;
     items += `<div class="dropdown-item-compact doc-tab-action doc-tab-action-delete" data-action="delete">${_di(_deleteIco)}<span>Delete</span></div>`;
 
@@ -6394,17 +6454,14 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     _docTabMenu.style.display = 'block';
     _docTabMenu._docId = docId;
 
-    // Position: anchor to the tab bar bottom, aligned to button horizontally
     const rect = _menuAnchorRect;
-    const tabBar = document.getElementById('doc-tab-bar');
-    const barBottom = tabBar ? tabBar.getBoundingClientRect().bottom : rect.bottom;
     _docTabMenu.style.position = 'fixed';
     _docTabMenu.style.zIndex = '1000';
     _docTabMenu.style.left = rect.left + 'px';
-    _docTabMenu.style.top = (barBottom + 2) + 'px';
+    _docTabMenu.style.top = (rect.bottom + 4) + 'px';
 
-    // Clamp to viewport edges
     requestAnimationFrame(() => {
+      if (!_docTabMenu) return;
       const menuRect = _docTabMenu.getBoundingClientRect();
       if (menuRect.right > window.innerWidth - 8) {
         _docTabMenu.style.left = (window.innerWidth - menuRect.width - 8) + 'px';
@@ -6413,37 +6470,37 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
         _docTabMenu.style.left = '8px';
       }
       if (menuRect.bottom > window.innerHeight - 8) {
-        _docTabMenu.style.top = (barBottom - menuRect.height - 4) + 'px';
+        _docTabMenu.style.top = Math.max(8, rect.top - menuRect.height - 4) + 'px';
       }
     });
 
-    // Wire action clicks
     _docTabMenu.querySelectorAll('.doc-tab-action').forEach(item => {
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         const action = item.dataset.action;
         _closeDocTabMenu();
         switch (action) {
-          case 'save': saveDocument(); break;
           case 'copy': copyDocument(); break;
-          case 'run': runDocument(); break;
-          case 'preview':
-            if (lang === 'markdown') toggleMarkdownPreview();
-            else if (lang === 'csv') toggleCsvPreview();
-            else if (_isRenderLang(lang)) toggleHtmlPreview();
-            break;
-          case 'download': {
-            const btn = document.getElementById('doc-fontsize-btn') || document.getElementById('doc-language-select');
-            showExportMenu(null, btn?.getBoundingClientRect());
-            break;
-          }
           case 'signed-reply': _sendSignedReply(docId); break;
-          case 'undock-format': _undockMdToolbarFromMenu(); break;
+          case 'export-filled-pdf': _downloadFilledPdf(); break;
+          case 'export-md': exportDocument(); break;
+          case 'export-pdf': exportAsPdf(); break;
+          case 'export-docx': exportAsDocx(); break;
+          case 'import-library': openLibrary({ tab: 'documents' }); break;
+          case 'import-device': _importFromDevice(); break;
+          case 'save': saveDocument(); break;
+          case 'run': runDocument(); break;
           case 'close': closeTab(docId); break;
           case 'delete': deleteActiveDocument(); break;
         }
       });
     });
+  }
+
+  /** @deprecated Prefer showDocActionsMenu — kept for any residual callers. */
+  function showDocTabMenu(btnEl, docId) {
+    if (docId && docId !== activeDocId) switchToDoc(docId);
+    showDocActionsMenu(btnEl);
   }
 
   /**
@@ -6644,91 +6701,16 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
 
   function showExportMenu(e, anchorRect) {
     if (e) e.stopPropagation();
-    // Remove existing menu if any
-    const existing = document.getElementById('doc-export-menu');
-    if (existing) { existing.remove(); return; }
-
-    // Position from provided rect, clicked element, or fallback to language select
-    const rect = anchorRect
-      || (e && e.target && e.target.closest('button')?.getBoundingClientRect())
-      || document.getElementById('doc-language-select')?.getBoundingClientRect();
-    if (!rect) return;
-
-    const lang = document.getElementById('doc-language-select')?.value || '';
-    const extMap = {
-      javascript: '.js', python: '.py', html: '.html', css: '.css',
-      markdown: '.md', json: '.json', yaml: '.yml', bash: '.sh',
-      sql: '.sql', rust: '.rs', go: '.go', java: '.java', c: '.c', cpp: '.cpp', csharp: '.cs',
-      typescript: '.ts', ruby: '.rb', php: '.php', text: '.txt',
-      xml: '.xml', toml: '.toml', ini: '.ini', csv: '.csv',
-    };
-    const ext = extMap[lang] || '.txt';
-
-    const menu = document.createElement('div');
-    menu.id = 'doc-export-menu';
-    menu.className = 'doc-overflow-menu open';
-    menu.style.position = 'fixed';
-    menu.style.top = (rect.bottom + 2) + 'px';
-    menu.style.right = (window.innerWidth - rect.right) + 'px';
-    menu.style.left = 'auto';
-    menu.style.zIndex = '9999';
-
-    const langLabel = lang ? lang.toUpperCase() : 'TXT';
-    // Form-backed markdown doc → primary export is the filled PDF, not the
-    // markdown source. Promote it to the top of the menu.
-    const liveContent = document.getElementById('doc-editor-textarea')?.value
-      || docs.get(activeDocId)?.content || '';
-    const isForm = _isFormBackedDoc(liveContent);
-    const options = [];
-    // Import lives at the top of the same dropdown — it's a sibling action
-    // ("bring something IN" vs "send something OUT"), and the footer was
-    // getting too cramped for dedicated icons.
-    options.push({ label: 'Import from library', fn: () => openLibrary({ tab: 'documents' }) });
-    options.push({ label: 'Import from device', fn: () => _importFromDevice(), _divider: true });
-    if (isForm) options.push({ label: 'Filled PDF (.pdf)', fn: _downloadFilledPdf });
-    options.push(
-      { label: 'Export Markdown', fn: exportDocument },
-      { label: 'Print as PDF', fn: exportAsPdf },
-      { label: 'Export as Word', fn: exportAsDocx },
-    );
-
-    options.forEach(opt => {
-      const item = document.createElement('button');
-      item.className = 'doc-overflow-item';
-      item.textContent = opt.label;
-      item.addEventListener('click', (ev) => { ev.stopPropagation(); menu.remove(); opt.fn(); });
-      menu.appendChild(item);
-      if (opt._divider) {
-        const sep = document.createElement('div');
-        sep.className = 'doc-overflow-divider';
-        sep.style.cssText = 'height:1px;margin:3px 6px;background:color-mix(in srgb,var(--border) 60%,transparent);';
-        menu.appendChild(sep);
-      }
-    });
-
-    document.body.appendChild(menu);
-    // Flip above the anchor when there's no room below — the Export button now
-    // lives in the bottom footer, so the menu would otherwise drop off-screen.
-    const mh = menu.offsetHeight;
-    if (rect.bottom + mh > window.innerHeight - 8) {
-      menu.style.top = 'auto';
-      menu.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
+    // Unified actions menu now owns import/export — open it from the same
+    // trailing ⋯ control (or a synthetic anchor at the given rect).
+    const btn = document.getElementById('doc-actions-menu-btn');
+    if (btn) {
+      showDocActionsMenu(btn);
+      return;
     }
-    const close = (ev) => {
-      if (ev && ev.type === 'keydown') {
-        if (ev.key !== 'Escape') return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        ev.stopImmediatePropagation?.();
-      } else if (ev && menu.contains(ev.target)) {
-        return;
-      }
-      menu.remove();
-      document.removeEventListener('click', close);
-      document.removeEventListener('keydown', close, true);
-    };
-    setTimeout(() => document.addEventListener('click', close), 100);
-    document.addEventListener('keydown', close, true);
+    if (!anchorRect) return;
+    const fake = { getBoundingClientRect: () => anchorRect };
+    showDocActionsMenu(fake);
   }
 
   function exportAsHtml() {
@@ -6942,7 +6924,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
       content: pane,
       header,
       fsClass: 'doc-fullscreen',
-      skipSelector: 'button, input, select, textarea, label, .doc-tab, .doc-tab-close, .doc-tab-new, .doc-tab-arrow, .doc-tab-play, .doc-tab-menu-btn, .doc-mobile-grabber',
+      skipSelector: 'button, input, select, textarea, label, .doc-tab, .doc-tab-close, .doc-tab-new, .doc-tab-arrow, .doc-tab-play, #doc-actions-menu-btn, .doc-mobile-grabber',
       enableDock: true,
       enableLeftDock: true,
       onDragStart: () => {
@@ -7003,7 +6985,7 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     stay.remove();
   }
 
-  /** Undock format toolbar from the tab ⋯ menu (power-user). */
+  /** Programmatic undock of the format toolbar (palette / restore). */
   function _undockMdToolbarFromMenu() {
     if (window.innerWidth <= 768) return;
     const pane = document.getElementById('doc-editor-pane');
@@ -8221,6 +8203,13 @@ import { undockToolbarAsWindow, restoreToolbarUndockIfNeeded } from './toolbarPa
     return isOpen;
   }
 
+  // Compat alias: older chat.js called isEditorOpen(); gallery editor owns that
+  // name for image editing. Document panel must expose the same name so a
+  // stale cached chat.js does not throw TypeError before /api/chat_stream.
+  export function isEditorOpen() {
+    return isOpen;
+  }
+
   export function getCurrentDocId() {
     return activeDocId;
   }
@@ -8262,6 +8251,7 @@ const documentModule = {
   streamDocDelta,
   streamDocFinalize,
   isPanelOpen,
+  isEditorOpen,
   enterDiffMode,
   exitDiffMode,
   isDiffModeActive,

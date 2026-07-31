@@ -1265,7 +1265,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
 
     Actions:
       toggle <name> <on|off>  — Toggle a setting (web, bash, rag, research, incognito, document_editor)
-      set_mode <agent|chat>   — Switch between agent and chat mode
+      set_mode <agent|plan|chat>   — Switch between agent, plan, and chat mode
       switch_model <model>    — Change the model for the current session
       set_theme <preset>      — Apply a theme preset (dark, light, paper, nord, dracula, gruvbox, gpt, claude, lavender, etc.)
       create_theme <name> <bg> <fg> <panel> <border> <accent> [key=val ...] — Create custom theme. Optional key=val: advanced color overrides AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false
@@ -1313,10 +1313,10 @@ async def do_ui_control(content: str, session_id: Optional[str] = None) -> Dict:
 
     elif action == "set_mode":
         if len(parts) < 2:
-            return {"error": "set_mode needs: set_mode <agent|chat>"}
+            return {"error": "set_mode needs: set_mode <agent|plan|chat>"}
         mode = parts[1].lower()
-        if mode not in ("agent", "chat"):
-            return {"error": f"Invalid mode '{mode}'. Use: agent, chat"}
+        if mode not in ("agent", "plan", "chat"):
+            return {"error": f"Invalid mode '{mode}'. Use: agent, plan, chat"}
         return {
             "ui_event": "set_mode",
             "mode": mode,

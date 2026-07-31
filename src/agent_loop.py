@@ -63,6 +63,32 @@ read/write files, create and edit documents, generate images, manage memories, a
 To use a tool, write a fenced code block with the tool name as the language tag. \
 The block executes automatically and you see the output."""
 
+_PLAN_PREAMBLE = """\
+You are in PLAN MODE. You may explore with read-only and search tools, then produce a concrete plan. \
+You must NOT execute writes, shell commands, document edits, or other mutating actions — those tools \
+are disabled. When you have enough context, end with a structured plan the user can approve."""
+
+_PLAN_RULES = """\
+## Plan mode rules
+- Explore first when needed (read files, search the web/library/chats). Do not claim you edited or ran anything.
+- Never attempt write/action tools (bash, python, write_file, create/edit documents, manage_* mutations, images, browser, cookbook serve, ui_control, etc.). If blocked, continue planning without them.
+- Your final reply must include a clear plan the user can Start. Prefer ending with a fenced JSON block:
+
+```plan
+{
+  "title": "Short plan title",
+  "overview": "One or two sentences",
+  "steps": [
+    {"title": "Step title", "detail": "What to do"}
+  ],
+  "risks": ["Optional risk or assumption"]
+}
+```
+
+- Also write a short human-readable outline above the fence (title + numbered steps).
+- Do not say you will start executing — the user clicks Start to run the plan in Agent mode.
+"""
+
 _AGENT_RULES = """\
 ## Rules
 - Only use tools when needed. Don't search for things you already know.
@@ -77,7 +103,7 @@ _AGENT_RULES = """\
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add.
 - "Create/add/write a note" / in-app todos / "remind me to X at <time>" → use `manage_notes` (checklist, reminders). Do NOT store note content in `manage_memory`. For Todos board Immediate/Intermediate tasks, list parent goals then pass `parent_ids` (focus→build→aim).
-- Cross-entity / "suggest links" / "set up links" → `search_knowledge` with `suggest_link` (or `merge_subgraph` preview for batches). Do not narrate edges in prose.
+- Cross-entity / "suggest links" / "set up links" → `search_knowledge` with `suggest_link` (or one `merge_subgraph` preview for batches). Queue the full set in one tool round — do not dribble edges across later rounds. Do not narrate edges in prose.
 - "Do X every morning / daily / on a schedule / automatically" (e.g. "summarize my inbox every morning") → this is a request to CREATE A SCHEDULED TASK, not to do X once right now. Call `manage_tasks` with action=create (prompt = what to do, schedule + cron/time). Do NOT just perform the action inline this turn — the user wants it to recur. After creating, return a clickable `[Task name](#task-<id>)` link and tell them it'll run on schedule and show in the Tasks panel. If you also want to show a sample of this run, do that AFTER creating the task, not instead of it.
 
 ## UI conventions
@@ -117,11 +143,11 @@ _API_AGENT_RULES = """\
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
 - "Create/add/write a note" / quick reminders / "remind me at 3pm" → use `manage_notes`. For **Todos board / One Thing** horizons (Immediate / Intermediate / Long Horizon with priority + due date) → use `manage_notes` with `action=list_one_thing|add_one_thing|toggle_one_thing`. Horizons: `focus`=Immediate Tasks, `build`=Intermediate Goals, `aim`=Long Horizon, `misc`. Priorities: `critical`, `elevated`, `steady`. Task title goes in `text`/`title`; optional longer body in `details`. **Hierarchy:** `focus` must link to a `build` parent and `build` to an `aim` parent — call `list_one_thing` on the parent horizon first, then `add_one_thing` with `parent_ids` (8-char prefixes OK). `aim`/`misc` need no parents. **Marking complete** via `toggle_one_thing` shows the user a Confirm/Dismiss toast — do NOT claim the task is done until they confirm (or until you call again with `confirmed=true` after they said yes). Do NOT store notes in `manage_memory`.
-- New documents, articles, files, or long-form content for the Library → `create_document` (appears in Documents library + Links). NOT `write_file` or markdown-on-disk tools.
+- New documents, articles, files, or long-form content for the Library → `create_document` (appears in Documents library + Links). NOT `write_file`, NOT bash/`cat` to disk, NOT `app_api`. To create markdown files and link them into the knowledge graph: `create_document` for each file, then `search_knowledge` with `suggest_link` / `merge_subgraph` using the returned graph_node_ids.
 - Cross-entity context ("what connects to X", tasks + docs + memories + papers together) → call `search_knowledge` (search/read/neighbors). Prefer over calling manage_documents + manage_memory + list_tasks separately. Use `types: ["paper"]` for synced Zotero items (Links → Papers tab).
 - **Reading a saved paper** (user asks to read/summarize/analyze a library paper, or you have a `paper:<zotero_key>` id) → **Tier 1 first:** `search_knowledge` `action=read` on that id (abstract + metadata; **includes cached Deep Research summary** when the paper was researched before). **Tier 2:** `section=methods|introduction|results|discussion` for one PDF section. **Tier 3:** `include_pdf=true` when abstract/section is insufficient. Do **NOT** `web_search` the title/DOI. Only `web_search` if PDF extraction failed **and** the user asks for outside sources.
 - **Compare 2–3 saved papers** (methods, results, limitations side-by-side) → `compare_papers` with `paper_keys` and `focus`. Uses section extracts + cached DR summaries — do **NOT** loop multiple `search_knowledge` reads unless compare fails. **4+ papers** → same tool auto-starts Deep Research `compare` mode.
-- **"Suggest links" / "set up links" / "propose connections" / "link these" / "connect these"** → resolve node ids via `search_knowledge` search/read if needed, then call `suggest_link` (1–2 edges) with typed `kind` + `reason`, or `merge_subgraph` **phase=preview** for 3+. Do **NOT** answer with a prose list of suggested edges — the tool queues a Confirm toast / Connections inbox. Default to `suggest_link`; do **NOT** call `action=link` or `merge_subgraph` phase=apply unless the user explicitly asked to connect/save/accept. Use graph ids like `document:<uuid>`, `paper:<zotero_key>`, or `task:<uuid>`. **`refutes` edges are inhibitory**. Anti-pattern: inventing markdown `#document-` anchors instead of proposing graph edges. (`search_vault` is disabled — Obsidian vault linking was removed.)
+- **"Suggest links" / "set up links" / "propose connections" / "link these" / "connect these"** → resolve node ids via `search_knowledge` search/read if needed, then propose the **full** set in **one** tool round: `suggest_link` for 1–2 edges (all in the same round), or one `merge_subgraph` **phase=preview** for 3+. Do **not** dribble more `suggest_link` calls in later rounds once ids are known. Do **NOT** answer with a prose list of suggested edges — the tool queues an in-chat review card / Connections inbox. Do **NOT** call `action=link` or `merge_subgraph` phase=apply unless the user explicitly asked to connect/save/accept (UI Accept is enough — do not apply yourself). Use graph ids like `document:<uuid>`, `paper:<zotero_key>`, or `task:<uuid>`. **`refutes` edges are inhibitory**. Anti-pattern: inventing markdown `#document-` anchors instead of proposing graph edges. (`search_vault` is disabled — Obsidian vault linking was removed.)
 - "Disable/turn off/enable/turn on <tool>" (shell, search, research, browser, documents, incognito, etc.) → call `ui_control` with `toggle <name> <on|off>`. Aliases accepted: shell→bash, search→web, deepresearch→research, documents→document_editor. NEVER record this as a memory — the user wants the toggle flipped, not a note about preferring it.
 - "Research X" / "do research on X" / "look into Y" / "deep dive on Z" → call `trigger_research` with `topic`. This starts a live job that appears in the Deep Research sidebar (streams progress + final report). **Do NOT use `web_search` for these** — saw the agent do a plain web_search for "do research on X" when the user wanted the deep-research job. "research X" is a deep-research request, not a quick lookup. (web_search is only for a single quick fact mid-task.) Do NOT POST /api/research/start via app_api either — blocked. After starting, tell the user it's running in the Deep Research sidebar. Only if the user explicitly wants it inline/quick should you fall back to web_search.
 - "My Zotero library" / "my papers" / "read this paper" / saved sources → `search_knowledge` `action=read` with `paper:<key>` (abstract first). For full PDF: same call with `include_pdf=true`. Alternate: `search_zotero` with `zotero_key` (PDF) or broad search without PDF. Do **NOT** `web_search` to read papers in the user's library. NOT trigger_research for a single saved paper.
@@ -265,22 +291,22 @@ Include `[PROPOSED]` rows still awaiting user approval in Connections.
 ```search_knowledge
 {"action": "suggest_link", "from": "document:uuid-a", "to": "document:uuid-b", "kind": "derives_from", "reason": "Doc B extends the experiment methods from doc A"}
 ```
-Propose a typed link between two graph nodes — the user gets a notification to accept or dismiss. Use during conversation when items clearly relate. Requires graph node ids (search first, or use graph_node_id from create_document). Do NOT use `link` unless the user explicitly asked to connect them.
+Propose a typed link — queues an in-chat review card. Requires graph node ids (search first, or use graph_node_id from create_document). Do NOT use `link` unless the user explicitly asked to connect them.
 
 ```search_knowledge
 {"action": "suggest_link", "from": "paper:AFOLD001", "to": "paper:ESMF001", "kind": "relates", "reason": "Both compare protein structure predictors"}
 ```
-After `compare_papers` or Deep Research: use `merge_subgraph` **preview** for batches (≤20). Use `suggest_link` only for 1–2 edges.
+**Batching rule:** For 1–2 edges, fire every `suggest_link` in the **same** tool round. For 3+ edges (or after `compare_papers` / Deep Research), use **one** `merge_subgraph` **preview** (≤20) with the full proposal list. Never dribble suggestions across later rounds once node ids are known.
 
 ```search_knowledge
 {"action": "merge_subgraph", "phase": "preview", "proposals": [{"from": "paper:AFOLD001", "to": "paper:ESMF001", "kind": "supports", "reason": "Same benchmark conclusions"}]}
 ```
-Validate up to 20 proposed edges — opens batch review UI; **does not write** until the user accepts in the UI.
+Validate up to 20 proposed edges — opens the in-chat review card; **does not write** until the user accepts in the UI.
 
 ```search_knowledge
 {"action": "merge_subgraph", "phase": "apply", "accepted": [...]}
 ```
-**Only when the user explicitly asks to save/accept links** after preview. Otherwise let the pop-up / Connections inbox handle approval.
+**Only when the user explicitly asks to save/accept links** after preview. Otherwise let the in-chat review card / Connections inbox handle approval — do **not** apply on your own.
 
 ```search_knowledge
 {"action": "list_pending", "project_id": "proj-uuid"}
@@ -449,7 +475,6 @@ GENERIC LOOPBACK to ANY Nobody internal endpoint. Use this whenever the user wan
 - Calendar: `/api/calendar/events`, `/api/calendar/calendars`, `/api/calendar/events/{uid}`
 - Cookbook: `/api/cookbook/gpus`, `/api/cookbook/state`, `/api/cookbook/setup`, `/api/cookbook/kill-pid`, `/api/cookbook/packages`, `/api/cookbook/hf-latest`, `/api/model/cached`
 - Gallery: `/api/gallery/list`, `/api/gallery/delete`, `/api/gallery/{id}`, `/api/gallery/albums`
-- Library / Documents: list all via `/api/documents/library`; docs in a session via `/api/documents/{session_id}`; a single doc via `/api/document/{id}` (singular) and its history via `/api/document/{id}/versions` (singular). Note the plural `/api/documents/...` vs singular `/api/document/{id}` split.
 - Memory: `/api/memory`, `/api/memory/{id}`, `/api/memory/search`
 - Notes: `/api/notes`, `/api/notes/{id}`
 - Tasks: `/api/tasks`, `/api/tasks/{id}/run`, `/api/tasks/notifications`
@@ -463,7 +488,9 @@ Body for POST/PUT/PATCH goes in `body` (object). Query params in `query` (object
 
 **When to prefer named tools over app_api:** if a named wrapper exists (manage_calendar, manage_notes, list_served_models, etc.) USE IT — it has nicer output formatting and clearer schema. Reach for `app_api` only when there's no wrapper for what you need.
 
-Blocked paths (refused for safety): /api/auth/, /api/users/, /api/tokens/, /api/admin/, /api/backup/restore.""",
+**DOCUMENTS / LIBRARY — never via app_api.** Create Library markdown/docs with `create_document` (returns graph_node_id). List/read/delete with `manage_documents`. Link them with `search_knowledge` suggest_link / merge_subgraph. Do NOT bash-write files then invent `/api/library/documents/register` or hit `/api/document*` — those paths are blocked.
+
+Blocked paths (refused for safety): /api/auth/, /api/users/, /api/tokens/, /api/admin/, /api/backup/restore, /api/document*, /api/library/*.""",
 }
 
 def get_builtin_overrides() -> dict:
@@ -486,7 +513,7 @@ def _section_text(name: str, default: str) -> str:
     return val if isinstance(val, str) and val.strip() else default
 
 
-def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool = False) -> str:
+def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool = False, plan_mode: bool = False) -> str:
     """Build the system prompt with only the specified tools included."""
     disabled = disabled_tools or set()
     included = tool_names - disabled
@@ -494,9 +521,9 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
     if compact:
         tool_list = ", ".join(sorted(included)) if included else "none"
         parts = [
-            "You are an AI assistant with tool access.",
+            _PLAN_PREAMBLE if plan_mode else "You are an AI assistant with tool access.",
             f"Available tools: {tool_list}.",
-            _API_AGENT_RULES,
+            _PLAN_RULES if plan_mode else _API_AGENT_RULES,
         ]
         # Local/compact models still need fenced examples for retrieval tools.
         _FENCE_TOOLS = (
@@ -515,7 +542,7 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
             parts.append("\n\n".join(fence_blocks))
         return "\n\n".join(parts)
 
-    parts = [_AGENT_PREAMBLE]
+    parts = [_PLAN_PREAMBLE if plan_mode else _AGENT_PREAMBLE]
 
     # Collect full-block tool sections (with examples)
     full_blocks = []
@@ -548,7 +575,7 @@ def _assemble_prompt(tool_names: set, disabled_tools: set = None, compact: bool 
             hint += f", ... ({len(not_shown) - 5} more)"
         parts.append(f"(Other tools available when needed: {hint})")
 
-    parts.append(_AGENT_RULES)
+    parts.append(_PLAN_RULES if plan_mode else _AGENT_RULES)
     return "\n\n".join(parts)
 
 
@@ -668,6 +695,7 @@ def _build_system_prompt(
     owner: Optional[str] = None,
     session_id: Optional[str] = None,
     active_project_file: Optional[str] = None,
+    plan_mode: bool = False,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -682,7 +710,7 @@ def _build_system_prompt(
         _ov_sig = _hl.sha256(_json.dumps(get_builtin_overrides() or {}, sort_keys=True).encode()).hexdigest()
     except Exception:
         _ov_sig = ""
-    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig)
+    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, bool(plan_mode))
     if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
@@ -691,7 +719,7 @@ def _build_system_prompt(
         from src.agent_loop import _build_base_prompt as _bbp_recompute
         _, _skill_index_block = _bbp_recompute(
             disabled_tools, mcp_mgr, needs_admin, relevant_tools,
-            mcp_disabled_map=mcp_disabled_map, compact=compact,
+            mcp_disabled_map=mcp_disabled_map, compact=compact, plan_mode=plan_mode,
         )
     else:
         agent_prompt, _skill_index_block = _build_base_prompt(
@@ -701,6 +729,7 @@ def _build_system_prompt(
             relevant_tools,
             mcp_disabled_map=mcp_disabled_map,
             compact=compact,
+            plan_mode=plan_mode,
         )
         if not active_document:
             _cached_base_prompt = agent_prompt
@@ -1022,6 +1051,7 @@ def _build_base_prompt(
     relevant_tools=None,
     mcp_disabled_map=None,
     compact: bool = False,
+    plan_mode: bool = False,
 ):
     """Build the agent prompt with only relevant tools included.
 
@@ -1039,7 +1069,7 @@ def _build_base_prompt(
         tool_names = set(ALWAYS_AVAILABLE) | set(relevant_tools)
         if needs_admin:
             tool_names |= _ADMIN_TOOLS
-        agent_prompt = _assemble_prompt(tool_names, disabled, compact=compact)
+        agent_prompt = _assemble_prompt(tool_names, disabled, compact=compact, plan_mode=plan_mode)
     else:
         # Fallback: full prompt (RAG unavailable)
         agent_prompt = AGENT_SYSTEM_PROMPT
@@ -1050,10 +1080,16 @@ def _build_base_prompt(
                 "chat_with_model", "ask_teacher", "list_models",
             }
             agent_prompt = _assemble_prompt(
-                set(TOOL_SECTIONS.keys()) - mgmt_tools, disabled, compact=compact
+                set(TOOL_SECTIONS.keys()) - mgmt_tools, disabled, compact=compact, plan_mode=plan_mode,
             )
         elif compact:
-            agent_prompt = _assemble_prompt(set(TOOL_SECTIONS.keys()), disabled, compact=True)
+            agent_prompt = _assemble_prompt(
+                set(TOOL_SECTIONS.keys()), disabled, compact=True, plan_mode=plan_mode,
+            )
+        elif plan_mode:
+            agent_prompt = _assemble_prompt(
+                set(TOOL_SECTIONS.keys()), disabled, compact=False, plan_mode=True,
+            )
 
     # Inject the Level-0 skill index — one line per skill so the agent
     # knows what canonical procedures exist. Includes published skills
@@ -1421,6 +1457,7 @@ async def stream_agent_loop(
     fallbacks: Optional[List[tuple]] = None,
     _is_teacher_run: bool = False,
     active_project_file: Optional[str] = None,
+    plan_mode: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -1602,6 +1639,7 @@ async def stream_agent_loop(
         owner=owner,
         session_id=session_id,
         active_project_file=active_project_file,
+        plan_mode=plan_mode,
     )
     prep_timings["prompt_build"] = time.time() - _t2
     link_project_id = _link_proposal_project_id(session_id)
@@ -2319,23 +2357,10 @@ async def stream_agent_loop(
             elif "error" in result:
                 output_text = result["error"][:2000]
 
-            # Emit tool_output (include ui_event data if present)
+            # Emit tool_output (include ui_event data if present).
+            # link_suggestion / graph_merge_proposals are emitted as standalone
+            # SSE events above — do NOT also embed them here (avoids double UI).
             tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code")}
-            if block.tool_type == "search_knowledge" and result.get("action") == "suggest_link":
-                _ls = {
-                    "from": result.get("from"),
-                    "to": result.get("to"),
-                    "from_title": result.get("from_title"),
-                    "to_title": result.get("to_title"),
-                    "from_type": result.get("from_type"),
-                    "to_type": result.get("to_type"),
-                    "kind": result.get("kind"),
-                    "reason": result.get("reason"),
-                    "suggestion_id": result.get("suggestion_id"),
-                }
-                if link_project_id:
-                    _ls["project_id"] = link_project_id
-                tool_output_data["link_suggestion"] = _ls
             if (
                 block.tool_type == "manage_notes"
                 and result.get("action") == "propose_complete"
@@ -2348,27 +2373,6 @@ async def stream_agent_loop(
                     "horizon_label": result.get("horizon_label"),
                     "priority": result.get("priority"),
                 }
-            if block.tool_type == "search_knowledge" and result.get("action") == "merge_subgraph":
-                rows = result.get("rows") or []
-                if rows:
-                    from src.learned_link_prefs import should_emit_batch_link_proposals
-                    if should_emit_batch_link_proposals(owner):
-                        _gmp = {
-                            "rows": rows,
-                            "merge_session_id": result.get("merge_session_id"),
-                        }
-                        if link_project_id:
-                            _gmp["project_id"] = link_project_id
-                        tool_output_data["graph_merge_proposals"] = _gmp
-            if block.tool_type == "compare_papers":
-                proposals = result.get("suggested_edges") or []
-                if proposals:
-                    from src.learned_link_prefs import should_emit_batch_link_proposals
-                    if should_emit_batch_link_proposals(owner):
-                        _gmp = {"proposals": proposals}
-                        if link_project_id:
-                            _gmp["project_id"] = link_project_id
-                        tool_output_data["graph_merge_proposals"] = _gmp
             if "ui_event" in result:
                 tool_output_data["ui_event"] = result["ui_event"]
                 for k in ("toggle_name", "state", "mode", "model", "endpoint_url", "theme_name", "colors"):

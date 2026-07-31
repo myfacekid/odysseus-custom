@@ -169,6 +169,7 @@ if AUTH_ENABLED:
         "/api/auth/integrations/presets",
         "/api/health",
         "/api/version",
+        "/api/_debug_agent_log",
         "/login",
     }
     AUTH_EXEMPT_PREFIXES = ["/static"]
@@ -785,6 +786,31 @@ async def get_version():
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+# #region agent log
+@app.post("/api/_debug_agent_log")
+async def _debug_agent_log(request: Request):
+    """Same-origin debug ingest (CSP blocks cross-origin 127.0.0.1:7917)."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {"message": str(payload)}
+    payload.setdefault("timestamp", int(datetime.utcnow().timestamp() * 1000))
+    sid = str(payload.get("sessionId") or "6cee87").replace("/", "")[:32]
+    try:
+        with open(
+            f"/home/kincaidr/Documents/GitHub/odysseus-custom/.cursor/debug-{sid}.log",
+            "a",
+            encoding="utf-8",
+        ) as fh:
+            import json as _json
+            fh.write(_json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.debug("debug agent log write failed: %s", e)
+    return {"ok": True}
+# #endregion
 
 @app.get("/api/ready")
 async def readiness_check() -> JSONResponse:

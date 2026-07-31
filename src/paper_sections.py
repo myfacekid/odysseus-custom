@@ -1,6 +1,6 @@
 """Paper section parsing and lookup (Paper Token Retrieval R1).
 
-Regex + heading heuristics on PDF-extracted plain text. See docs/paper-token-retrieval-roadmap_v1.md.
+Regex + heading heuristics on PDF-extracted plain text.
 """
 
 from __future__ import annotations

@@ -1,7 +1,6 @@
 """Multi-paper comparison tool (Paper Token Retrieval R3).
 
 Side-by-side section extracts reusing R1 sections and R2 summaries.
-See docs/paper-token-retrieval-roadmap_v1.md.
 """
 
 from __future__ import annotations
