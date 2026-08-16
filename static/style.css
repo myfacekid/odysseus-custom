@@ -2655,6 +2655,11 @@ body.bg-pattern-fog {
     .chat-input-bar { container-type: inline-size; container-name: chatbar; }
     @container chatbar (max-width: 340px) {
       .chat-input-right .mode-toggle { display: none !important; }
+      .chat-input-right .perm-toggle { display: none !important; }
+    }
+    @container chatbar (max-width: 420px) {
+      /* Ask/Auto is secondary chrome — drop before mode toggle on tight bars */
+      .chat-input-right .perm-toggle { display: none !important; }
     }
     @container chatbar (max-width: 260px) {
       #model-picker-wrap { display: none !important; }
@@ -3006,6 +3011,144 @@ body.bg-pattern-fog {
     }
     .mode-toggle-btn + .mode-toggle-btn {
       border-left: none;
+    }
+    /* Ask / Auto permission toggle (Agent & Plan modes) */
+    .perm-toggle {
+      display: inline-flex;
+      flex-shrink: 0;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-tech, 2px);
+      overflow: hidden;
+      margin-left: 6px;
+      transform-origin: left center;
+    }
+    .chat-input-right .perm-toggle {
+      /* Don't let Ask/Auto crowd the send button on dense layouts */
+      max-width: 96px;
+    }
+    .perm-toggle[hidden] { display: none !important; }
+    .perm-toggle.perm-toggle-pop {
+      animation: perm-toggle-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes perm-toggle-pop {
+      0%   { transform: scale(0.72) translateX(-4px); opacity: 0; }
+      100% { transform: scale(1) translateX(0); opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .perm-toggle.perm-toggle-pop { animation: none; }
+    }
+    .perm-toggle-btn {
+      background: none;
+      border: none;
+      color: color-mix(in srgb, var(--fg) 40%, transparent);
+      cursor: pointer;
+      padding: 0 8px;
+      font-size: 11px;
+      font-weight: 500;
+      font-family: var(--font-ui, 'Iosevka', monospace);
+    }
+    .perm-toggle-btn + .perm-toggle-btn { border-left: 1px solid var(--border); }
+    .perm-toggle-btn.active {
+      color: var(--fg);
+      background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
+    }
+    .steer-queue-chip {
+      font-size: 11px;
+      color: var(--color-muted-alt);
+      padding: 2px 10px 0;
+      cursor: pointer;
+      line-height: 1.3;
+      max-height: 1.4em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .steer-queue-chip.hidden { display: none; }
+    .tool-approval-card {
+      margin: 6px 0 6px 18px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-tech, 2px);
+      background: color-mix(in srgb, var(--accent, var(--red)) 6%, var(--bg));
+      font-size: 12px;
+      max-width: min(420px, 100%);
+      box-sizing: border-box;
+    }
+    .tool-approval-card .tool-approval-cmd {
+      font-family: var(--font-mono, monospace);
+      font-size: 11px;
+      opacity: 0.75;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 4px 0 8px;
+      max-height: 4.5em;
+      overflow: auto;
+    }
+    .tool-approval-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .tool-approval-actions button {
+      font-size: 11px;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--fg);
+      border-radius: var(--radius-tech, 2px);
+      cursor: pointer;
+    }
+    .tool-approval-actions button.primary {
+      border-color: var(--accent, var(--red));
+      color: var(--accent, var(--red));
+    }
+    .change-tape {
+      margin: 8px 0 4px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-tech, 2px);
+      font-size: 12px;
+      max-width: min(480px, 100%);
+      box-sizing: border-box;
+    }
+    .change-tape-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+      opacity: 0.85;
+    }
+    .change-tape ul {
+      margin: 0;
+      padding-left: 1.1em;
+    }
+    .change-tape li { margin: 2px 0; opacity: 0.85; }
+    .steer-applied-marker {
+      font-size: 11px;
+      opacity: 0.7;
+      margin: 4px 0 4px 18px;
+      font-style: italic;
+    }
+    .ctx-breakdown-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 8px;
+      font-size: 0.75rem;
+    }
+    .ctx-breakdown-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .ctx-breakdown-swatch {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 1px;
+      margin-right: 6px;
     }
     /* Message count badge in the chat-meta header (next to the title).
        Auto-hides when empty so a brand-new chat doesn't show "0 msgs". */
@@ -3562,15 +3705,15 @@ body.bg-pattern-fog {
       transition: color .15s;
     }
     .msg-footer .response-metrics:hover { color:var(--fg); }
-    /* Context usage ring — right side of footer */
+    /* Context usage ring — directly after metrics */
     .ctx-ring {
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      margin-left: auto;
+      margin-left: 0;
       line-height: 0;
       opacity: 0.6;
-      cursor: default;
+      cursor: pointer;
       transition: opacity 0.15s;
       --ctx-stroke: var(--color-muted, #888);
     }
@@ -3705,6 +3848,8 @@ body.bg-pattern-fog {
 
     .msg-actions {
       display:inline-flex; align-items:center; gap:4px;
+      margin-left: auto; /* keep actions on the right; metrics+ctx stay left */
+      flex-shrink: 0;
     }
     .footer-copy-btn {
       background:none; border:none;
@@ -39664,6 +39809,25 @@ body.theme-frosted .modal {
 }
 .setup-checklist-row--ok .setup-checklist-icon { color: var(--green, #4c8); }
 .setup-checklist-row--warn .setup-checklist-icon { color: var(--amber, #da3); }
+.setup-checklist-row--optional .setup-checklist-icon { color: color-mix(in srgb, var(--fg) 45%, transparent); }
+.setup-checklist-badge {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.55;
+  margin-left: 6px;
+}
+.setup-checklist-badge--opt { opacity: 0.4; }
+.setup-checklist-banner {
+  font-size: 12px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tech, 2px);
+  opacity: 0.9;
+}
+.setup-checklist-banner--ok {
+  border-color: color-mix(in srgb, var(--green, #4c8) 40%, var(--border));
+}
 .setup-checklist-icon {
   flex-shrink: 0;
   width: 20px;

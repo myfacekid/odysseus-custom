@@ -24,16 +24,22 @@ async function refreshGettingStarted() {
   try {
     const status = await fetchSetupStatus();
     const rows = [status.endpoint, status.webSearch, status.zotero];
-    host.innerHTML = rows.map((row) => {
+    const chatReady = status.readyForChat
+      ? '<div class="setup-checklist-banner setup-checklist-banner--ok">Ready for chat</div>'
+      : '<div class="setup-checklist-banner">Add a model endpoint to start chatting — or type <code>/setup</code> in chat.</div>';
+    host.innerHTML = chatReady + rows.map((row) => {
       const icon = row.ok ? '✓' : '!';
-      const mod = row.ok ? 'ok' : 'warn';
+      const mod = row.ok ? 'ok' : (row.required ? 'warn' : 'optional');
+      const badge = row.required
+        ? '<span class="setup-checklist-badge">Required</span>'
+        : '<span class="setup-checklist-badge setup-checklist-badge--opt">Optional</span>';
       const fixBtn = row.ok
         ? ''
-        : `<button type="button" class="admin-btn-sm setup-checklist-fix" data-settings-fix-tab="${esc(row.fixTab)}">Fix</button>`;
+        : `<button type="button" class="admin-btn-sm setup-checklist-fix" data-settings-fix-tab="${esc(row.fixTab)}">${row.required ? 'Fix' : 'Set up'}</button>`;
       return `<div class="setup-checklist-row setup-checklist-row--${mod}">
         <span class="setup-checklist-icon" aria-hidden="true">${icon}</span>
         <div class="setup-checklist-copy">
-          <div class="setup-checklist-label">${esc(row.label)}</div>
+          <div class="setup-checklist-label">${esc(row.label)} ${badge}</div>
           <div class="setup-checklist-detail">${esc(row.detail)}</div>
         </div>
         ${fixBtn}

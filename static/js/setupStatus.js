@@ -66,7 +66,10 @@ function _zoteroOk(cfg) {
 }
 
 /**
- * @returns {Promise<{ endpoint: object, webSearch: object, zotero: object, allOk: boolean }>}
+ * @returns {Promise<{
+ *   endpoint: object, webSearch: object, zotero: object,
+ *   readyForChat: boolean, readyForResearch: boolean, allOk: boolean
+ * }>}
  */
 export async function fetchSetupStatus() {
   const [epRes, settingsRes, zoteroRes] = await Promise.all([
@@ -102,25 +105,35 @@ export async function fetchSetupStatus() {
     id: 'endpoint',
     label: 'Model endpoint',
     fixTab: 'services',
+    required: true,
     ...epState,
   };
   const webSearch = {
     id: 'webSearch',
     label: 'Web search',
     fixTab: 'search',
+    required: false,
+    recommended: true,
     ...searchState,
   };
   const zotero = {
     id: 'zotero',
     label: 'Zotero catalog',
     fixTab: 'search',
+    required: false,
     ...zoteroState,
   };
+
+  const readyForChat = !!endpoint.ok;
+  const readyForResearch = !!endpoint.ok && !!webSearch.ok;
 
   return {
     endpoint,
     webSearch,
     zotero,
+    readyForChat,
+    readyForResearch,
+    // Legacy: full green including optional Zotero
     allOk: endpoint.ok && webSearch.ok && zotero.ok,
   };
 }

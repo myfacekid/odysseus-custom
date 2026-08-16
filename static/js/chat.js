@@ -8,7 +8,7 @@
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
-import chatRenderer from './chatRenderer.js?v=20260730q';
+import chatRenderer from './chatRenderer.js?v=20260801b';
 import chatStream from './chatStream.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule, { THINK_TAG } from './markdown.js';
@@ -84,7 +84,9 @@ import createResearchSynapse from './researchSynapse.js';
   let _displayOverride = null; // Override visible user bubble text (hides injected prompts)
   let _hideUserBubble = false; // Skip user bubble entirely (e.g. continue after stop)
   let _pendingContinue = null; // Stores the stopped AI element to merge with new response
-  // ── Auto-recovery: when a turn's stream silently dies (connection drop) or
+  // Mid-run steer: Phase A local queue (drain when stream ends) + Phase B server queue
+  let _localSteerQueue = [];
+  let _serverSteerPending = 0;  // ── Auto-recovery: when a turn's stream silently dies (connection drop) or
   // goes quiet while the connection is alive, re-engage the model with a
   // completion handshake instead of leaving it hung. Capped so it can't loop.
   let _autoNudges = 0;             // handshakes fired for the CURRENT user turn
@@ -215,6 +217,114 @@ import createResearchSynapse from './researchSynapse.js';
   var hideWelcomeScreen = chatRenderer.hideWelcomeScreen;
   var showWelcomeScreen = chatRenderer.showWelcomeScreen;
 
+  function _updateSteerChip() {
+    const chip = document.getElementById('steer-queue-chip');
+    if (!chip) return;
+    const n = _localSteerQueue.length + _serverSteerPending;
+    if (n <= 0) {
+      chip.classList.add('hidden');
+      chip.textContent = '';
+      return;
+    }
+    chip.classList.remove('hidden');
+    chip.textContent = n === 1 ? 'Queued (1) — click to clear' : `Queued (${n}) — click to clear`;
+  }
+
+  async function queueMidRunSteer(text) {
+    const sid = sessionModule.getCurrentSessionId();
+    const body = (text || '').trim();
+    if (!body || !sid) return;
+    // Phase B: server round-boundary inject when agent run is active
+    try {
+      const r = await fetch(`${API_BASE}/api/chat/steer/${sid}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: body }),
+      });
+      if (r.ok) {
+        _serverSteerPending += 1;
+        _updateSteerChip();
+        if (uiModule && uiModule.showToast) uiModule.showToast('Queued redirect', 2000);
+        return;
+      }
+    } catch (_) {}
+    // Phase A fallback: drain as next turn when stream ends
+    _localSteerQueue.push(body);
+    _updateSteerChip();
+    if (uiModule && uiModule.showToast) uiModule.showToast('Queued for after this reply', 2500);
+  }
+
+  function _drainLocalSteerQueue() {
+    if (!_localSteerQueue.length) {
+      _updateSteerChip();
+      return;
+    }
+    const next = _localSteerQueue.shift();
+    _updateSteerChip();
+    const input = uiModule.el('message');
+    if (input) {
+      input.value = next;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const submitBtn = document.querySelector('.send-btn');
+    if (submitBtn) setTimeout(() => submitBtn.click(), 40);
+  }
+
+  function _mountApprovalCard(payload) {
+    const chatBox = document.getElementById('chat-history');
+    if (!chatBox || !payload) return;
+    let thread = null;
+    for (let ci = chatBox.children.length - 1; ci >= Math.max(0, chatBox.children.length - 8); ci--) {
+      const child = chatBox.children[ci];
+      if (child.classList && child.classList.contains('agent-thread')) {
+        thread = child;
+        break;
+      }
+    }
+    const host = thread || chatBox;
+    const card = document.createElement('div');
+    card.className = 'tool-approval-card';
+    card.dataset.approvalId = payload.approval_id || '';
+    const tool = payload.tool || 'tool';
+    const cmd = payload.command || '';
+    card.innerHTML = `<div><b>Allow ${tool}?</b></div>`
+      + (cmd ? `<pre class="tool-approval-cmd"></pre>` : '')
+      + `<div class="tool-approval-actions">`
+      + `<button type="button" class="primary" data-dec="approve">Allow</button>`
+      + `<button type="button" data-dec="deny">Deny</button>`
+      + `<button type="button" data-dec="always_session">Always (session)</button>`
+      + `<button type="button" data-dec="always">Always</button>`
+      + `</div>`;
+    const pre = card.querySelector('.tool-approval-cmd');
+    if (pre) pre.textContent = cmd;
+    const sid = payload.session_id || sessionModule.getCurrentSessionId();
+    card.querySelectorAll('button[data-dec]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const decision = btn.getAttribute('data-dec');
+        card.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        try {
+          await fetch(`${API_BASE}/api/chat/tool-approval/${sid}`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              approval_id: payload.approval_id,
+              decision,
+              tool,
+            }),
+          });
+        } catch (err) {
+          if (uiModule && uiModule.showToast) uiModule.showToast('Approval failed', 3000);
+        }
+        card.classList.add('resolved');
+        card.querySelector('.tool-approval-actions').textContent = decision === 'deny' ? 'Denied' : 'Allowed';
+      });
+    });
+    host.appendChild(card);
+    if (uiModule && uiModule.scrollHistory) uiModule.scrollHistory();
+  }
+
   /**
    * Update submit button state
    */
@@ -251,7 +361,9 @@ import createResearchSynapse from './researchSynapse.js';
       delete submitBtn.dataset.phase;
       submitBtn.classList.remove('recording');
       isStreaming = false;
+      _serverSteerPending = 0;
       _stopStallWatchdog();
+      setTimeout(() => _drainLocalSteerQueue(), 80);
       // Defer to global updater which handles mic/newchat/send modes
       if (window._updateSendBtnIcon) {
         setTimeout(window._updateSendBtnIcon, 50);
@@ -276,12 +388,6 @@ import createResearchSynapse from './researchSynapse.js';
    * Handle chat form submission
    */
   export async function handleChatSubmit(e) {
-    // #region agent log
-    try {
-      const _ts = (typeof Storage !== 'undefined' && Storage.loadToggleState) ? Storage.loadToggleState() : {};
-      fetch('/api/_debug_agent_log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'8a946c',runId:'post-fix',hypothesisId:'H4',location:'chat.js:handleChatSubmit:entry',message:'chat submit started',data:{mode:_ts.mode||null,hasAbort:!!currentAbort},timestamp:Date.now()})}).catch(()=>{});
-    } catch (_) {}
-    // #endregion
     e.preventDefault();
     // Cancel research clarification timeout if active
     if (window._researchTimeoutTimer) {
@@ -300,8 +406,21 @@ import createResearchSynapse from './researchSynapse.js';
       return;
     }
 
-    // If currently streaming, stop it
+    // If currently streaming: non-empty composer text queues a steer;
+    // empty composer + submit stops the run.
     if (isStreaming) {
+      const messageInput = uiModule.el('message');
+      const steerText = (messageInput && messageInput.value || '').trim();
+      if (steerText) {
+        e.preventDefault();
+        queueMidRunSteer(steerText).then(() => {
+          if (messageInput) {
+            messageInput.value = '';
+            messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        });
+        return;
+      }
       // Cancel server-side research if in progress
       const _cancelSid = sessionModule.getCurrentSessionId();
       if (_cancelSid && _researchingStreamIds.has(_cancelSid)) {
@@ -347,7 +466,6 @@ import createResearchSynapse from './researchSynapse.js';
         _renderCancelledBubble(currentHolder);
         currentHolder = null;
         updateSubmitButton('idle', submitBtn);
-        const messageInput = uiModule.el('message');
         if (messageInput) messageInput.disabled = false;
         currentAccumulated = '';
         return;
@@ -413,8 +531,7 @@ import createResearchSynapse from './researchSynapse.js';
       // Reset button state
       updateSubmitButton('idle', submitBtn);
       
-      // Re-enable message input
-      const messageInput = uiModule.el('message');
+      // Re-enable message input (reuse messageInput from top of isStreaming block)
       if (messageInput) messageInput.disabled = false;
       
       // Clear tracking variables
@@ -1981,6 +2098,53 @@ import createResearchSynapse from './researchSynapse.js';
                 if (_isBg) continue;
                 if (currentHolder && json.id) currentHolder.dataset.dbId = json.id;
 
+              } else if (json.type === 'tool_approval_required') {
+                if (_isBg) continue;
+                _mountApprovalCard(json);
+              } else if (json.type === 'tool_approval_resolved') {
+                if (_isBg) continue;
+                document.querySelectorAll('.tool-approval-card').forEach((card) => {
+                  if (card.dataset.approvalId === json.approval_id) {
+                    card.classList.add('resolved');
+                    const acts = card.querySelector('.tool-approval-actions');
+                    if (acts) acts.textContent = json.decision === 'deny' ? 'Denied' : 'Allowed';
+                  }
+                });
+              } else if (json.type === 'change_tape') {
+                if (_isBg) continue;
+                if (currentHolder && chatRenderer.displayMetrics) {
+                  // Attach for when metrics arrive; also render immediately
+                  currentHolder._pendingChangeTape = json.changes;
+                  const fakeMetrics = { change_tape: json.changes, context_percent: 0 };
+                  // Render tape without wiping metrics — direct DOM
+                  let tapeEl = currentHolder.querySelector('.change-tape');
+                  if (!tapeEl) {
+                    tapeEl = document.createElement('div');
+                    tapeEl.className = 'change-tape';
+                    const footer = currentHolder.querySelector('.msg-footer');
+                    if (footer) currentHolder.insertBefore(tapeEl, footer);
+                    else currentHolder.appendChild(tapeEl);
+                  }
+                  const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+                  tapeEl.innerHTML = '<div class="change-tape-title">Changes this turn</div><ul>'
+                    + (json.changes || []).map((c) => `<li>${esc(c.summary || c.tool || '')}</li>`).join('')
+                    + '</ul>';
+                }
+              } else if (json.type === 'steer_queued') {
+                _serverSteerPending = Math.max(_serverSteerPending, json.pending || 1);
+                _updateSteerChip();
+              } else if (json.type === 'steer_applied') {
+                if (_serverSteerPending > 0) _serverSteerPending -= 1;
+                _updateSteerChip();
+                if (!_isBg) {
+                  const chatBox = document.getElementById('chat-history');
+                  if (chatBox) {
+                    const mark = document.createElement('div');
+                    mark.className = 'steer-applied-marker';
+                    mark.textContent = 'Steered: ' + (json.text || '').slice(0, 120);
+                    chatBox.appendChild(mark);
+                  }
+                }
               } else if (json.type === 'tool_start') {
                 if (_isBg) continue;
                 _cancelThinkingTimer();
@@ -2288,15 +2452,9 @@ import createResearchSynapse from './researchSynapse.js';
                   accumulated = chatRenderer.stripPlanFence(accumulated);
                 }
                 currentAccumulated = accumulated;
-                // #region agent log
-                fetch('/api/_debug_agent_log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'8a946c',runId:'post-fix',hypothesisId:'H1',location:'chat.js:plan_card',message:'stripped plan fence from live bubble',data:{beforeLen:_beforePlan.length,afterLen:(roundText||'').length,hadFence:_beforePlan!==(roundText||''),stillHasFence:/```\s*(?:plan|json)/i.test(roundText||''),usedServerContent:typeof json.content==='string',planTitle:(plan&&plan.title)||null,hasStripFn:!!(chatRenderer&&chatRenderer.stripPlanFence)},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
                 _renderStream();
                 if (roundHolder && chatRenderer && typeof chatRenderer.scrubPlanJsonFromBubble === 'function') {
-                  const _scrubbed = chatRenderer.scrubPlanJsonFromBubble(roundHolder);
-                  // #region agent log
-                  fetch('/api/_debug_agent_log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'8a946c',runId:'post-fix',hypothesisId:'H5',location:'chat.js:plan_card:scrub',message:'DOM scrub after plan card',data:{removed:_scrubbed,anchorClass:roundHolder&&roundHolder.className},timestamp:Date.now()})}).catch(()=>{});
-                  // #endregion
+                  chatRenderer.scrubPlanJsonFromBubble(roundHolder);
                 }
                 if (plan && chatRenderer && (chatRenderer.mountPlanCardOnMessage || chatRenderer.buildPlanCard)) {
                   const anchor = roundHolder || currentHolder;
@@ -2668,6 +2826,10 @@ import createResearchSynapse from './researchSynapse.js';
         }
         if (metrics) {
           displayMetrics(footerTarget, metrics);
+          if (!window._nobodyFirstMetricsFired) {
+            window._nobodyFirstMetricsFired = true;
+            try { window.dispatchEvent(new CustomEvent('nobody-first-metrics')); } catch (_) {}
+          }
         }
         // Attach variant navigation if this was a regeneration
         _attachVariantNav(footerTarget);
@@ -4709,6 +4871,22 @@ import createResearchSynapse from './researchSynapse.js';
       node.classList.toggle('open');
     });
     window.__nobody_thread_click_bound = true;
+  }
+
+  const _steerChip = document.getElementById('steer-queue-chip');
+  if (_steerChip && !_steerChip._bound) {
+    _steerChip._bound = true;
+    _steerChip.addEventListener('click', async () => {
+      _localSteerQueue = [];
+      _serverSteerPending = 0;
+      const sid = sessionModule.getCurrentSessionId();
+      if (sid) {
+        try {
+          await fetch(`${API_BASE}/api/chat/steer/${sid}`, { method: 'DELETE', credentials: 'same-origin' });
+        } catch (_) {}
+      }
+      _updateSteerChip();
+    });
   }
 
   export default chatModule;

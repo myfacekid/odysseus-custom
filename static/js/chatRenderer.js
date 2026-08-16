@@ -1911,34 +1911,86 @@ export function displayMetrics(messageElement, metrics) {
     window._realContextLengths[metrics.model] = metrics.context_length;
   }
 
-  // Context usage ring
+  // Context usage ring (directly after metrics)
   let ctxRing = null;
   const ctxLen = metrics.context_length || 0;
+  const breakdown = metrics.context_breakdown || null;
   if (ctxPct !== undefined && ctxPct > 0) {
     const r = 6, stroke = 1.5;
     const circ = 2 * Math.PI * r;
-    const fill = circ * (ctxPct / 100);
     const ctxColor = ctxPct >= 85 ? 'var(--red, #e06c75)' : ctxPct >= 70 ? '#ff9900' : 'var(--green, #98c379)';
+    const segColors = {
+      history: '#6b9bd1',
+      system_tools: '#c678dd',
+      memory_rag: '#98c379',
+      skills: '#e5c07b',
+      other: '#56b6c2',
+      free: 'var(--border, #333)',
+    };
+    let ringSvg;
+    const usedTotal = breakdown
+      ? (breakdown.history || 0) + (breakdown.system_tools || 0) + (breakdown.memory_rag || 0)
+        + (breakdown.skills || 0) + (breakdown.other || 0)
+      : 0;
+    const windowTotal = ctxLen || (usedTotal + (breakdown?.free || 0)) || 1;
+    if (breakdown && usedTotal > 0) {
+      let offset = circ * 0.25; // start at top
+      const parts = ['history', 'system_tools', 'memory_rag', 'skills', 'other']
+        .map((k) => ({ k, n: breakdown[k] || 0 }))
+        .filter((p) => p.n > 0);
+      const arcs = parts.map((p) => {
+        const len = circ * Math.min(1, p.n / windowTotal);
+        const dash = `${len} ${Math.max(0, circ - len)}`;
+        const el = `<circle cx="7" cy="7" r="${r}" fill="none" stroke="${segColors[p.k]}" stroke-width="${stroke}"
+          stroke-dasharray="${dash}" stroke-dashoffset="${offset}" stroke-linecap="butt"
+          transform="rotate(-90 7 7)"/>`;
+        offset -= len;
+        return el;
+      }).join('');
+      ringSvg = `<svg width="14" height="14" viewBox="0 0 14 14">
+        <circle cx="7" cy="7" r="${r}" fill="none" stroke="var(--border, #333)" stroke-width="${stroke}" opacity="0.3"/>
+        ${arcs}
+      </svg>`;
+    } else {
+      const fill = circ * (ctxPct / 100);
+      ringSvg = `<svg width="14" height="14" viewBox="0 0 14 14">
+      <circle cx="7" cy="7" r="${r}" fill="none" stroke="var(--border, #333)" stroke-width="${stroke}" opacity="0.3"/>
+      <circle cx="7" cy="7" r="${r}" fill="none" stroke="var(--ctx-stroke)" stroke-width="${stroke}"
+        stroke-dasharray="${fill} ${circ - fill}" stroke-dashoffset="${circ * 0.25}"
+        stroke-linecap="round" transform="rotate(-90 7 7)"/>
+    </svg>`;
+    }
     ctxRing = document.createElement('span');
     ctxRing.className = 'ctx-ring';
     ctxRing.title = `${ctxPct}% context used — click for details`;
     ctxRing.style.cursor = 'pointer';
     ctxRing.style.setProperty('--ctx-color', ctxColor);
-    ctxRing.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14">
-      <circle cx="7" cy="7" r="${r}" fill="none" stroke="var(--border, #333)" stroke-width="${stroke}" opacity="0.3"/>
-      <circle cx="7" cy="7" r="${r}" fill="none" stroke="var(--ctx-stroke)" stroke-width="${stroke}"
-        stroke-dasharray="${fill} ${circ - fill}" stroke-dashoffset="${circ * 0.25}"
-        stroke-linecap="round" transform="rotate(-90 7 7)"/>
-    </svg><span class="ctx-ring-pct">${Math.round(ctxPct)}%</span>`;
+    ctxRing.innerHTML = `${ringSvg}<span class="ctx-ring-pct">${Math.round(ctxPct)}%</span>`;
 
     ctxRing.addEventListener('click', (e) => {
       e.stopPropagation();
       document.querySelectorAll('.ctx-detail-popup').forEach(p => { if (typeof p._dismiss === 'function') p._dismiss(); else p.remove(); });
 
-      const usedTokens = inputTokens || 0;
+      const usedTokens = inputTokens || usedTotal || 0;
       const totalCtx = ctxLen || 0;
       const modelShort = model.split('/').pop();
       const fmtNum = n => n ? n.toLocaleString() : '?';
+      const labels = {
+        history: 'History',
+        system_tools: 'Tools / system',
+        memory_rag: 'Memory / RAG',
+        skills: 'Skills',
+        other: 'Other',
+        free: 'Free',
+      };
+      let legendHtml = '';
+      if (breakdown) {
+        legendHtml = '<div class="ctx-breakdown-legend">' + Object.keys(labels).map((k) => {
+          const n = breakdown[k] || 0;
+          if (!n && k !== 'free') return '';
+          return `<div class="ctx-breakdown-row"><span><span class="ctx-breakdown-swatch" style="background:${segColors[k]}"></span>${labels[k]}</span><span>${fmtNum(n)}</span></div>`;
+        }).join('') + '</div>';
+      }
 
       const popup = document.createElement('div');
       popup.className = 'ctx-detail-popup';
@@ -1951,11 +2003,15 @@ export function displayMetrics(messageElement, metrics) {
           <span>${fmtNum(usedTokens)} used</span>
           <span>${fmtNum(totalCtx)} total</span>
         </div>
+        ${legendHtml}
         <div style="margin-top:8px;font-size:0.8rem;">
           <div><span class="ctx-label">Model</span> ${modelShort}</div>
           <div><span class="ctx-label">Usage</span> <span style="color:${ctxColor};font-weight:600;">${ctxPct}%</span></div>
           <div><span class="ctx-label">Window</span> ${fmtNum(totalCtx)} tokens</div>
         </div>
+        ${breakdown && (breakdown.system_tools || 0) > (usedTotal * 0.45) && ctxPct >= 60
+          ? '<div style="margin-top:6px;font-size:0.75rem;opacity:0.7;">Agent tools are heavy for this window.</div>'
+          : ''}
         ${ctxPct >= 70 ? `<button class="ctx-compact-btn" title="Summarize older messages to free up context">Compact context</button>` : ''}
       `;
 
@@ -2027,13 +2083,16 @@ export function displayMetrics(messageElement, metrics) {
       popup.style.visibility = 'hidden';
       document.body.appendChild(popup);
       const pr = popup.getBoundingClientRect();
-      // Position above the ring, right-aligned
-      popup.style.left = Math.max(8, rect.right - pr.width) + 'px';
+      // Prefer above the ring, keep fully on-screen (don't cover sidebar/composer)
+      const maxLeft = Math.max(8, window.innerWidth - pr.width - 8);
+      popup.style.left = Math.min(maxLeft, Math.max(8, rect.right - pr.width)) + 'px';
       const spaceAbove = rect.top;
       if (spaceAbove >= pr.height + 8) {
         popup.style.top = (rect.top - pr.height - 8) + 'px';
       } else {
-        popup.style.top = (rect.bottom + 8) + 'px';
+        const below = rect.bottom + 8;
+        const maxTop = Math.max(8, window.innerHeight - pr.height - 8);
+        popup.style.top = Math.min(below, maxTop) + 'px';
       }
       popup.style.visibility = '';
 
@@ -2044,8 +2103,10 @@ export function displayMetrics(messageElement, metrics) {
   let footer = messageElement.querySelector('.msg-footer');
   if (footer) {
     const actions = footer.querySelector('.msg-actions');
-    if (actions) {
-      footer.insertBefore(metricsDivider, actions);
+    // Order: … metrics | ctx-ring …… actions (actions stay end-aligned via CSS)
+    const insertBeforeEl = actions || null;
+    if (insertBeforeEl) {
+      footer.insertBefore(metricsDivider, insertBeforeEl);
       footer.insertBefore(metricsContainer, metricsDivider);
     } else {
       footer.appendChild(metricsContainer);
@@ -2057,8 +2118,13 @@ export function displayMetrics(messageElement, metrics) {
       ctxDiv.style.color = 'var(--color-muted-alt)';
       ctxDiv.style.pointerEvents = 'none';
       ctxDiv.className = 'ctx-divider';
-      footer.appendChild(ctxDiv);
-      footer.appendChild(ctxRing);
+      if (insertBeforeEl) {
+        footer.insertBefore(ctxDiv, insertBeforeEl);
+        footer.insertBefore(ctxRing, insertBeforeEl);
+      } else {
+        footer.appendChild(ctxDiv);
+        footer.appendChild(ctxRing);
+      }
     }
   } else {
     messageElement.appendChild(metricsContainer);
@@ -2066,6 +2132,26 @@ export function displayMetrics(messageElement, metrics) {
   }
 
   if (uiModule) uiModule.scrollHistory();
+
+  // Change tape from this turn (mutating tools)
+  const tape = metrics.change_tape;
+  if (Array.isArray(tape) && tape.length && messageElement) {
+    let tapeEl = messageElement.querySelector('.change-tape');
+    if (!tapeEl) {
+      tapeEl = document.createElement('div');
+      tapeEl.className = 'change-tape';
+      const footer = messageElement.querySelector('.msg-footer');
+      if (footer) messageElement.insertBefore(tapeEl, footer);
+      else messageElement.appendChild(tapeEl);
+    }
+    tapeEl.innerHTML = '<div class="change-tape-title">Changes this turn</div><ul>'
+      + tape.map((c) => `<li>${escHtml(c.summary || c.tool || '')}</li>`).join('')
+      + '</ul>';
+  }
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**

@@ -6,24 +6,28 @@ background asyncio task into a per-session replay buffer; SSE clients SUBSCRIBE
 to that buffer (replay everything so far, then live). Closing the SSE only drops
 the subscriber — the drain task keeps going.
 
-The wrapped generator already persists the assistant message to the session on
-completion, so reopening the session shows the finished result even if nobody
-was connected when it finished. Reconnecting mid-run replays the buffer + streams
-live (pick up where it is).
-
-Durability scope: in-memory, survives as long as the server process runs (tab
-close / navigation / refresh). It does NOT survive a server restart.
+Also holds per-run steer queues and coordinates tool-approval cancels on stop.
 """
 import asyncio
 import json
 import logging
-from typing import AsyncGenerator, Dict, Optional
+import time
+import uuid
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class _Run:
-    __slots__ = ("buffer", "subscribers", "status", "task", "evict_task")
+    __slots__ = (
+        "buffer",
+        "subscribers",
+        "status",
+        "task",
+        "evict_task",
+        "steer_queue",
+        "owner",
+    )
 
     def __init__(self) -> None:
         self.buffer: list = []          # ordered SSE event strings (replay log)
@@ -31,14 +35,12 @@ class _Run:
         self.status: str = "running"    # running | done | error | stopped
         self.task: Optional[asyncio.Task] = None
         self.evict_task: Optional[asyncio.Task] = None
+        self.steer_queue: List[Dict[str, Any]] = []
+        self.owner: Optional[str] = None
 
 
 _RUNS: Dict[str, _Run] = {}
 
-# How long a FINISHED run (and its full replay buffer) is retained after the
-# last subscriber disconnects, so a reconnect within the window can still
-# replay the result. After this, the run is evicted to bound memory — without
-# it, every session that ever streamed kept its entire event log forever.
 _EVICT_GRACE_S = 180
 
 
@@ -54,9 +56,7 @@ def _publish(run: _Run, ev: str) -> None:
 
 
 def _schedule_evict(session_id: str) -> None:
-    """(Re)arm a grace-period eviction for a terminal run with no subscribers.
-    Identity-checked so a run that gets replaced/reused is never evicted by a
-    stale timer."""
+    """(Re)arm a grace-period eviction for a terminal run with no subscribers."""
     run = _RUNS.get(session_id)
     if run is None:
         return
@@ -85,22 +85,77 @@ def get_status(session_id: str) -> Optional[str]:
     return r.status if r else None
 
 
+def get_run(session_id: str) -> Optional[_Run]:
+    return _RUNS.get(session_id)
+
+
+def enqueue_steer(
+    session_id: str,
+    text: str,
+    *,
+    mode: str = "redirect",
+) -> Optional[Dict[str, Any]]:
+    """Queue a mid-run steer. Returns the item, or None if no active run."""
+    run = _RUNS.get(session_id)
+    if not run or run.status != "running":
+        return None
+    body = (text or "").strip()
+    if not body:
+        return None
+    item = {
+        "id": uuid.uuid4().hex,
+        "text": body,
+        "mode": mode or "redirect",
+        "created_at": time.time(),
+    }
+    run.steer_queue.append(item)
+    _publish(
+        run,
+        f"data: {json.dumps({'type': 'steer_queued', 'id': item['id'], 'text': body, 'pending': len(run.steer_queue)})}\n\n",
+    )
+    return item
+
+
+def clear_steer_queue(session_id: str) -> List[Dict[str, Any]]:
+    """Drop pending steers; return what was cleared (for restoring to composer)."""
+    run = _RUNS.get(session_id)
+    if not run:
+        return []
+    cleared = list(run.steer_queue)
+    run.steer_queue.clear()
+    return cleared
+
+
+def pop_steers_coalesced(session_id: str) -> Optional[Dict[str, Any]]:
+    """Pop all pending steers as one coalesced item, or None."""
+    run = _RUNS.get(session_id)
+    if not run or not run.steer_queue:
+        return None
+    items = list(run.steer_queue)
+    run.steer_queue.clear()
+    if len(items) == 1:
+        return items[0]
+    bullets = "\n".join(f"- {it['text']}" for it in items)
+    return {
+        "id": uuid.uuid4().hex,
+        "text": bullets,
+        "mode": "redirect",
+        "created_at": time.time(),
+        "coalesced_ids": [it["id"] for it in items],
+    }
+
+
 async def _drain(session_id: str, agen: AsyncGenerator[str, None],
                  prev_task: Optional[asyncio.Task] = None) -> None:
-    """Pull every event from the wrapped generator into the run buffer, fanning
-    each out to live subscribers. Runs to completion regardless of subscribers."""
+    """Pull every event from the wrapped generator into the run buffer."""
     run = _RUNS.get(session_id)
     if run is None:
         return
-    # If this run replaced an in-flight one (rapid double-send), wait for that
-    # one to fully finish first. Its CancelledError handler calls aclose(), which
-    # persists its partial response — letting it complete before we start writing
-    # keeps the two runs' session saves sequential instead of interleaved.
     if prev_task is not None and not prev_task.done():
         try:
             await asyncio.wait({prev_task})
         except asyncio.CancelledError:
-            raise            # our own cancellation — propagate
+            raise
         except Exception:
             pass
     try:
@@ -110,8 +165,12 @@ async def _drain(session_id: str, agen: AsyncGenerator[str, None],
             run.status = "done"
     except asyncio.CancelledError:
         run.status = "stopped"
-        # Let the wrapped generator's own CancelledError handler run (it saves
-        # the partial response to the session).
+        try:
+            from src.tool_permissions import get_approval_registry
+
+            await get_approval_registry().cancel_session(session_id)
+        except Exception:
+            pass
         try:
             await agen.aclose()
         except Exception:
@@ -126,45 +185,43 @@ async def _drain(session_id: str, agen: AsyncGenerator[str, None],
         )
         _publish(run, "data: [DONE]\n\n")
     finally:
-        # Wake every subscriber with the end sentinel so their SSE closes.
         for q in list(run.subscribers):
             try:
                 q.put_nowait((None, None))
             except Exception:
                 pass
-        # Run is terminal — arm the grace timer so it (and its buffer) is
-        # eventually freed even if nobody ever reconnects. subscribe() cancels
-        # this on connect and re-arms on disconnect.
         _schedule_evict(session_id)
 
 
-def start(session_id: str, agen: AsyncGenerator[str, None]) -> _Run:
-    """Start a detached run draining `agen` for a session. If a run is already in
-    flight for this session (e.g. a rapid double-send), it's cancelled first."""
+def start(
+    session_id: str,
+    agen: AsyncGenerator[str, None],
+    *,
+    owner: Optional[str] = None,
+) -> _Run:
+    """Start a detached run draining `agen` for a session."""
     prev = _RUNS.get(session_id)
     prev_task: Optional[asyncio.Task] = None
     if prev:
         if prev.task and not prev.task.done():
             prev.task.cancel()
-            prev_task = prev.task   # new run awaits this before it starts writing
+            prev_task = prev.task
         if prev.evict_task and not prev.evict_task.done():
             prev.evict_task.cancel()
     run = _Run()
+    run.owner = owner
     _RUNS[session_id] = run
     run.task = asyncio.create_task(_drain(session_id, agen, prev_task))
     return run
 
 
 async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
-    """Replay the run's buffer from the start, then stream live until it ends.
-    Safe to call repeatedly (reconnect) and from multiple clients at once."""
+    """Replay the run's buffer from the start, then stream live until it ends."""
     run = _RUNS.get(session_id)
     if run is None:
         return
     q: asyncio.Queue = asyncio.Queue()
-    run.subscribers.add(q)            # register BEFORE replaying so nothing is missed
-    # A live subscriber is connected — don't let a pending grace timer evict
-    # the run out from under it mid-replay.
+    run.subscribers.add(q)
     if run.evict_task and not run.evict_task.done():
         run.evict_task.cancel()
     try:
@@ -176,18 +233,16 @@ async def subscribe(session_id: str) -> AsyncGenerator[str, None]:
             return
         while True:
             seq, ev = await q.get()
-            if seq is None:            # end sentinel
-                while next_seq < len(run.buffer):   # flush any tail the sentinel raced
+            if seq is None:
+                while next_seq < len(run.buffer):
                     yield run.buffer[next_seq]
                     next_seq += 1
                 break
-            if seq >= next_seq:        # skip events already replayed from the buffer
+            if seq >= next_seq:
                 yield ev
                 next_seq = seq + 1
     finally:
         run.subscribers.discard(q)
-        # Last subscriber gone on a finished run — (re)arm eviction so the
-        # buffer doesn't linger indefinitely.
         if not run.subscribers and run.status != "running":
             _schedule_evict(session_id)
 
@@ -196,6 +251,7 @@ def stop(session_id: str) -> bool:
     """Cancel an in-flight run (the wrapped generator saves its partial)."""
     run = _RUNS.get(session_id)
     if run and run.task and not run.task.done():
+        clear_steer_queue(session_id)
         run.task.cancel()
         return True
     return False

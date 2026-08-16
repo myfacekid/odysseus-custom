@@ -917,6 +917,13 @@ def setup_chat_routes(
                                         pct = min(round((last_metrics["input_tokens"] / ctx.context_length) * 100, 1), 100.0)
                                         last_metrics["context_percent"] = pct
                                         last_metrics["context_length"] = ctx.context_length
+                                    try:
+                                        from src.model_context import estimate_context_breakdown
+                                        last_metrics["context_breakdown"] = estimate_context_breakdown(
+                                            messages, context_length=ctx.context_length or 0
+                                        )
+                                    except Exception:
+                                        pass
                                     # The frontend reads `tokens_per_second`; the raw usage event
                                     # carries the backend's true gen speed as `gen_tps` (llama.cpp
                                     # timings). Map it through so this direct-chat path shows real
@@ -952,6 +959,13 @@ def setup_chat_routes(
                                     "model": sess.model,
                                     "usage_source": "estimated",
                                 }
+                                try:
+                                    from src.model_context import estimate_context_breakdown
+                                    last_metrics["context_breakdown"] = estimate_context_breakdown(
+                                        messages, context_length=ctx.context_length or 0
+                                    )
+                                except Exception:
+                                    pass
                                 yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
                             if full_response:
                                 _saved_id = save_assistant_response(
@@ -990,9 +1004,15 @@ def setup_chat_routes(
                 _agent_rounds = 0
                 _agent_tool_calls = 0
                 _answered_by = None  # set if the selected model failed and a fallback answered
+                _partial_tool_events = []
+                _partial_change_tape = []
                 try:
                     from src.settings import get_setting
+                    from src.tool_permissions import normalize_mode
                     _tool_budget = int(get_setting("agent_max_tool_calls", 0))
+                    _permission_mode = normalize_mode(
+                        (ctx.uprefs or {}).get("agent_permission_mode")
+                    )
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1011,6 +1031,7 @@ def setup_chat_routes(
                         fallbacks=_fallback_candidates,
                         active_project_file=active_project_file,
                         plan_mode=_plan_mode,
+                        permission_mode=_permission_mode,
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
@@ -1027,14 +1048,26 @@ def setup_chat_routes(
                                     web_sources = data.get("data", [])
                                     yield chunk
                                 elif data.get("type") in (
-                                    "tool_start", "tool_output", "agent_step",
+                                    "tool_start", "tool_output", "tool_progress", "agent_step",
                                     "doc_stream_open", "doc_stream_delta",
                                     "doc_update", "doc_suggestions", "link_suggestion", "graph_merge_proposals", "ui_control",
+                                    "tool_approval_required", "tool_approval_waiting", "tool_approval_resolved",
+                                    "change_tape", "steer_queued", "steer_applied", "budget_exceeded",
                                 ):
                                     if data.get("type") == "agent_step":
                                         _agent_rounds = max(_agent_rounds, data.get("round", 1))
                                     elif data.get("type") == "tool_start":
                                         _agent_tool_calls += 1
+                                    elif data.get("type") == "tool_output":
+                                        _partial_tool_events.append({
+                                            "round": data.get("round"),
+                                            "tool": data.get("tool"),
+                                            "command": data.get("command"),
+                                            "output": data.get("output"),
+                                            "exit_code": data.get("exit_code"),
+                                        })
+                                    elif data.get("type") == "change_tape":
+                                        _partial_change_tape = data.get("changes") or []
                                     yield chunk
                                 elif data.get("type") == "fallback":
                                     # Selected model failed; a fallback answered.
@@ -1101,9 +1134,16 @@ def setup_chat_routes(
                     # outer finally from running and left _active_streams
                     # with a stale entry).
                     try:
-                        if full_response:
+                        if full_response or _partial_tool_events:
                             logger.info("Client disconnected mid-stream for session %s, saving partial response (%d chars)", session, len(full_response))
-                            _stopped_content2, _stopped_md2 = clean_thinking_for_save(full_response, {"stopped": True, "model": sess.model})
+                            _stopped_md2 = {"stopped": True, "model": sess.model}
+                            if _partial_tool_events:
+                                _stopped_md2["tool_events"] = _partial_tool_events
+                            if _partial_change_tape:
+                                _stopped_md2["change_tape"] = _partial_change_tape
+                            _stopped_content2, _stopped_md2 = clean_thinking_for_save(
+                                full_response or "", _stopped_md2
+                            )
                             sess.add_message(ChatMessage("assistant", _stopped_content2, metadata=_stopped_md2))
                             if not incognito:
                                 session_manager.save_sessions()
@@ -1127,7 +1167,7 @@ def setup_chat_routes(
         # SSE response just subscribes (replay buffered output + live); dropping
         # the SSE only removes a subscriber — the run keeps going and saves the
         # assistant message on completion regardless. Reconnect via /api/chat/resume.
-        agent_runs.start(session, _safe_stream())
+        agent_runs.start(session, _safe_stream(), owner=_user)
         return StreamingResponse(agent_runs.subscribe(session), media_type="text/event-stream")
 
     # ------------------------------------------------------------------ #
@@ -1148,8 +1188,70 @@ def setup_chat_routes(
     @router.post("/api/chat/stop/{session_id}")
     async def chat_stop(request: Request, session_id: str) -> Dict[str, Any]:
         _verify_session_owner(request, session_id)
+        cleared = agent_runs.clear_steer_queue(session_id)
         stopped = agent_runs.stop(session_id)
-        return {"stopped": stopped}
+        return {
+            "stopped": stopped,
+            "cleared_steers": [c.get("text") for c in cleared if c.get("text")],
+        }
+
+    # ------------------------------------------------------------------ #
+    # POST /api/chat/tool-approval/{session_id} — resolve Ask-mode tool gate
+    # ------------------------------------------------------------------ #
+    @router.post("/api/chat/tool-approval/{session_id}")
+    async def chat_tool_approval(request: Request, session_id: str) -> Dict[str, Any]:
+        _verify_session_owner(request, session_id)
+        body = await request.json()
+        approval_id = str(body.get("approval_id") or "").strip()
+        decision = str(body.get("decision") or "").strip().lower()
+        if not approval_id or decision not in ("approve", "deny", "always_session", "always"):
+            raise HTTPException(400, "approval_id and decision (approve|deny|always_session|always) required")
+        from src.tool_permissions import (
+            allow_tool_for_session,
+            get_approval_registry,
+            save_allowed_tool,
+        )
+        registry = get_approval_registry()
+        pending = registry.peek(approval_id)
+        if pending and pending.get("session_id") and pending["session_id"] != session_id:
+            raise HTTPException(403, "Approval does not belong to this session")
+        user = get_current_user(request)
+        if decision == "always_session":
+            tool = (pending or {}).get("tool") or body.get("tool")
+            if tool:
+                allow_tool_for_session(session_id, tool)
+        elif decision == "always":
+            tool = (pending or {}).get("tool") or body.get("tool")
+            if tool:
+                allow_tool_for_session(session_id, tool)
+                save_allowed_tool(user, tool)
+        ok = await registry.resolve(approval_id, decision)
+        if not ok:
+            raise HTTPException(404, "No pending approval with that id")
+        return {"ok": True, "approval_id": approval_id, "decision": decision}
+
+    # ------------------------------------------------------------------ #
+    # POST /api/chat/steer/{session_id} — queue mid-run redirect (Phase B)
+    # ------------------------------------------------------------------ #
+    @router.post("/api/chat/steer/{session_id}")
+    async def chat_steer(request: Request, session_id: str) -> Dict[str, Any]:
+        _verify_session_owner(request, session_id)
+        if not agent_runs.is_active(session_id):
+            raise HTTPException(409, "No active run to steer")
+        body = await request.json()
+        text = str(body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "text required")
+        item = agent_runs.enqueue_steer(session_id, text, mode=str(body.get("mode") or "redirect"))
+        if not item:
+            raise HTTPException(409, "No active run to steer")
+        return {"ok": True, "id": item["id"], "pending": True}
+
+    @router.delete("/api/chat/steer/{session_id}")
+    async def chat_steer_clear(request: Request, session_id: str) -> Dict[str, Any]:
+        _verify_session_owner(request, session_id)
+        cleared = agent_runs.clear_steer_queue(session_id)
+        return {"ok": True, "cleared": len(cleared), "texts": [c.get("text") for c in cleared]}
 
     # ------------------------------------------------------------------ #
     # GET /api/chat/stream_status — check if a stream is active for a session

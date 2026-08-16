@@ -296,3 +296,90 @@ def estimate_tokens(messages: List[Dict]) -> int:
                 if isinstance(item, dict) and item.get("type") == "text":
                     total += int(len(item.get("text", "")) * 0.3)
     return total
+
+
+def _estimate_text_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(0, int(len(text) * 0.3))
+
+
+def estimate_context_breakdown(
+    messages: List[Dict],
+    *,
+    context_length: int = 0,
+    system_prompt: str = "",
+) -> Dict[str, int]:
+    """Approximate token buckets for context honesty UI.
+
+    Buckets: history, system_tools, memory_rag, skills, other, free.
+    Heuristic classification of system/preface messages by content markers.
+    """
+    history = 0
+    system_tools = _estimate_text_tokens(system_prompt or "")
+    memory_rag = 0
+    skills = 0
+    other = 0
+
+    for msg in messages or []:
+        role = (msg.get("role") or "").lower()
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            text = " ".join(
+                item.get("text", "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            )
+        else:
+            text = content if isinstance(content, str) else str(content or "")
+        toks = _estimate_text_tokens(text) + 4
+        low = text[:500].lower()
+
+        if role in ("user", "assistant", "tool"):
+            # Tool-result feed-backs count as history of the turn
+            history += toks
+            continue
+        if role != "system":
+            other += toks
+            continue
+
+        if "available skills" in low or "skills index" in low:
+            skills += toks
+        elif any(
+            m in low
+            for m in (
+                "retrieved documents",
+                "web search",
+                "memory",
+                "zotero",
+                "obsidian",
+                "vault",
+                "untrusted",
+            )
+        ):
+            memory_rag += toks
+        elif any(
+            m in low
+            for m in (
+                "tool access",
+                "```bash",
+                "plan mode",
+                "you are an ai assistant",
+                "function calling",
+            )
+        ):
+            system_tools += toks
+        else:
+            # Generic system / character / project preface
+            other += toks
+
+    used = history + system_tools + memory_rag + skills + other
+    free = max(0, int(context_length) - used) if context_length else 0
+    return {
+        "history": int(history),
+        "system_tools": int(system_tools),
+        "memory_rag": int(memory_rag),
+        "skills": int(skills),
+        "other": int(other),
+        "free": int(free),
+    }

@@ -266,8 +266,8 @@
     })();
   </script>
   <link rel="stylesheet" href="/static/style.css?v=20260730-tools-type">
-  <link rel="modulepreload" href="/static/app.js?v=20260730q">
-  <link rel="modulepreload" href="/static/js/chat.js?v=20260730q">
+  <link rel="modulepreload" href="/static/app.js?v=20260801b">
+  <link rel="modulepreload" href="/static/js/chat.js?v=20260801b">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
   <link rel="modulepreload" href="/static/js/markdown.js">
@@ -1509,11 +1509,16 @@
             <button type="button" class="mode-toggle-btn" id="mode-plan-btn" aria-pressed="false">Plan</button>
             <button type="button" class="mode-toggle-btn active" id="mode-chat-btn" aria-pressed="true">Chat</button>
           </div>
+          <div class="perm-toggle" id="agent-perm-toggle" data-perm="ask" title="Ask before mutating agent tools" hidden>
+            <button type="button" class="perm-toggle-btn active" data-perm="ask" aria-pressed="true">Ask</button>
+            <button type="button" class="perm-toggle-btn" data-perm="auto" aria-pressed="false">Auto</button>
+          </div>
           <button type="submit" form="chat-form" class="send-btn newchat-mode" data-mode="newchat" aria-label="New chat">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span class="send-btn-label">+ New</span>
           </button>
         </div>
       </div>
+      <div id="steer-queue-chip" class="steer-queue-chip hidden" aria-live="polite"></div>
       <!-- Hidden checkboxes for state -->
       <input type="checkbox" id="web-toggle" style="display:none;">
       <input type="checkbox" id="bash-toggle" style="display:none;">
@@ -1784,7 +1789,7 @@
         <div data-settings-panel="getting-started">
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Getting started</h2>
-            <p class="admin-toggle-sub" style="margin:0 0 12px">Three essentials for chat, Research, and Links. Fix anything marked below, then you’re ready.</p>
+            <p class="admin-toggle-sub" style="margin:0 0 12px">Start with a model endpoint (required for chat). Web search and Zotero unlock Research and Links — set them up when you need them.</p>
             <div id="setup-checklist" class="setup-checklist" aria-live="polite">
               <div class="setup-checklist-loading">Checking setup…</div>
             </div>
@@ -2745,10 +2750,10 @@
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/document.js"></script>
 <script type="module" src="/static/js/gallery.js"></script>
-<script type="module" src="/static/js/chatRenderer.js?v=20260730q"></script>
+<script type="module" src="/static/js/chatRenderer.js?v=20260801b"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=20260730q"></script>
+<script type="module" src="/static/js/chat.js?v=20260801b"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
 <script type="module" src="/static/js/compare/index.js"></script>
@@ -2757,9 +2762,9 @@
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260730q"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260801b"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
-<script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js?v=20260730-tools-type').catch(()=>{});}</script>
+<script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js?v=20260801b').catch(()=>{});}</script>
 </body>
 </html>

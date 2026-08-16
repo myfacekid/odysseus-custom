@@ -1458,6 +1458,7 @@ async def stream_agent_loop(
     _is_teacher_run: bool = False,
     active_project_file: Optional[str] = None,
     plan_mode: bool = False,
+    permission_mode: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -1480,6 +1481,29 @@ async def stream_agent_loop(
         # public/non-admin users rather than trying to enumerate every tool.
         mcp_mgr = None
 
+    from src.tool_permissions import (
+        APPROVAL_KEEPALIVE_S,
+        APPROVAL_TIMEOUT_S,
+        allow_tool_for_session,
+        build_change_entry,
+        denied_tool_result,
+        format_steer_message,
+        get_approval_registry,
+        load_permission_prefs,
+        normalize_mode,
+        save_allowed_tool,
+        session_allowlist,
+        should_request_approval,
+    )
+
+    _perm_prefs = load_permission_prefs(owner)
+    _permission_mode = normalize_mode(
+        permission_mode if permission_mode is not None else _perm_prefs["mode"]
+    )
+    _perm_allow = set(_perm_prefs.get("allowed_tools") or ())
+    _sess_allow = session_allowlist(session_id)
+    _approval_registry = get_approval_registry()
+    change_tape: List[Dict] = []
     _t0 = time.time()
     _needs_admin = _detect_admin_intent(messages)
     _last_user = _extract_last_user_message(messages)
@@ -1635,7 +1659,7 @@ async def stream_agent_loop(
         messages, model, active_document, mcp_mgr, disabled_tools,
         needs_admin=_needs_admin, relevant_tools=_relevant_tools,
         mcp_disabled_map=_mcp_disabled_map,
-        compact=_is_api_model,
+        compact=_is_api_model or (0 < int(context_length or 0) <= 16000),
         owner=owner,
         session_id=session_id,
         active_project_file=active_project_file,
@@ -2180,43 +2204,106 @@ async def stream_agent_loop(
             else:
                 cmd_display = block.content.strip()
 
+            # --- Ask-mode permission gate (before tool_start / execute) ---
+            _denied = False
+            if should_request_approval(
+                block.tool_type,
+                mode=_permission_mode,
+                permanent=_perm_allow,
+                session=_sess_allow,
+            ):
+                _aid = await _approval_registry.create(
+                    tool=block.tool_type,
+                    command=cmd_display,
+                    session_id=session_id,
+                    owner=owner,
+                )
+                yield (
+                    f'data: {json.dumps({"type": "tool_approval_required", "approval_id": _aid, "tool": block.tool_type, "command": cmd_display, "round": round_num, "session_id": session_id})}\n\n'
+                )
+                _decision = "deny"
+                _deadline = time.time() + APPROVAL_TIMEOUT_S
+                _fut = _approval_registry.get_future(_aid)
+                while _fut is not None and not _fut.done() and time.time() < _deadline:
+                    _remaining = max(0.1, min(APPROVAL_KEEPALIVE_S, _deadline - time.time()))
+                    try:
+                        await asyncio.wait_for(asyncio.shield(_fut), timeout=_remaining)
+                    except asyncio.TimeoutError:
+                        if time.time() >= _deadline:
+                            break
+                        yield (
+                            f'data: {json.dumps({"type": "tool_approval_waiting", "approval_id": _aid})}\n\n'
+                        )
+                    except asyncio.CancelledError:
+                        await _approval_registry.cancel_session(session_id)
+                        raise
+                if _fut is not None and _fut.done():
+                    try:
+                        _decision = _fut.result()
+                    except Exception:
+                        _decision = "deny"
+                else:
+                    await _approval_registry.resolve(_aid, "deny")
+                    if _fut is not None and _fut.done():
+                        try:
+                            _decision = _fut.result()
+                        except Exception:
+                            _decision = "deny"
+                    else:
+                        _decision = "deny"
+                if _decision in ("always", "always_session"):
+                    allow_tool_for_session(session_id, block.tool_type)
+                    if _decision == "always":
+                        save_allowed_tool(owner, block.tool_type)
+                        _perm_allow.add(block.tool_type)
+                    _decision = "approve"
+                yield (
+                    f'data: {json.dumps({"type": "tool_approval_resolved", "approval_id": _aid, "decision": _decision, "tool": block.tool_type})}\n\n'
+                )
+                if _decision != "approve":
+                    _denied = True
+
             yield (
                 f'data: {json.dumps({"type": "tool_start", "tool": block.tool_type, "command": cmd_display, "round": round_num})}\n\n'
             )
 
-            # Streaming progress for long-running tools (bash, python).
-            # The bash/python branches inside _direct_fallback emit
-            # periodic {elapsed_s, tail} payloads via this callback;
-            # we forward each one as a `tool_progress` SSE event so
-            # the UI can render live elapsed-time + tail-of-output.
-            _progress_q: asyncio.Queue = asyncio.Queue()
-            async def _push_progress(payload):
-                await _progress_q.put(payload)
+            if _denied:
+                desc = block.tool_type
+                result = denied_tool_result(block.tool_type)
+            else:
+                # Streaming progress for long-running tools (bash, python).
+                # The bash/python branches inside _direct_fallback emit
+                # periodic {elapsed_s, tail} payloads via this callback;
+                # we forward each one as a `tool_progress` SSE event so
+                # the UI can render live elapsed-time + tail-of-output.
+                _progress_q: asyncio.Queue = asyncio.Queue()
+                async def _push_progress(payload):
+                    await _progress_q.put(payload)
 
-            async def _run_tool():
-                try:
-                    return await execute_tool_block(
-                        block,
-                        session_id=session_id,
-                        disabled_tools=disabled_tools,
-                        owner=owner,
-                        progress_cb=_push_progress,
+                async def _run_tool():
+                    try:
+                        return await execute_tool_block(
+                            block,
+                            session_id=session_id,
+                            disabled_tools=disabled_tools,
+                            owner=owner,
+                            progress_cb=_push_progress,
+                        )
+                    finally:
+                        # Sentinel so the drainer knows to stop.
+                        await _progress_q.put(None)
+
+                _tool_task = asyncio.create_task(_run_tool())
+                # Drain progress events as they arrive — block until the
+                # next event OR the tool finishes (sentinel = None).
+                while True:
+                    evt = await _progress_q.get()
+                    if evt is None:
+                        break
+                    yield (
+                        f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
                     )
-                finally:
-                    # Sentinel so the drainer knows to stop.
-                    await _progress_q.put(None)
-
-            _tool_task = asyncio.create_task(_run_tool())
-            # Drain progress events as they arrive — block until the
-            # next event OR the tool finishes (sentinel = None).
-            while True:
-                evt = await _progress_q.get()
-                if evt is None:
-                    break
-                yield (
-                    f'data: {json.dumps({"type": "tool_progress", "tool": block.tool_type, "round": round_num, **evt})}\n\n'
-                )
-            desc, result = await _tool_task
+                desc, result = await _tool_task
 
             # Extract structured web sources from web_search tool output.
             # web_search returns {"output": ..., "exit_code": 0}; check "output"
@@ -2432,6 +2519,12 @@ async def stream_agent_loop(
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
 
+            _tape_row = build_change_entry(
+                block.tool_type, cmd_display, result, output_text
+            )
+            if _tape_row:
+                change_tape.append(_tape_row)
+
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
@@ -2444,6 +2537,23 @@ async def stream_agent_loop(
         _append_tool_results(messages, round_response, native_tool_calls,
                              tool_results, tool_result_texts, used_native, round_num,
                              round_reasoning=round_reasoning)
+
+        # Mid-run steering: apply queued redirects at round boundary (after tools).
+        if session_id:
+            try:
+                from src import agent_runs as _agent_runs
+                _steer = _agent_runs.pop_steers_coalesced(session_id)
+            except Exception:
+                _steer = None
+            if _steer:
+                _steer_body = (_steer.get("text") or "").strip()
+                messages.append({
+                    "role": "user",
+                    "content": format_steer_message(_steer_body),
+                })
+                yield (
+                    f'data: {json.dumps({"type": "steer_applied", "id": _steer.get("id"), "text": _steer_body})}\n\n'
+                )
 
         # Emit agent_step event
         yield (
@@ -2461,6 +2571,9 @@ async def stream_agent_loop(
     if _fallback_chunk:
         yield _fallback_chunk
 
+    if change_tape:
+        yield f"data: {json.dumps({'type': 'change_tape', 'changes': change_tape})}\n\n"
+
     # --- Final metrics ---
     total_duration = time.time() - total_start
     metrics = _compute_final_metrics(
@@ -2472,6 +2585,15 @@ async def stream_agent_loop(
         backend_gen_tps=backend_gen_tps,
         backend_prefill_tps=backend_prefill_tps,
     )
+    if change_tape:
+        metrics["change_tape"] = change_tape
+    try:
+        from src.model_context import estimate_context_breakdown
+        metrics["context_breakdown"] = estimate_context_breakdown(
+            messages, context_length=context_length
+        )
+    except Exception:
+        pass
     yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
 
     # Teacher-escalation: inline takeover visible in the chat stream.

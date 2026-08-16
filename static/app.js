@@ -9,7 +9,7 @@ import modelsModule from './js/models.js';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=20260730q';
+import chatModule from './js/chat.js?v=20260801b';
 import compareModule from './js/compare/index.js';
 import documentModule from './js/document.js';
 import searchChatModule from './js/search-chat.js';
@@ -1679,10 +1679,63 @@ function initializeEventListeners() {
       document.querySelectorAll('[data-mode-tool]').forEach((b) => {
         b.style.display = (mode === 'agent' || mode === 'plan') ? '' : 'none';
       });
+      const permToggle = el('agent-perm-toggle');
+      if (permToggle) {
+        if (mode === 'agent' || mode === 'plan') {
+          const wasHidden = permToggle.hasAttribute('hidden');
+          permToggle.removeAttribute('hidden');
+          if (wasHidden) {
+            permToggle.classList.remove('perm-toggle-pop');
+            void permToggle.offsetWidth;
+            permToggle.classList.add('perm-toggle-pop');
+          }
+        } else {
+          permToggle.setAttribute('hidden', '');
+          permToggle.classList.remove('perm-toggle-pop');
+        }
+      }
     }
 
     window.setChatMode = setMode;
     window.updateModeTogglePill = () => updateModePill(currentMode);
+
+    // Ask / Auto permission mode (persisted via prefs)
+    (function initPermToggle() {
+      const wrap = el('agent-perm-toggle');
+      if (!wrap) return;
+      let perm = 'ask';
+      async function loadPerm() {
+        try {
+          const r = await fetch('/api/prefs/agent_permission_mode', { credentials: 'same-origin' });
+          if (r.ok) {
+            const d = await r.json();
+            if (d && (d.value === 'auto' || d.value === 'ask')) perm = d.value;
+          }
+        } catch (_) {}
+        applyPerm(perm, false);
+      }
+      function applyPerm(mode, save) {
+        perm = mode === 'auto' ? 'auto' : 'ask';
+        wrap.dataset.perm = perm;
+        wrap.querySelectorAll('.perm-toggle-btn').forEach((b) => {
+          const on = b.dataset.perm === perm;
+          b.classList.toggle('active', on);
+          b.setAttribute('aria-pressed', String(on));
+        });
+        if (save) {
+          fetch('/api/prefs/agent_permission_mode', {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: perm }),
+          }).catch(() => {});
+        }
+      }
+      wrap.querySelectorAll('.perm-toggle-btn').forEach((b) => {
+        b.addEventListener('click', () => applyPerm(b.dataset.perm, true));
+      });
+      loadPerm();
+    })();
 
     agentBtn.addEventListener('click', () => {
       const resChk = el('research-toggle');
@@ -4209,6 +4262,32 @@ function startNobodyApp() {
         clearTimeout(_loaderSlowTimer);
         clearTimeout(_loaderFailsafe);
         _dismissAppLoader();
+        // First-run: auto-open Getting started once when no model endpoint yet.
+        (async () => {
+          try {
+            const { fetchSetupStatus } = await import('./js/setupStatus.js');
+            const status = await fetchSetupStatus();
+            if (status.readyForChat) return;
+            const opened = localStorage.getItem('getting_started_auto_opened');
+            if (opened === '1') return;
+            localStorage.setItem('getting_started_auto_opened', '1');
+            const settings = await import('./js/settings.js');
+            if (settings.open) settings.open('getting-started');
+          } catch (_) {}
+        })();
+        // Soft /tour offer once after first successful metrics (wired below).
+        if (!window._nobodyTourOfferWired) {
+          window._nobodyTourOfferWired = true;
+          window.addEventListener('nobody-first-metrics', () => {
+            try {
+              if (localStorage.getItem('tour_offer_dismissed') === '1') return;
+              localStorage.setItem('tour_offer_dismissed', '1');
+              if (uiModule && uiModule.showToast) {
+                uiModule.showToast('Tip: type /tour for a 30s walkthrough', 6000);
+              }
+            } catch (_) {}
+          });
+        }
         // Fire any URL route opener now that sessions + module wiring are
         // ready. Deferred from up top of init for exactly this reason.
         if (window._nobodyRouteOpener) {

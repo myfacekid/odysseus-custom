@@ -612,9 +612,17 @@ export async function refreshModels(force = false) {
       box.appendChild(noModels);
       // No endpoints yet: keep the welcome screen focused on first setup.
       const welcomeSub = document.getElementById('welcome-sub');
-      if (welcomeSub) welcomeSub.innerHTML = 'Type <span class="setup-trigger-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Click to launch setup">/setup</span> to get started.';
+      if (welcomeSub) welcomeSub.innerHTML = 'Type <span class="setup-trigger-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;" title="Click to launch setup">/setup</span> to get started, or open <span class="getting-started-link" style="color:var(--accent,var(--red));font-weight:600;cursor:pointer;text-decoration:underline;">Getting started</span> in Settings.';
       const welcomeTip = document.getElementById('welcome-tip');
-      if (welcomeTip) welcomeTip.textContent = 'Type /setup, then choose Local models or API.';
+      if (welcomeTip) welcomeTip.textContent = 'Type /setup for Local models or API — or fix the Getting started checklist.';
+      document.querySelectorAll('.getting-started-link').forEach((a) => {
+        if (a._gsBound) return;
+        a._gsBound = true;
+        a.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          import('./settings.js').then((m) => m.open && m.open('getting-started')).catch(() => {});
+        });
+      });
     } else {
       // Configured installs should feel ready, not stuck in onboarding.
       const welcomeSub = document.getElementById('welcome-sub');
