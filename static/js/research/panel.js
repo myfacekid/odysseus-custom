@@ -316,6 +316,9 @@ let _activeComposeTab = 'topic';
 let _seedPapers = [];
 let _seedPreviewTimer = null;
 let _seedPreviewRequest = 0;
+/** @type {Record<string, object>} Preview rows keyed by ref / zotero_key / doi. */
+let _seedPreviewByRef = {};
+let _seedSyncRecommended = false;
 let _seedSearchTimer = null;
 let _seedSearchRequest = 0;
 let _seedPickerOpen = false;
@@ -331,6 +334,32 @@ const _SEED_TIER_CLASS = {
   unsourced: 'tier-thin',
   unknown: 'tier-unknown',
 };
+
+function _seedPaperRef(p) {
+  return String(p?.zotero_key || p?.doi || '').trim();
+}
+
+function _previewForPaper(p) {
+  const ref = _seedPaperRef(p);
+  if (!ref) return null;
+  return _seedPreviewByRef[ref] || _seedPreviewByRef[ref.toUpperCase()] || null;
+}
+
+function _setSeedPreviewCache(seeds) {
+  _seedPreviewByRef = {};
+  for (const s of seeds || []) {
+    const keys = [s.ref, s.zotero_key, s.doi].filter(Boolean).map((k) => String(k).trim());
+    for (const k of keys) {
+      _seedPreviewByRef[k] = s;
+      _seedPreviewByRef[k.toUpperCase()] = s;
+    }
+  }
+}
+
+function _clearSeedPreviewCache() {
+  _seedPreviewByRef = {};
+  _seedSyncRecommended = false;
+}
 
 function _loadSeedsFromStorage() {
   try {
@@ -367,14 +396,34 @@ function _renderSeedChips() {
     return;
   }
   host.innerHTML = _seedPapers.map((p, idx) => {
-    const meta = [_shortAuthors(p.authors), p.year].filter(Boolean).join(' · ');
-    const pdfTitle = p.has_pdf ? 'Full text (PDF) available' : 'No PDF — abstract/metadata only';
-    const pdfCls = p.has_pdf ? 'research-seed-chip-dot--pdf' : 'research-seed-chip-dot--nopdf';
+    const preview = _previewForPaper(p);
+    const hasPdf = preview?.has_pdf != null ? !!preview.has_pdf : !!p.has_pdf;
+    const metaBits = [_shortAuthors(p.authors || preview?.authors), p.year || preview?.year];
+    if (preview?.doi) metaBits.push(`DOI ${preview.doi}`);
+    else if (p.doi) metaBits.push(`DOI ${p.doi}`);
+    const meta = metaBits.filter(Boolean).join(' · ');
+    const pdfTitle = hasPdf ? 'Full text (PDF) available' : 'No PDF — abstract/metadata only';
+    const pdfCls = hasPdf ? 'research-seed-chip-dot--pdf' : 'research-seed-chip-dot--nopdf';
+    let tierHtml = '';
+    let notesHtml = '';
+    if (preview) {
+      const tierCls = _SEED_TIER_CLASS[preview.sourcing_tier] || 'tier-unknown';
+      const label = preview.sourcing_label || preview.sourcing_tier || 'Unknown';
+      tierHtml = `<span class="research-seed-preview-tier ${tierCls}">${_esc(label)}</span>`;
+      if (preview.in_catalog === false) {
+        notesHtml += '<span class="research-seed-preview-note">Not in catalog — sync Zotero or resolves at run</span>';
+      }
+      if (preview.catalog_stale) {
+        notesHtml += '<span class="research-seed-preview-note research-seed-preview-note--sync">Catalog out of date — sync Zotero in Settings</span>';
+      }
+    }
     return `<div class="research-seed-chip" data-idx="${idx}" title="${_esc(p.title || p.zotero_key || 'Paper')}">
       <span class="research-seed-chip-dot ${pdfCls}" title="${_esc(pdfTitle)}"></span>
       <div class="research-seed-chip-text">
         <div class="research-seed-chip-title">${_esc(p.title || p.zotero_key || 'Paper')}</div>
         ${meta ? `<div class="research-seed-chip-meta">${_esc(meta)}</div>` : ''}
+        ${tierHtml}
+        ${notesHtml}
       </div>
       <button type="button" class="research-seed-chip-remove" data-idx="${idx}" title="Remove" aria-label="Remove seed paper">×</button>
     </div>`;
@@ -385,6 +434,10 @@ function _renderSeedChips() {
       if (i >= 0) {
         _seedPapers.splice(i, 1);
         _saveSeedsToStorage();
+        if (!_seedPapers.length) {
+          _clearSeedPreviewCache();
+          _renderSeedPreviewStrip('', { hidden: true });
+        }
         _renderSeedChips();
         _scheduleSeedPreview();
         _refreshSeedResultStates();
@@ -424,7 +477,9 @@ function _updateSeedMetaUI() {
 function _clearAllSeeds() {
   if (!_seedPapers.length) return;
   _seedPapers = [];
+  _clearSeedPreviewCache();
   _saveSeedsToStorage();
+  _renderSeedPreviewStrip('', { hidden: true });
   _renderSeedChips();
   _scheduleSeedPreview();
   _refreshSeedResultStates();
@@ -466,6 +521,10 @@ function _removeSeedPaper(paper) {
     !((key && (s.zotero_key || '').toUpperCase() === key) || (doi && s.doi === doi)));
   if (_seedPapers.length === before) return false;
   _saveSeedsToStorage();
+  if (!_seedPapers.length) {
+    _clearSeedPreviewCache();
+    _renderSeedPreviewStrip('', { hidden: true });
+  }
   _renderSeedChips();
   _scheduleSeedPreview();
   return true;
@@ -531,16 +590,22 @@ function _scheduleSeedPreview() {
   _seedPreviewTimer = setTimeout(() => { void _refreshSeedPreview(); }, 350);
 }
 
+function _renderSeedPreviewStrip(html, { hidden = false } = {}) {
+  const host = document.getElementById('research-seed-preview');
+  if (!host) return;
+  host.hidden = hidden || !html;
+  host.innerHTML = html || '';
+}
+
 async function _refreshSeedPreview() {
   const host = document.getElementById('research-seed-preview');
   if (!host) return;
   if (!_seedPapers.length) {
-    host.innerHTML = '';
-    host.hidden = true;
+    _clearSeedPreviewCache();
+    _renderSeedPreviewStrip('', { hidden: true });
     return;
   }
-  host.hidden = false;
-  host.innerHTML = '<div class="research-seed-preview-loading">Checking seed sources…</div>';
+  _renderSeedPreviewStrip('<div class="research-seed-preview-loading">Checking seed sources…</div>');
   const reqId = ++_seedPreviewRequest;
   const refs = _seedRefsForApi();
   try {
@@ -554,33 +619,20 @@ async function _refreshSeedPreview() {
     const data = await res.json();
     if (reqId !== _seedPreviewRequest) return;
     const seeds = data.seeds || [];
+    _seedSyncRecommended = !!data.sync_recommended;
+    _setSeedPreviewCache(seeds);
+    _renderSeedChips();
     if (!seeds.length) {
-      host.innerHTML = '<div class="research-seed-preview-empty">No preview — seeds will resolve when the run starts.</div>';
+      _renderSeedPreviewStrip('<div class="research-seed-preview-empty">No preview — seeds will resolve when the run starts.</div>');
       return;
     }
-    const syncBanner = data.sync_recommended
+    const syncBanner = _seedSyncRecommended
       ? '<div class="research-seed-sync-hint">Some seed PDF flags look stale vs Zotero — sync your catalog in Settings → Search.</div>'
       : '';
-    host.innerHTML = `${syncBanner}<div class="research-seed-preview-heading">Before you run</div>
-      <ul class="research-seed-preview-list">${seeds.map((s) => {
-        const tierCls = _SEED_TIER_CLASS[s.sourcing_tier] || 'tier-unknown';
-        const col = (s.collection_paths || []).slice(0, 2).join(', ');
-        const bits = [
-          s.doi ? `DOI ${s.doi}` : '',
-          col ? col : '',
-          s.live_has_pdf === true ? 'PDF on Zotero' : (s.has_pdf ? 'PDF in library' : ''),
-        ].filter(Boolean);
-        return `<li class="research-seed-preview-item">
-          <div class="research-seed-preview-title">${_esc(s.title || s.ref || 'Paper')}</div>
-          <div class="research-seed-preview-meta">${_esc(bits.join(' · ') || 'No catalog metadata')}</div>
-          <span class="research-seed-preview-tier ${tierCls}">${_esc(s.sourcing_label || s.sourcing_tier || 'Unknown')}</span>
-          ${s.in_catalog === false ? '<span class="research-seed-preview-note">Not in catalog — sync Zotero or resolves at run</span>' : ''}
-          ${s.catalog_stale ? '<span class="research-seed-preview-note research-seed-preview-note--sync">Catalog out of date — sync Zotero in Settings</span>' : ''}
-        </li>`;
-      }).join('')}</ul>`;
+    _renderSeedPreviewStrip(syncBanner, { hidden: !syncBanner });
   } catch {
     if (reqId !== _seedPreviewRequest) return;
-    host.innerHTML = '<div class="research-seed-preview-empty">Could not load preview — seeds still run normally.</div>';
+    _renderSeedPreviewStrip('<div class="research-seed-preview-empty">Could not load preview — seeds still run normally.</div>');
   }
 }
 

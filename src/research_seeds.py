@@ -65,8 +65,12 @@ def _preview_from_catalog_row(row: dict, *, user_id: str = "") -> dict:
     finding = catalog_row_to_finding(row, user_id, pdf_text="", zotero_source="catalog")
     annotate_finding_sourcing(finding)
     tier = (finding.get("sourcing_tier") or "unknown").strip()
-    if row.get("has_pdf") and tier in ("retrieval_failed", "unsourced", "metadata_only"):
-        tier = "abstract_only" if (row.get("abstract") or "").strip() else "retrieval_failed"
+    # Preview does not extract PDFs. If the catalog says a PDF exists, forecast
+    # full-text-likely at run time instead of grading the empty pdf_text as abstract-only.
+    if row.get("has_pdf"):
+        tier = "adequate"
+    elif tier in ("retrieval_failed", "unsourced", "metadata_only"):
+        tier = "abstract_only" if (row.get("abstract") or "").strip() else tier
     key = (row.get("zotero_key") or "").strip().upper()
     doi = (row.get("doi") or finding.get("doi_or_id") or "").strip()
     return {
@@ -123,10 +127,13 @@ def _annotate_catalog_staleness(previews: List[dict], owner: str) -> None:
         preview["catalog_stale"] = live != catalog_pdf
         if live and not catalog_pdf:
             preview["has_pdf"] = True
-            preview["sourcing_label"] = _TIER_PREVIEW_LABELS.get(
-                preview.get("sourcing_tier") or "adequate",
-                preview.get("sourcing_label") or "Full text likely",
-            )
+            preview["sourcing_tier"] = "adequate"
+            preview["sourcing_label"] = _TIER_PREVIEW_LABELS["adequate"]
+        elif not live and catalog_pdf:
+            preview["has_pdf"] = False
+            if (preview.get("sourcing_tier") or "") == "adequate":
+                preview["sourcing_tier"] = "retrieval_failed"
+                preview["sourcing_label"] = _TIER_PREVIEW_LABELS["retrieval_failed"]
 
 
 def preview_seed_refs(owner: str, refs: List[str]) -> List[dict]:
