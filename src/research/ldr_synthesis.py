@@ -178,7 +178,7 @@ async def _build_pre_final_context(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=2048,
-            timeout=90,
+            timeout=180,
         )
         outline = format_thematic_outline(raw) or heuristic_thematic_outline(registry)
     except Exception as exc:
@@ -297,7 +297,8 @@ async def synthesize_academic_report(
             messages=msgs,
             temperature=0.3,
             max_tokens=max_report_tokens,
-            timeout=180,
+            # Slow local models routinely need >3 min for long reports.
+            timeout=600,
         )
         if (
             len(result.split()) < expand_threshold
@@ -314,7 +315,7 @@ async def synthesize_academic_report(
                 ],
                 temperature=0.4,
                 max_tokens=max_report_tokens,
-                timeout=180,
+                timeout=600,
             )
             if len(expanded.split()) > len(result.split()):
                 result = expanded

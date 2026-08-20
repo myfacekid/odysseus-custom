@@ -92,14 +92,14 @@ DEFAULT_SETTINGS = {
     # values let the model reference more of the gathered papers (at the cost of
     # a larger synthesis prompt). Bounded to [1, 50] in research_utils.
     "research_synthesis_window": 20,
-    # Hard wall-clock cap on a single deep-research run. The previous 600s
-    # (10 min) default cut off slow local / edge LLMs mid-synthesis; 1800s
-    # (30 min) is comfortable for most local setups while still bounding
-    # runaway jobs. Set to 0 to disable the cap entirely (unlimited) — only
-    # for very long deep-research runs, since a stalled job then runs an
-    # unbounded model/API bill. Other values are bounded to [60, 86400].
-    # Tune via Settings or by editing data/settings.json.
-    "research_run_timeout_seconds": 1800,
+    # Hard wall-clock cap on a single deep-research run. Earlier defaults
+    # (600s, then 1800s) still cut off slow local / edge LLMs mid-synthesis;
+    # 3600s (1 hour) leaves room for long gathers + report generation while
+    # still bounding runaway jobs. Set to 0 to disable the cap entirely
+    # (unlimited) — only for very long deep-research runs, since a stalled
+    # job then runs an unbounded model/API bill. Other values are bounded
+    # to [60, 86400]. Tune via Settings or by editing data/settings.json.
+    "research_run_timeout_seconds": 3600,
     # Deep research backend: "ldr" (LangGraph via local-deep-research).
     "research_engine": "ldr",
     # Academic API keys for LDR engine layer (Phase L1).
