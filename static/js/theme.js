@@ -4,7 +4,7 @@
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import { initColorPickers, attachColorPicker } from './colorPicker.js';
-import { hexToRgb } from './color/hex.js';
+import { hexToRgb, stampShadowInks } from './color/hex.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 
@@ -375,6 +375,12 @@ export function applyColors(colors) {
   s.setProperty('--panel', colors.panel);
   s.setProperty('--border', colors.border);
   if (colors.red) s.setProperty('--red', colors.red);
+
+  // Raised-button drop: translucent black, not --fg (glow) or an opaque
+  // panel shade (second plate). Alpha follows page luminance.
+  const stamp = stampShadowInks(colors.bg || colors.panel);
+  if (stamp.ink) s.setProperty('--shadow-ink', stamp.ink);
+  if (stamp.press) s.setProperty('--shadow-press-ink', stamp.press);
 
   // Derive and apply syntax highlighting colors
   const syn = deriveSyntaxColors(colors);

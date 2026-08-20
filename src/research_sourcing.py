@@ -70,12 +70,55 @@ def _content_mostly_title(title: str, body: str) -> bool:
     return False
 
 
+def collapse_prompt_body_text(text: str) -> str:
+    """Collapse visual PDF line breaks while keeping paragraph gaps."""
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    paragraphs = re.split(r"\n\s*\n", text)
+    collapsed = []
+    for para in paragraphs:
+        line = re.sub(r"[ \t]*\n[ \t]*", " ", para)
+        line = re.sub(r" {2,}", " ", line).strip()
+        if line:
+            collapsed.append(line)
+    return "\n\n".join(collapsed)
+
+
+def _is_title_page_summary_stub(summary: str, evidence: str) -> bool:
+    """True when summary is a short prefix of PDF/extracted evidence, not an abstract."""
+    summary = (summary or "").strip()
+    evidence = (evidence or "").strip()
+    if not summary or not evidence:
+        return False
+    if evidence.startswith(summary) and len(evidence) > len(summary) + 80:
+        return True
+    if summary == evidence[: len(summary)] and len(summary) <= 800 and len(evidence) > 900:
+        return True
+    return False
+
+
 def _best_body_text(finding: dict) -> str:
     for key in ("evidence", "abstract", "summary"):
         text = (finding.get(key) or "").strip()
         if text:
             return text
     return ""
+
+
+def _adequate_prompt_body(finding: dict) -> str:
+    """Prefer abstract/full evidence over a title-page summary stub."""
+    abstract = (finding.get("abstract") or "").strip()
+    evidence = collapse_prompt_body_text((finding.get("evidence") or "").strip())
+    summary = collapse_prompt_body_text((finding.get("summary") or "").strip())
+    candidates = [t for t in (abstract, evidence) if t]
+    body = max(candidates, key=len) if candidates else ""
+    if not body:
+        return summary or "(no content)"
+    if summary and not _is_title_page_summary_stub(summary, evidence or body):
+        if len(summary) > len(body):
+            body = summary
+    return body or "(no content)"
 
 
 def assess_finding_sourcing(finding: dict) -> Tuple[str, str, bool]:
@@ -219,9 +262,8 @@ def format_finding_content_for_prompt(finding: dict) -> str:
     year = (finding.get("year") or "").strip()
 
     if tier == SOURCING_TIER_ADEQUATE:
-        summary = (finding.get("summary") or "").strip()
-        evidence = (finding.get("evidence") or "").strip()
-        return summary if summary else (evidence[:2500] if evidence else "(no content)")
+        body = _adequate_prompt_body(finding)
+        return body[:2500] if body else "(no content)"
 
     if tier == SOURCING_TIER_ABSTRACT_ONLY:
         body = _best_body_text(finding)

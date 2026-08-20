@@ -378,18 +378,31 @@ class ResearchHandler:
             except asyncio.TimeoutError:
                 logger.error(f"Research hard timeout ({hard_timeout}s) for session {session_id}")
                 entry["status"] = "error"
-                # If we have partial results, save what we have
                 researcher = entry.get("researcher")
-                if researcher and researcher.evolving_report:
+                registry = getattr(researcher, "evidence_registry", None) if researcher else None
+                from src.research.ldr_synthesis import persistable_synthesis_report
+
+                saved = persistable_synthesis_report(
+                    (getattr(researcher, "evolving_report", None) or "") if researcher else "",
+                    question=query,
+                    registry=registry,
+                    findings=getattr(researcher, "findings", None) if researcher else None,
+                    research_mode=entry.get("research_mode") or "literature_review",
+                )
+                if saved:
+                    entry["raw_report"] = strip_thinking(saved)
                     entry["result"] = self._format_research_report(
-                        query, researcher.evolving_report,
-                        researcher.get_stats(), hard_timeout,
+                        query, saved,
+                        researcher.get_stats() if researcher else {},
+                        hard_timeout,
                     )
                     entry["status"] = "done"
+                    if researcher and getattr(researcher, "evidence_registry", None):
+                        entry["evidence_registry"] = researcher.evidence_registry.to_dict()
                     self._save_result(session_id, entry)
                     try:
-                        sources = self._extract_sources(researcher.findings) if researcher.findings else []
-                        findings = self._extract_raw_findings(researcher.findings) if researcher.findings else []
+                        sources = self._extract_sources(researcher.findings) if researcher and researcher.findings else []
+                        findings = self._extract_raw_findings(researcher.findings) if researcher and researcher.findings else []
                         _guarded_complete(session_id, entry["result"], sources, findings)
                     except Exception as e:
                         logger.warning(f"on_complete callback failed in timeout branch: {e}")
@@ -407,6 +420,22 @@ class ResearchHandler:
         task = asyncio.create_task(_run())
         entry["task"] = task
         return {"session_id": session_id, "status": "running", "query": query}
+
+    async def run_and_wait(self, session_id: str, **kwargs) -> str:
+        """Start research and await the background task. Raises on error/cancel."""
+        self.start_research(session_id, **kwargs)
+        entry = self._active_tasks.get(session_id) or {}
+        bg = entry.get("task")
+        if bg is not None:
+            await bg
+        entry = self._active_tasks.get(session_id) or {}
+        status = entry.get("status")
+        result = entry.get("result") or ""
+        if status == "cancelled":
+            raise asyncio.CancelledError
+        if status == "error":
+            raise RuntimeError(result or "Research failed")
+        return result
 
     def get_status(self, session_id: str) -> Optional[dict]:
         """Get current research status for a session."""

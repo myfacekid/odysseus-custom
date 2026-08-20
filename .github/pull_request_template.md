@@ -40,11 +40,11 @@ Fixes #
 
 - [ ] **Screenshot or short clip** of the change in the running app, attached below. Mobile screenshot too if the change affects mobile.
 - [ ] **Style match**: the change uses Nobody's existing visual language. Specifically:
-  - Reuse existing CSS variables (`--red`, `--fg`, `--bg`, `--card`, `--border`, etc.) — do not introduce new color values, font sizes, or spacing units.
-  - Reuse existing button/input/card/border classes. Don't invent parallel styling.
+  - Reuse existing CSS variables (`--red`, `--fg`, `--bg`, `--panel`, `--border`, `--shadow-hard`, `--shadow-press`, `--shadow-ink`, `--radius-tech`, etc.) — do not introduce new color values, font sizes, or spacing units.
+  - Reuse existing button/input/card/border classes (`.btn`, `.admin-btn-sm`, `.confirm-btn`). Labeled actions use the raised stamp (`--shadow-hard` / `--shadow-press`, translucent black `--shadow-ink`, no four-sided hairline); don't invent parallel button CSS.
   - **No Unicode emoji in UI or code.** Use inline SVG (matching the monochrome icon style already in `static/index.html`) or plain text.
-  - Monospaced font (`Fira Code`) for primary UI text. Don't override.
-  - Dark theme is the default; any light-mode work must be wired through the existing theme system, not hard-coded.
+  - Chrome type is Iosevka (`--font-ui`); don't override compact chrome onto another face.
+  - Default paper is light Modus Operandi Tinted; appearance work must be wired through the existing theme system, not hard-coded.
 - [ ] **No new component patterns.** If a similar widget already exists in the app, extend it instead of writing a parallel one.
 - [ ] **I am not an LLM agent submitting a bulk PR.** If you are, please open an issue describing the problem first — bulk auto-generated PRs that don't match the project's visual style are closed on sight, even when the underlying fix is correct.
 

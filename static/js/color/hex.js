@@ -12,3 +12,40 @@ export function hexToRgb(hex) {
   const n = parseInt(h, 16);
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
+
+function _srgbChannelToLin(c) {
+  const x = c / 255;
+  return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+}
+
+/** Relative luminance (WCAG) of a parsed {r,g,b} sRGB triple. */
+export function relativeLuminance(rgb) {
+  if (!rgb) return 0;
+  return 0.2126 * _srgbChannelToLin(rgb.r)
+    + 0.7152 * _srgbChannelToLin(rgb.g)
+    + 0.0722 * _srgbChannelToLin(rgb.b);
+}
+
+/**
+ * Translucent black drop-shadow inks for raised buttons.
+ *
+ * Operandi Tinted's look is 18% black over the paper — a hard offset
+ * drop, not an opaque second plate. Mixing --fg made neon/dark themes
+ * glow; mixing --panel made a solid shade. Always black + alpha.
+ *
+ * `surfaceHex` is the page/panel the shadow falls on. Light surfaces
+ * keep 0.18; darker ones raise alpha so the drop still reads.
+ *
+ * Returns { ink, press } CSS colors, or nulls if `surfaceHex` is invalid.
+ */
+export function stampShadowInks(surfaceHex) {
+  const rgb = hexToRgb(surfaceHex);
+  if (!rgb) return { ink: null, press: null };
+  const L = relativeLuminance(rgb);
+  const alpha = L >= 0.5 ? 0.18 : L >= 0.25 ? 0.28 : L >= 0.12 ? 0.40 : 0.50;
+  const press = Math.round(alpha * (14 / 18) * 1000) / 1000;
+  return {
+    ink: `rgba(0, 0, 0, ${alpha})`,
+    press: `rgba(0, 0, 0, ${press})`,
+  };
+}

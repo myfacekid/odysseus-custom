@@ -82,3 +82,35 @@ def test_parse_retrieval_plan_falls_back_on_empty_json():
     plan = parse_retrieval_plan(None, "RNA folding thermodynamics", [], research_mode="literature_review")
     assert plan.normalized_scope() == "balanced"
     assert plan.search_keywords
+
+
+def test_missing_optional_plan_fields_treats_blank_key_topics_as_unset():
+    from src.research_retrieval_plan import missing_optional_plan_fields, sanitize_approved_plan
+
+    raw = {
+        "search_keywords": ["foldseek structure"],
+        "scope": "balanced",
+        "key_topics": [],
+        "anchor_terms": [],
+    }
+    missing = missing_optional_plan_fields(raw)
+    assert "key_topics" in missing
+    assert "sub_questions" in missing
+    cleaned = sanitize_approved_plan(raw)
+    assert "key_topics" not in cleaned
+    assert cleaned["search_keywords"] == ["foldseek structure"]
+
+
+def test_merge_llm_into_approved_plan_does_not_overwrite_keywords():
+    from src.research_retrieval_plan import merge_llm_into_approved_plan
+
+    approved = {"search_keywords": ["foldseek structure"], "scope": "balanced"}
+    llm = {
+        "search_keywords": ["SHOULD_NOT_WIN"],
+        "key_topics": ["structure representation"],
+        "sub_questions": ["How is structure encoded?"],
+    }
+    merged = merge_llm_into_approved_plan(approved, llm, ["key_topics", "sub_questions"])
+    assert merged["search_keywords"] == ["foldseek structure"]
+    assert merged["key_topics"] == ["structure representation"]
+    assert merged["sub_questions"] == ["How is structure encoded?"]

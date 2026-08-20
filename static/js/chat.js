@@ -291,10 +291,10 @@ import createResearchSynapse from './researchSynapse.js';
     card.innerHTML = `<div><b>Allow ${tool}?</b></div>`
       + (cmd ? `<pre class="tool-approval-cmd"></pre>` : '')
       + `<div class="tool-approval-actions">`
-      + `<button type="button" class="primary" data-dec="approve">Allow</button>`
-      + `<button type="button" data-dec="deny">Deny</button>`
-      + `<button type="button" data-dec="always_session">Always (session)</button>`
-      + `<button type="button" data-dec="always">Always</button>`
+      + `<button type="button" class="btn btn-primary" data-dec="approve">Allow</button>`
+      + `<button type="button" class="btn" data-dec="deny">Deny</button>`
+      + `<button type="button" class="btn" data-dec="always_session">Always (session)</button>`
+      + `<button type="button" class="btn" data-dec="always">Always</button>`
       + `</div>`;
     const pre = card.querySelector('.tool-approval-cmd');
     if (pre) pre.textContent = cmd;

@@ -149,6 +149,7 @@ function _ensureStyles() {
   border: 1px solid var(--border, rgba(127,127,127,0.4));
   background: var(--panel, transparent); color: inherit;
   padding: 7px 14px; font: inherit; font-size: 13px; cursor: pointer; border-radius: 2px;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
 }
 .zotero-save-sheet .confirm-btn-primary {
   background: var(--accent, var(--red, #c44)); color: #fff; border-color: transparent;

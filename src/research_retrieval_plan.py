@@ -192,6 +192,80 @@ def derive_retrieval_plan_fallback(
     )
 
 
+_OPTIONAL_LIST_FIELDS = (
+    "key_topics",
+    "sub_questions",
+    "avoid_topics",
+    "anchor_terms",
+)
+_OPTIONAL_STR_FIELDS = ("success_criteria",)
+
+
+def missing_optional_plan_fields(raw: Optional[Dict[str, Any]]) -> List[str]:
+    """Optional HITL fields that the user left unset (blank means fill later)."""
+    if not raw or not isinstance(raw, dict):
+        return list(_OPTIONAL_LIST_FIELDS) + list(_OPTIONAL_STR_FIELDS)
+    missing: List[str] = []
+    for key in _OPTIONAL_LIST_FIELDS:
+        if not _clean_str_list(raw.get(key)):
+            missing.append(key)
+    for key in _OPTIONAL_STR_FIELDS:
+        if not str(raw.get(key) or "").strip():
+            missing.append(key)
+    return missing
+
+
+def sanitize_approved_plan(raw: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Drop blank optional fields so run-time fill can tell them from user pins."""
+    if not raw or not isinstance(raw, dict):
+        return None
+    out: Dict[str, Any] = {}
+    keywords = _clean_str_list(raw.get("search_keywords"))
+    if keywords:
+        out["search_keywords"] = keywords
+    for key in _OPTIONAL_LIST_FIELDS:
+        cleaned = _clean_str_list(raw.get(key), limit=12 if key == "avoid_topics" else 24)
+        if cleaned:
+            out[key] = cleaned
+    success = str(raw.get("success_criteria") or "").strip()
+    if success:
+        out["success_criteria"] = success
+    scope = str(raw.get("scope") or "").strip().lower()
+    if scope:
+        out["scope"] = scope
+    for key in ("must_stay_close_to_seeds", "foundational_ok"):
+        if key in raw and raw[key] is not None:
+            out[key] = bool(raw[key])
+    expansion = _clean_str_list(raw.get("expansion_queries"), limit=12)
+    if expansion:
+        out["expansion_queries"] = expansion
+    openalex = _clean_str_list(raw.get("openalex_search_queries"))
+    if openalex:
+        out["openalex_search_queries"] = openalex
+    return out or None
+
+
+def merge_llm_into_approved_plan(
+    approved: Dict[str, Any],
+    llm_raw: Optional[Dict[str, Any]],
+    missing: Sequence[str],
+) -> Dict[str, Any]:
+    """Copy only unset optional fields from planner JSON onto the user plan."""
+    merged = dict(approved or {})
+    if not llm_raw or not isinstance(llm_raw, dict) or not missing:
+        return merged
+    for key in missing:
+        if key in _OPTIONAL_STR_FIELDS:
+            val = str(llm_raw.get(key) or "").strip()
+            if val:
+                merged[key] = val
+            continue
+        cleaned = _clean_str_list(llm_raw.get(key), limit=12 if key == "avoid_topics" else 24)
+        if cleaned:
+            merged[key] = cleaned
+    return merged
+
+
 def parse_retrieval_plan(
     raw: Optional[Dict[str, Any]],
     question: str,

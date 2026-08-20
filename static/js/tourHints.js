@@ -88,7 +88,7 @@ function _show(modal) {
         <path class="th-cursor" d="M0 0 L0 9 L2.5 7 L4.5 10 L6 9 L4 6 L7 6 Z" fill="currentColor" />
       </svg>
     </div>
-    <div class="tour-hint-text"><b>Pro tip:</b> drag a window's title bar to a screen edge to snap it, or to the top for fullscreen. Swipe a tool down to minimize it to the dock chip bar.</div>
+    <div class="tour-hint-text"><b>Pro tip:</b> drag a window's title bar to a screen edge to snap it, or to the top for fullscreen. Swipe a tool down to minimize it to the bottom-left minimized strip.</div>
     <button class="tour-hint-dismiss" type="button">Got it</button>
   `;
   document.body.appendChild(pop);
@@ -173,7 +173,7 @@ export function init() {
 
 const NAV_HINT_COPY = {
   desktopRail: '<b>Icon rail:</b> this is the collapsed sidebar — same tools, icons only. Expand the sidebar (☰) any time to see labels.',
-  mobileMenu: '<b>Mobile:</b> open the menu (☰) for chats, projects, and all tools. The icon rail stays hidden unless you minimize a tool to a chip.',
+  mobileMenu: '<b>Mobile:</b> open the menu (☰) for chats, projects, and all tools. The icon rail stays hidden unless you minimize a tool to the corner strip.',
   mobileMini: '<b>Icon rail:</b> this slim strip appears when a minimized tool restores its rail. On phones, prefer the ☰ menu for navigation.',
   connectionsVsLinks: '<b>Connections vs Links:</b> pending proposals are in <b>Connections</b> (Memory tab). Accepted edges appear in <b>Links</b>.',
   libraryVsResearch: '<b>Research vs Library:</b> <b>Research</b> is the compose queue and active runs. Finished reports are in <b>Library</b>, Research tab.',

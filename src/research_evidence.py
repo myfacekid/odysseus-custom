@@ -557,36 +557,70 @@ class EvidenceRegistry:
         repaired = ensure_sourcing_disclosure(repaired, self._sources)
         return repaired.strip(), warnings
 
-    def build_structured_fallback(self, question: str, findings: List[dict]) -> str:
+    def build_structured_fallback(
+        self,
+        question: str,
+        findings: List[dict],
+        research_mode: str = "literature_review",
+    ) -> str:
         """Academic-style fallback when LLM synthesis fails."""
-        self.sync_findings(findings)
-        if not self._sources:
-            return f"# {question}\n\nNo sources were gathered."
+        from src.research_templates import section_headings
 
-        lines = [
-            f"# {question}",
-            "",
-            "## Executive Summary",
-            (
-                "_Automatic synthesis did not complete. This report summarizes "
-                f"{len(self._sources)} source(s) gathered during research._"
-            ),
-            "",
-            "## Key Findings",
-        ]
+        self.sync_findings(findings)
+        title = (question or "Literature synthesis").strip() or "Literature synthesis"
+        if not self._sources:
+            return f"# {title}\n\nNo sources were gathered."
+
+        findings = findings or []
+
+        def _finding_for_src(src: EvidenceSource) -> dict:
+            for item in findings:
+                if item.get("source_id") == src.source_id:
+                    return item
+            for item in findings:
+                if item.get("citation_num") == src.citation_num:
+                    return item
+            return {}
+
+        source_bullets: List[str] = []
         for src in self._sources:
-            f = next(
-                (item for item in findings if item.get("source_id") == src.source_id),
-                {},
-            )
+            f = _finding_for_src(src)
             summary = format_finding_content_for_prompt(f)
             if is_thin_sourcing(src.sourcing_tier):
                 summary = (
                     f"_(Insufficient source text — bibliographic record only.)_ {summary[:800]}"
                 )
             seed_note = " _(seed source)_" if src.is_seed else ""
-            lines.append(f"- **[{src.citation_num}]** {src.title}{seed_note}: {summary}")
-        lines.append("")
+            source_bullets.append(
+                f"- **[{src.citation_num}]** {src.title}{seed_note}: {summary}"
+            )
+
+        body_sections = [s for s in section_headings(research_mode) if s != "References"]
+        source_section_names = (
+            "Key Findings",
+            "Findings Comparison",
+            "Related Work by Theme",
+            "Evidence Addressing Gaps",
+        )
+        source_section = next(
+            (name for name in source_section_names if name in body_sections),
+            body_sections[1] if len(body_sections) > 1 else "Key Findings",
+        )
+        incomplete_note = (
+            "_Automatic synthesis did not complete. This report summarizes "
+            f"{len(self._sources)} source(s) gathered during research._"
+        )
+
+        lines = [f"# {title}", ""]
+        for name in body_sections:
+            lines.append(f"## {name}")
+            if name == "Executive Summary":
+                lines.append(incomplete_note)
+            elif name == source_section:
+                lines.extend(source_bullets)
+            else:
+                lines.append(incomplete_note)
+            lines.append("")
         lines.append(self.build_references_section(None))
         return "\n".join(lines).strip()
 
@@ -626,18 +660,53 @@ class EvidenceRegistry:
             + "\n".join(rows)
         )
 
-    def sourcing_limitations_block(self) -> str:
-        """Sources that must not be discussed substantively."""
-        findings = []
+    def sourcing_limitations_block(self, findings: Optional[List[dict]] = None) -> str:
+        """Sources that must not be discussed substantively.
+
+        When ``findings`` are provided, re-assess tiers from their body text so
+        the limitations block matches the same evidence used as source notes.
+        """
+        from src.research_sourcing import annotate_finding_sourcing, best_finding_body_text
+
+        by_num: Dict[int, dict] = {}
+        by_sid: Dict[str, dict] = {}
+        for f in findings or []:
+            if not isinstance(f, dict):
+                continue
+            num = f.get("citation_num")
+            if isinstance(num, int):
+                by_num[num] = f
+            sid = (f.get("source_id") or "").strip()
+            if sid:
+                by_sid[sid] = f
+
+        rows = []
         for src in self._sources:
-            findings.append({
-                "citation_num": src.citation_num,
-                "title": src.title,
-                "sourcing_tier": src.sourcing_tier,
-                "sourcing_note": src.sourcing_note,
-                "allow_substantive_claims": src.allow_substantive_claims,
-            })
-        return build_sourcing_limitations_block(findings)
+            f = by_num.get(src.citation_num) or by_sid.get(src.source_id)
+            if f:
+                row = dict(f)
+            else:
+                row = {
+                    "title": src.title,
+                    "evidence": src.content_excerpt,
+                    "sourcing_tier": src.sourcing_tier,
+                    "sourcing_note": src.sourcing_note,
+                    "allow_substantive_claims": src.allow_substantive_claims,
+                }
+            row["citation_num"] = src.citation_num
+            row.setdefault("title", src.title)
+            if best_finding_body_text(row):
+                # Re-assess from body so note/tier match source-note evidence.
+                row.pop("sourcing_tier", None)
+                row.pop("sourcing_note", None)
+                row.pop("allow_substantive_claims", None)
+                annotate_finding_sourcing(row)
+            elif not (row.get("sourcing_tier") or "").strip():
+                row["sourcing_tier"] = src.sourcing_tier
+                row["sourcing_note"] = src.sourcing_note
+                row["allow_substantive_claims"] = src.allow_substantive_claims
+            rows.append(row)
+        return build_sourcing_limitations_block(rows)
 
     def to_dict(self) -> dict:
         return {

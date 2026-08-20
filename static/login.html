@@ -107,6 +107,10 @@
     --bg-effect-size: 1;
     --font-ui: 'Iosevka', 'Fira Code', monospace;
     --radius-tech: 2px;
+    --shadow-ink: color-mix(in srgb, black 18%, transparent);
+    --shadow-press-ink: color-mix(in srgb, black 12%, transparent);
+    --shadow-hard: 2px 2px 0 var(--shadow-ink);
+    --shadow-press: 1px 1px 0 var(--shadow-press-ink);
   }
   /* Background patterns — mirrors static/style.css "Background Patterns"
      block so the theme's chosen bgPattern renders on login too. The
@@ -189,15 +193,24 @@
     /* Asymmetric vertical padding nudges the label 1px down while keeping
        the button's total height the same as 0.7rem all-around. */
     padding: calc(0.7rem + 1px) 0.7rem calc(0.7rem - 1px);
-    border: 1px solid color-mix(in srgb, var(--red) 78%, #000); border-radius: var(--radius-tech, 2px);
+    border: 1px solid transparent; border-radius: var(--radius-tech, 2px);
     /* Darken the brand red slightly so #fff label text clears the WCAG AA
        4.5:1 contrast threshold (plain --red #e06c75 only reaches ~3.2:1). */
     background: color-mix(in srgb, var(--red) 78%, #000); color: #fff; font-size: 1rem; cursor: pointer;
     font-weight: 600; font-family: var(--font-ui, 'Iosevka', monospace);
     letter-spacing: 0.06em; text-transform: uppercase;
+    box-shadow: var(--shadow-hard);
+    transition: background 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
   }
   button:hover { background: color-mix(in srgb, var(--red) 66%, black); }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button:active:not(:disabled) {
+    transform: translate(1px, 1px);
+    box-shadow: var(--shadow-press);
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: var(--shadow-hard); }
+  @media (prefers-reduced-motion: reduce) {
+    button:active:not(:disabled) { transform: none; }
+  }
   .error { color: #e55; font-size: 0.85rem; margin-bottom: 0.75rem; display: none; }
   .toggle { text-align: center; margin-top: calc(1rem + 4px); font-size: 0.85rem; color: color-mix(in srgb, var(--fg) 50%, transparent); }
   .toggle a { color: var(--red); cursor: pointer; text-decoration: none; }
@@ -212,8 +225,10 @@
     background: none; border: none; padding: 4px; cursor: pointer;
     color: color-mix(in srgb, var(--fg) 40%, transparent); width: auto;
     display: flex; align-items: center; justify-content: center;
+    box-shadow: none;
   }
   .pw-toggle:hover { color: var(--fg); background: none; }
+  .pw-toggle:active { transform: translateY(calc(-50% + 1px)); box-shadow: none; }
   .pw-toggle svg { display: block; }
   .remember-toggle {
     position: absolute !important; right: 13px; top: 50%; transform: translateY(-50%);
@@ -221,7 +236,9 @@
     width: 14px !important; height: 14px !important; display: flex !important;
     align-items: center; justify-content: center;
     font-size: 0; margin: 0; color: transparent;
+    box-shadow: none;
   }
+  .remember-toggle:active { transform: translateY(-50%); box-shadow: none; }
   /* Visually hide the native checkbox but keep it in the accessibility tree
      and keyboard-focusable (display:none would drop it from tab order). It
      overlays the dot so a click/tap still toggles it. */

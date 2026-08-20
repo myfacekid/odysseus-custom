@@ -168,7 +168,7 @@ function _initHoverCardSpaceToggle() {
   document.addEventListener('pointerover', (e) => {
     _lastPointerClientX = e.clientX;
     _lastPointerClientY = e.clientY;
-    const chip = e.target?.closest?.('.minimized-dock-chip[data-modal-id]');
+    const chip = e.target?.closest?.('.minimized-strip-row[data-modal-id]');
     if (chip) hoveredDockChip = chip;
     const card = e.target?.closest?.(SPACE_CARD_SELECTOR);
     if (card) hoveredToggleCard = card;

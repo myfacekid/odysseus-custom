@@ -56,6 +56,24 @@ def test_catalog_row_to_finding_includes_paper_key():
     assert finding["pdf_extracted"] is True
 
 
+def test_catalog_row_to_finding_does_not_use_pdf_prefix_as_summary():
+    pdf_text = "Journal Header\nAffiliations\n" + ("Results paragraph. " * 80)
+    row = {
+        "zotero_key": "NOPREF",
+        "title": "A real paper",
+        "authors": "Doe",
+        "year": "2024",
+        "has_pdf": True,
+        "url": "https://doi.org/10.1/nopref",
+        "item_type": "journalArticle",
+    }
+    finding = catalog_row_to_finding(row, "1", pdf_text=pdf_text)
+    summary = (finding.get("summary") or "").strip()
+    assert summary != pdf_text[:800]
+    assert not summary.startswith("Journal Header")
+    assert "Results paragraph" in finding["evidence"]
+
+
 def test_research_zotero_uses_catalog_before_live_api(tmp_path, monkeypatch):
     monkeypatch.setattr("src.zotero_catalog.ZOTERO_ROOT", tmp_path / "zotero")
     owner = "tester"
@@ -94,6 +112,10 @@ def test_research_zotero_uses_catalog_before_live_api(tmp_path, monkeypatch):
 
 
 def test_research_zotero_falls_back_to_live_api(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.zotero_catalog.ZOTERO_ROOT", tmp_path / "zotero")
+    owner = "tester"
+
+    class FakeClient:
         def search_items(self, query, limit=10, seed_library=False):
             return [{
                 "key": "LIVE01",

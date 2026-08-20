@@ -9,6 +9,7 @@ from src.zotero_client import (
     _extract_search_terms,
     _title_matches_query,
     _extract_pdf_text,
+    collapse_extracted_pdf_text,
     _is_pdf_attachment,
     _normalize_searchable_item,
     _expand_searchable_items,
@@ -121,6 +122,14 @@ def test_extract_pdf_text_from_bytes():
     text = _extract_pdf_text(r.content)
     assert len(text) > 500
     assert "attention" in text.lower()
+
+
+def test_collapse_extracted_pdf_text_joins_visual_lines():
+    raw = "Attention Is All You Need\nVaswani et al.\n\nAbstract\nWe propose a new network."
+    out = collapse_extracted_pdf_text(raw)
+    assert "Attention Is All You Need Vaswani et al." in out
+    assert "\n\n" in out
+    assert "Abstract We propose a new network." in out
 
 
 def test_format_zotero_search_context():

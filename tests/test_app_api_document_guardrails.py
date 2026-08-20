@@ -11,6 +11,7 @@ from src.tool_implementations import (
     _APP_API_DOC_REDIRECT,
     _cookbook_base_url,
     do_app_api,
+    note_bound_port,
 )
 
 
@@ -146,6 +147,7 @@ def test_document_prefixes_are_blocklisted():
 
 
 def test_cookbook_base_url_honors_ports(monkeypatch):
+    note_bound_port(None)
     monkeypatch.delenv("NOBODY_PORT", raising=False)
     monkeypatch.delenv("APP_PORT", raising=False)
     assert _cookbook_base_url() == "http://localhost:7000"
@@ -155,3 +157,9 @@ def test_cookbook_base_url_honors_ports(monkeypatch):
 
     monkeypatch.setenv("NOBODY_PORT", "7900")
     assert _cookbook_base_url() == "http://localhost:7900"  # NOBODY_PORT wins
+
+    # Actual listen port beats env — Docker APP_PORT is the host mapping,
+    # and native uvicorn --port 7002 often has no APP_PORT at all.
+    note_bound_port(7002)
+    assert _cookbook_base_url() == "http://localhost:7002"
+    note_bound_port(None)

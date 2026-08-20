@@ -3154,8 +3154,8 @@ function initializeEventListeners() {
       if (!modal || !modal.classList || !modal.classList.contains('modal')) return;
       if (modal.id && SKIP_IDS.has(modal.id)) return;
       // Modals managed by the new modalManager (Modals.register) get their own
-      // .modal-minimize-btn and chips via the .minimized-dock-chip system.
-      // Skip them entirely so we don't double-up minimize buttons or chips.
+      // .modal-minimize-btn and rows via the minimized corner strip.
+      // Skip them entirely so we don't double-up minimize buttons or strip rows.
       if (modal.id && window.Modals && window.Modals.isRegistered && window.Modals.isRegistered(modal.id)) return;
       const header = modal.querySelector('.modal-header');
       if (!header) return;
@@ -3251,7 +3251,7 @@ function initializeEventListeners() {
       ['.admin-tabs', '.admin-tab'],
     ];
     const _IGNORE = 'input, textarea, select, [contenteditable="true"], .preset-range, ' +
-      '.note-cl-row, .minimized-dock-chip, canvas';
+      '.note-cl-row, .minimized-strip-row, .minimized-strip-pill, canvas';
     let sx = 0, sy = 0, tracking = false;
 
     document.addEventListener('touchstart', (e) => {

@@ -133,6 +133,13 @@ _TIMEOUT_EXEMPT_PREFIXES = (
 
 class _RequestTimeoutMiddleware(_BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        try:
+            server = request.scope.get("server") if hasattr(request, "scope") else None
+            if server and len(server) >= 2 and server[1]:
+                from src.tool_implementations import note_bound_port
+                note_bound_port(server[1])
+        except Exception:
+            pass
         path = request.url.path or ""
         if any(path.startswith(p) for p in _TIMEOUT_EXEMPT_PREFIXES):
             return await call_next(request)
@@ -621,7 +628,7 @@ app.include_router(setup_gallery_routes())
 
 # Scheduled tasks + event bus
 from src.task_scheduler import TaskScheduler
-task_scheduler = TaskScheduler(session_manager)
+task_scheduler = TaskScheduler(session_manager, research_handler=research_handler)
 from src.event_bus import set_task_scheduler
 set_task_scheduler(task_scheduler)
 from routes.task_routes import setup_task_routes

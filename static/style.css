@@ -86,7 +86,13 @@
   --radius-none: 0;
   --radius-tech: 2px;
   --border-grid: #D0D7DE;
-  --shadow-hard: 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent);
+  /* Hard 2px drop — translucent black over the paper, same as Operandi
+     Tinted. Do not tint with --fg (glows on dark/neon) or --panel (reads
+     as a second solid plate). applyColors() raises alpha on dark pages. */
+  --shadow-ink: color-mix(in srgb, black 18%, transparent);
+  --shadow-press-ink: color-mix(in srgb, black 12%, transparent);
+  --shadow-hard: 2px 2px 0 var(--shadow-ink);
+  --shadow-press: 1px 1px 0 var(--shadow-press-ink);
   --tracking-label: 0.06em;
 
   /* Glass window surfaces — theme bg patterns/canvases show through */
@@ -209,6 +215,9 @@ body {
  * Theme --font-family is for reading/content. Compact chrome (uppercase
  * tracked labels, fixed-height toolbars, mode toggles) stays on --font-ui
  * so wider serif/sans theme fonts cannot overflow button boxes.
+ *
+ * Labeled actions are raised stamps: --shadow-hard at rest, --shadow-press
+ * plus a 1px translate on :active. Ghost icon chrome stays flat.
  */
 button,
 input[type="button"],
@@ -230,9 +239,11 @@ select {
   justify-content: center;
   gap: 6px;
   padding: 4px 10px;
-  border: 1px solid var(--accent, var(--red));
+  /* Transparent stroke — a 4-sided border reads as lines on the lit
+     (top/left) edges. The raise is the bottom-right drop only. */
+  border: 1px solid transparent;
   border-radius: var(--radius-tech, 2px);
-  background: transparent;
+  background: var(--panel);
   color: var(--fg);
   font-family: var(--font-ui, 'Iosevka', monospace);
   font-size: 11px;
@@ -240,12 +251,12 @@ select {
   letter-spacing: var(--tracking-label, 0.06em);
   text-transform: uppercase;
   cursor: pointer;
-  box-shadow: none;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  box-shadow: var(--shadow-hard, 2px 2px 0 var(--shadow-ink));
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -254,7 +265,8 @@ select {
 .confirm-btn:hover,
 .memory-toolbar-btn:hover,
 .theme-io-btn:hover {
-  background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
+  background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+  border-color: transparent;
 }
 .btn:focus-visible,
 .admin-btn-sm:focus-visible,
@@ -273,7 +285,7 @@ select {
 .admin-btn-add,
 .confirm-btn-primary {
   background: var(--accent, var(--red));
-  border-color: var(--accent, var(--red));
+  border-color: transparent;
   color: var(--bg);
   font-weight: 600;
 }
@@ -281,7 +293,7 @@ select {
 .admin-btn-add:hover,
 .confirm-btn-primary:hover {
   background: color-mix(in srgb, var(--accent, var(--red)) 88%, var(--fg));
-  border-color: color-mix(in srgb, var(--accent, var(--red)) 88%, var(--fg));
+  border-color: transparent;
   color: var(--bg);
   filter: none;
 }
@@ -289,8 +301,8 @@ select {
 .admin-btn-delete,
 .confirm-btn-danger,
 .memory-toolbar-btn.danger {
-  background: transparent;
-  border-color: var(--color-error);
+  background: var(--panel);
+  border-color: transparent;
   color: var(--color-error);
 }
 .btn-danger:hover,
@@ -298,13 +310,13 @@ select {
 .confirm-btn-danger:hover,
 .memory-toolbar-btn.danger:hover {
   background: var(--color-error);
-  border-color: var(--color-error);
+  border-color: transparent;
   color: #fff;
 }
 .btn-secondary,
 .confirm-btn-secondary,
 .admin-btn-sm {
-  border-color: var(--border);
+  border-color: transparent;
   background: var(--panel);
   color: var(--fg);
 }
@@ -312,19 +324,114 @@ select {
 .confirm-btn-secondary:hover,
 .admin-btn-sm:hover {
   background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
-  border-color: var(--accent, var(--red));
+  border-color: transparent;
 }
 .memory-toolbar-btn.active {
-  background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
-  border-color: var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
+  border-color: transparent;
   color: var(--accent, var(--red));
 }
 .btn:disabled,
 .admin-btn-add:disabled,
 .admin-btn-sm:disabled,
-.memory-toolbar-btn:disabled {
+.admin-btn-delete:disabled,
+.confirm-btn:disabled,
+.memory-toolbar-btn:disabled,
+.theme-io-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+}
+
+/* Raised stamp press — plate seats 1px into the paper. */
+.btn:active:not(:disabled),
+.admin-btn-sm:active:not(:disabled),
+.admin-btn-add:active:not(:disabled),
+.admin-btn-delete:active:not(:disabled),
+.confirm-btn:active:not(:disabled),
+.memory-toolbar-btn:active:not(:disabled),
+.theme-io-btn:active:not(:disabled),
+.project-empty-btn:active:not(:disabled),
+.project-chip-menu-item:active:not(:disabled),
+.view-report-btn:active:not(:disabled),
+.send-btn:active:not(:disabled):not(.send-pending),
+.ge-btn:active:not(:disabled):not(.ge-mask-vis-btn):not(.ge-inpaint-mode-btn):not(.ge-wand-mode-btn),
+.tool-approval-actions button:active:not(:disabled),
+.input-icon-btn:active:not(:disabled),
+.overflow-menu-item:active:not(:disabled),
+.doc-md-toolbar button:active:not(:disabled),
+.doclib-toolbar-btn:active:not(:disabled),
+.diff-toolbar-btn:active:not(:disabled),
+.project-workspace-icon-btn:active:not(:disabled),
+.icon-rail-btn:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: var(--shadow-press, 1px 1px 0 var(--shadow-press-ink, color-mix(in srgb, black 12%, transparent)));
+}
+#sidebar-search-btn:active > svg,
+#sidebar-new-chat-btn:active > svg,
+#sidebar-new-project-btn:active > svg,
+#tools-section .list-item:active > svg:first-of-type,
+.section-header-flex:active .section-icon,
+.session-item:active .session-icon {
+  transform: translate(1px, 1px);
+  box-shadow: var(--shadow-press, 1px 1px 0 var(--shadow-press-ink, color-mix(in srgb, black 12%, transparent)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn:active:not(:disabled),
+  .admin-btn-sm:active:not(:disabled),
+  .admin-btn-add:active:not(:disabled),
+  .admin-btn-delete:active:not(:disabled),
+  .confirm-btn:active:not(:disabled),
+  .memory-toolbar-btn:active:not(:disabled),
+  .theme-io-btn:active:not(:disabled),
+  .project-empty-btn:active:not(:disabled),
+  .project-chip-menu-item:active:not(:disabled),
+  .view-report-btn:active:not(:disabled),
+  .send-btn:active:not(:disabled):not(.send-pending),
+  .ge-btn:active:not(:disabled):not(.ge-mask-vis-btn):not(.ge-inpaint-mode-btn):not(.ge-wand-mode-btn),
+  .tool-approval-actions button:active:not(:disabled),
+  .input-icon-btn:active:not(:disabled),
+  .overflow-menu-item:active:not(:disabled),
+  .doc-md-toolbar button:active:not(:disabled),
+  .doclib-toolbar-btn:active:not(:disabled),
+  .diff-toolbar-btn:active:not(:disabled),
+  .project-workspace-icon-btn:active:not(:disabled),
+  .icon-rail-btn:active:not(:disabled),
+  #sidebar-search-btn:active > svg,
+  #sidebar-new-chat-btn:active > svg,
+  #sidebar-new-project-btn:active > svg,
+  #tools-section .list-item:active > svg:first-of-type,
+  .section-header-flex:active .section-icon,
+  .session-item:active .session-icon {
+    transform: none;
+  }
+}
+
+/* Join a divider / slate — square the open edge. Isolated buttons stay symmetric. */
+.btn-flush-end {
+  border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
+}
+.btn-flush-start {
+  border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0;
+}
+
+/* Stacked choice plates — same 4px column as the project slate. */
+.btn-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+.btn-stack > .btn,
+.btn-stack > .confirm-btn,
+.btn-stack > .admin-btn-sm,
+.btn-stack > .admin-btn-add,
+.btn-stack > .admin-btn-delete,
+.btn-stack > .project-empty-btn {
+  width: 100%;
+  justify-content: center;
 }
 
 .badge,
@@ -710,18 +817,17 @@ body.bg-pattern-fog {
     .sidebar {
       width: 240px;
       background: var(--sidebar-bg, var(--panel));
-      border-right: 1px solid var(--border);
+      border: none;
+      box-shadow: 2px 0 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
       transition: width 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
       display: flex;
       flex-direction: column;
       flex-shrink: 0;
-      overflow: hidden;
+      overflow: visible;
       min-height: 0;
       margin: 0;
       padding: 0;
-      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
       backdrop-filter: blur(10px);
-      border: 1px solid color-mix(in srgb, var(--fg) 11%, transparent);
       position: relative;
       /* Above project slate (z-index 18) so the menu slides out from under the toolbar */
       z-index: 25;
@@ -753,7 +859,8 @@ body.bg-pattern-fog {
       order: 2;
       margin: 0;
       border-right: none;
-      border-left: 1px solid var(--border);
+      border-left: none;
+      box-shadow: -2px 0 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
     }
     .sidebar.hidden {
       /* !important so it beats the inline width init.js restores from storage —
@@ -849,12 +956,15 @@ body.bg-pattern-fog {
       display: none;
     }
 
-    /* Sticky sidebar header — hamburger · Nobody · project chip toolbar row */
+    /* Sticky sidebar header — row 1: hamburger clearance · Nobody; row 2: project chip */
     .sidebar-header {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
+      align-content: flex-start;
       justify-content: flex-start;
       gap: 8px;
+      row-gap: 8px;
       padding: 12px 10px 8px 42px; /* top matches fixed hamburger; left clears it */
       flex-shrink: 0;
       min-height: 50px;
@@ -875,7 +985,6 @@ body.bg-pattern-fog {
       scrollbar-width: none;
       display: flex;
       flex-direction: column;
-      gap: 0;
       padding: 10px 8px 8px;
       min-height: 0;
       transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
@@ -883,10 +992,13 @@ body.bg-pattern-fog {
     .sidebar-brand {
       display: flex;
       align-items: center;
-      flex-shrink: 0;
+      flex: 1 1 auto;
+      min-width: 0;
       height: 30px;
       min-height: 30px;
       padding: 0;
+      /* Fill leftover width on the logo row (chip sits on the row below) */
+      width: 100%;
     }
     .sidebar-brand-title {
       font-size: 1rem;
@@ -899,19 +1011,173 @@ body.bg-pattern-fog {
     .sidebar-sep {
       display: none;
     }
+    /* Sidebar chrome rows — stamp lives on the icon well only (matches
+       .icon-rail-btn color + shadow). The row itself stays flat so expanded
+       and collapsed chrome read as the same icon language. Order: Search,
+       New Chat (mirrors the icon rail). */
     #sidebar-search-btn,
-    #sidebar-new-chat-btn {
+    #sidebar-new-chat-btn,
+    #sidebar-new-project-btn,
+    #tools-section .list-item,
+    .section-header-flex,
+    #session-list .session-item {
+      margin: 0 0 4px;
+      height: 34px;
+      min-height: 34px;
+      padding: 0 8px;
+      gap: 10px;
+      box-sizing: border-box;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      transition: background 0.12s ease;
+    }
+    /* Stamped icon wells — fixed 24×24 plate; glyph centered inside.
+       Direct SVGs use equal padding so the viewBox sits in the middle;
+       session wells are flex containers holding a nested glyph. */
+    #sidebar-search-btn > svg,
+    #sidebar-new-chat-btn > svg,
+    #sidebar-new-project-btn > svg,
+    #tools-section .list-item > svg:first-of-type,
+    .section-header-flex .section-icon {
+      box-sizing: border-box;
+      width: 24px !important;
+      height: 24px !important;
+      padding: 5px;
       margin: 0;
-      padding: 8px 8px;
+      flex-shrink: 0;
+      display: block;
+      border-radius: var(--radius-tech, 2px);
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      color: var(--accent, var(--red));
+      stroke: var(--accent, var(--red));
+      opacity: 1 !important;
+      position: relative;
+      left: 0 !important;
+      box-shadow: var(--shadow-hard, 2px 2px 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent)));
+      transition: background 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
+    }
+    #session-list .session-item .session-icon {
+      box-sizing: border-box;
+      width: 24px !important;
+      height: 24px !important;
+      padding: 0;
+      margin: 0;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 0;
+      border-radius: var(--radius-tech, 2px);
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      color: var(--accent, var(--red));
+      stroke: var(--accent, var(--red));
+      opacity: 1 !important;
+      position: relative;
+      left: 0 !important;
+      box-shadow: var(--shadow-hard, 2px 2px 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent)));
+      transition: background 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
+    }
+    #session-list .session-item .session-icon svg {
+      width: 14px;
+      height: 14px;
+      display: block;
+      flex-shrink: 0;
+      margin: 0;
+    }
+    #sidebar-search-btn .grow,
+    #sidebar-new-chat-btn .grow,
+    #sidebar-new-project-btn .grow,
+    #tools-section .list-item .grow,
+    .section-header-flex .section-title,
+    .section-header-flex h4,
+    #session-list .session-item .grow {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      line-height: 1.25;
+      position: relative;
+      left: 0 !important;
+      min-width: 0;
+    }
+    .section-header-flex .section-title,
+    .section-header-flex h4 {
+      font-weight: 600;
+    }
+    /* Right-edge meta balances the row: shortcut chip on Search, open-
+       chevron on the other action / section rows. */
+    #sidebar-new-chat-btn::after,
+    #sidebar-new-project-btn::after,
+    #tools-section .list-item:not(:has(.list-item-plus-btn))::after,
+    .section-header-flex:not(:has(.section-header-btn))::after {
+      content: '›';
+      flex-shrink: 0;
+      margin-left: auto;
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 500;
+      line-height: 1;
+      color: var(--fg);
+      opacity: 0.32;
+      pointer-events: none;
+    }
+    .section.collapsed .section-header-flex:not(:has(.section-header-btn))::after {
+      transform: rotate(90deg);
+    }
+    #sidebar-search-btn::after {
+      content: 'Ctrl+K';
+      flex-shrink: 0;
+      margin-left: auto;
+      padding: 3px 6px;
+      border-radius: var(--radius-tech, 2px);
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      box-shadow: 1px 1px 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
+      font-family: var(--font-mono, 'Roboto Mono', monospace);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1;
+      color: var(--fg);
+      opacity: 0.55;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    body.is-mac #sidebar-search-btn::after { content: '⌘K'; }
+    #sidebar-new-chat-btn:hover::after,
+    #sidebar-new-project-btn:hover::after,
+    #tools-section .list-item:not(:has(.list-item-plus-btn)):hover::after,
+    .section-header-flex:not(:has(.section-header-btn)):hover::after {
+      opacity: 0.55;
+    }
+    #sidebar-search-btn:hover::after { opacity: 0.75; }
+    #tools-section .list-item:has(.list-item-plus-btn)::after {
+      display: none;
+    }
+    #tools-section .list-item .list-item-plus-btn {
+      margin-left: 4px;
+      height: 24px !important;
+      min-width: 24px !important;
+      padding: 0 6px !important;
+      left: 0;
+      border-radius: var(--radius-tech, 2px);
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      color: var(--accent, var(--red));
+      box-shadow: var(--shadow-hard, 2px 2px 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent)));
+    }
+    #tools-section .list-item .list-item-plus-btn:hover {
+      background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+      color: var(--accent, var(--red));
     }
     #sessions-section {
       margin-top: -1px;
     }
     #tools-section {
       margin-top: 1px;
-    }
-    #tools-section .list-item {
-      padding: 8px 8px;
     }
     .sidebar.right-side .sidebar-header {
       justify-content: flex-end;
@@ -966,7 +1232,8 @@ body.bg-pattern-fog {
       width: 48px;
       flex-shrink: 0;
       background: var(--panel);
-      border-right: 1px solid var(--border);
+      border-right: none;
+      box-shadow: 2px 0 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -1002,13 +1269,18 @@ body.bg-pattern-fog {
       order: 2;
       margin: 0;
       border-right: none;
-      border-left: 1px solid var(--border);
+      border-left: none;
+      box-shadow: -2px 0 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
     }
-    .icon-rail-divider {
-      width: 24px;
-      height: 1px;
-      background: var(--border);
-      margin: 4px 0;
+    .icon-rail-divider,
+    .rail-separator {
+      width: 22px;
+      height: 2px;
+      margin: 6px auto;
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      box-shadow: var(--shadow-hard, 2px 2px 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent)));
+      border: none;
+      border-radius: 1px;
     }
     /* U6: shared tooltip (static/js/ui/tooltip.js) — used for icon-only
        surfaces like the icon rail. Positioned via JS; starts hidden. */
@@ -1044,16 +1316,26 @@ body.bg-pattern-fog {
       width: 34px;
       height: 34px;
       border: 1px solid transparent;
-      background: transparent;
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
       color: var(--accent, var(--red));
       font-size: 16px;
+      line-height: 0;
       border-radius: var(--radius-tech, 2px);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      opacity: 0.5;
-      transition: opacity 0.08s, background 0.08s, border-color 0.08s;
+      padding: 0;
+      opacity: 1;
+      box-shadow: var(--shadow-hard, 2px 2px 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent)));
+      transition: background 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
+    }
+    .icon-rail-btn svg {
+      display: block;
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      flex-shrink: 0;
     }
     .rail-notes-badge {
       position: absolute;
@@ -1109,14 +1391,13 @@ body.bg-pattern-fog {
       font-weight: 600;
     }
     .icon-rail-btn:hover {
-      opacity: 1;
-      background: color-mix(in srgb, var(--accent) 8%, transparent);
-      border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+      background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+      border-color: transparent;
+      color: var(--accent, var(--red));
     }
     .icon-rail-btn.active-section {
-      opacity: 1;
-      background: color-mix(in srgb, var(--accent) 12%, transparent);
-      border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+      background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+      border-color: transparent;
     }
     /* U3 — pending Connections count on Brain icon only (rail + sidebar mirror
        the same nav; the badge rides whichever one is currently visible). */
@@ -1205,17 +1486,21 @@ body.bg-pattern-fog {
       color: var(--fg);
       border: 1px solid var(--fg);
       cursor: pointer;
+      box-sizing: border-box;
       width: 24px;
       height: 24px;
+      min-width: 24px;
+      min-height: 24px;
+      aspect-ratio: 1;
       padding: 0;
       margin-left: 0;
-      margin-right: 4px;
+      margin-right: 2px;
       line-height: 1;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       border-radius: var(--radius-tech, 2px);
-      flex-shrink: 0;
+      flex: 0 0 24px;
       transition: background 0.15s, color 0.15s;
     }
     .modal-minimize-btn:hover { background: var(--fg); color: var(--bg); }
@@ -1230,192 +1515,100 @@ body.bg-pattern-fog {
       transition: left 0.12s ease, top 0.12s ease, width 0.12s ease, height 0.12s ease, opacity 0.12s, transform 0.12s;
     }
     #tile-ghost.visible { opacity: 1; transform: scale(1); }
-    /* Bottom dock — chip per minimized modal */
+    /* Minimized strip — bottom-left corner tray (mirrors #activity-strip) */
     #minimized-dock {
-      position: fixed; bottom: var(--composer-clearance, 12px); left: 50%; transform: translateX(-50%);
-      display: flex; gap: 6px; flex-wrap: wrap;
-      max-width: calc(100vw - 24px);
-      padding: 4px;
-      z-index: 10020;
-      pointer-events: none;
-    }
-    .minimized-dock-chip {
-      pointer-events: auto;
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 8px 6px 10px;
-      background: var(--panel, var(--bg));
-      border: 1px solid var(--border);
-      border-radius: var(--radius-none, 0);
-      color: var(--fg); font-family: inherit; font-size: 12px;
-      cursor: grab; touch-action: none; user-select: none;
-      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
-      transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s, border-color 0.15s;
-      animation: dock-chip-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-    }
-    .minimized-dock-chip:hover {
-      background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel, var(--bg)));
-      border-color: color-mix(in srgb, var(--accent, var(--red)) 40%, var(--border));
-    }
-    .minimized-dock-chip:active { cursor: grabbing; }
-    .minimized-dock-chip.dragging {
-      cursor: grabbing; z-index: 1000;
-      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
-      transition: none;
-      opacity: 0.95;
-    }
-    /* Whole-dock drag (grabbed an edge chip) */
-    #minimized-dock.dock-dragging { cursor: grabbing; }
-    #minimized-dock.dock-dragging .minimized-dock-chip {
-      transition: none;
-      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
-    }
-    /* Subtle visual cue that edge chips drag the whole dock */
-    #minimized-dock .minimized-dock-chip:first-child:not(:only-child),
-    #minimized-dock .minimized-dock-chip:last-child:not(:only-child) {
-      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
-    }
-    .minimized-dock-chip svg { opacity: 0.7; flex-shrink: 0; }
-    .minimized-dock-label { white-space: nowrap; }
-
-    /* Mobile: chips are icon-only. Tap to restore, drag toward
-       the trash zone at top-center to close. touch-action:none lets the
-       pointermove listener claim the gesture instead of the page scroll. */
-    @media (max-width: 768px) {
-      .minimized-dock-chip {
-        width: 40px; height: 40px;
-        padding: 0 !important;
-        border-radius: var(--radius-tech, 2px) !important;
-        justify-content: center;
-        position: relative;
-        overflow: visible;
-        touch-action: none;
-      }
-      .minimized-dock-chip svg { width: 18px; height: 18px; opacity: 0.9; }
-      .minimized-dock-label,
-      .minimized-dock-x { display: none !important; }
-      .minimized-dock-chip.chip-free-drag {
-        box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent)) !important;
-      }
-      /* Long-press hint — chip swells and settles while the detach timer
-         counts down so the user feels feedback before the bubble peels out
-         of the chain. Returns to scale(1) at the end so there's no visual
-         jump when the timer fires and the chip becomes a free-drag puck. */
-      .minimized-dock-chip.chip-long-press {
-        background:
-          radial-gradient(circle at 30% 25%, color-mix(in srgb, #fff 28%, transparent), transparent 36%),
-          linear-gradient(135deg,
-            color-mix(in srgb, var(--accent, var(--red)) 34%, var(--panel, var(--bg))),
-            color-mix(in srgb, #7dd3fc 26%, var(--panel, var(--bg))) 52%,
-            color-mix(in srgb, #f0abfc 22%, var(--panel, var(--bg))));
-        border-color: color-mix(in srgb, var(--accent, var(--red)) 72%, #fff 12%) !important;
-        animation: chip-long-press-pulse 0.82s ease-in-out infinite;
-        z-index: 10030;
-      }
-      .minimized-dock-chip.chip-long-press::before {
-        content: '';
-        position: absolute;
-        inset: -96px;
-        border-radius: inherit;
-        background:
-          radial-gradient(circle,
-            color-mix(in srgb, var(--accent, var(--red)) 42%, transparent) 0 18%,
-            color-mix(in srgb, #7dd3fc 34%, transparent) 34%,
-            color-mix(in srgb, #f0abfc 30%, transparent) 50%,
-            transparent 72%);
-        pointer-events: none;
-        z-index: -1;
-        animation: chip-long-press-ripple 0.82s ease-out infinite;
-      }
-      @keyframes chip-long-press-pulse {
-        0%, 100% { transform: scale(1); }
-        50%      { transform: scale(1.42);
-                   box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent)); }
-      }
-      @keyframes chip-long-press-ripple {
-        0%   { opacity: 0.92; transform: scale(0.08); }
-        72%  { opacity: 0.28; transform: scale(3.6); }
-        100% { opacity: 0; transform: scale(5.4); }
-      }
-      /* Chip whose modal is currently open — accent ring so the user can
-         tell at a glance which floating bubble belongs to the visible
-         modal. Tap it to minimize. */
-      .minimized-dock-chip.chip-active {
-        border-color: var(--accent, var(--red)) !important;
-        box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
-      }
-      .minimized-dock-chip.chip-active svg { opacity: 1; }
-    }
-    /* Magnetic close zone — slides in from the side opposite the chip's
-       starting position so it never overlaps the dock. Always accent
-       color, larger than the chips, snappy spring transition. */
-    #dock-trash-zone {
       position: fixed;
-      left: 50%;
-      width: 88px; height: 88px;
-      border-radius: 50%;
-      background: var(--accent, var(--red, #e53935));
-      color: #fff;
-      display: flex; align-items: center; justify-content: center;
+      left: 16px;
+      right: auto;
+      bottom: 88px;
+      transform: none;
+      z-index: 200;
+      display: none;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 11px;
+      max-width: min(320px, 82vw);
       pointer-events: none;
-      opacity: 0;
-      z-index: 9000;
+    }
+    #minimized-dock.active { display: flex; }
+    #minimized-dock > * { pointer-events: auto; }
+    .minimized-strip-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 11px;
+      border-radius: var(--radius-none, 0);
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border: 1px solid var(--border);
       box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
-      transition: opacity 0.18s ease,
-                  transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
-                  box-shadow 0.18s ease;
+      color: var(--fg);
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: border-color 0.15s ease, background 0.15s ease;
+      font-family: inherit;
+      font-size: 11px;
     }
-    /* Off-screen start position depends on which side the chip is on so
-       the X slides in from the opposite edge with a snappy overshoot. */
-    #dock-trash-zone[data-side="top"]    { transform: translateX(-50%) translateY(-180%) scale(0.7); }
-    #dock-trash-zone[data-side="bottom"] { transform: translateX(-50%) translateY(180%) scale(0.7); }
-    #dock-trash-zone.visible {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0) scale(1);
+    .minimized-strip-pill:hover {
+      border-color: color-mix(in srgb, var(--accent-primary, var(--hl-function, #61afef)) 60%, var(--border));
     }
-    #dock-trash-zone.engaged {
-      transform: translateX(-50%) translateY(0) scale(1.22);
+    .minimized-strip-count { font-weight: 700; }
+    .minimized-strip-label { opacity: 0.75; }
+    .minimized-strip-panel {
+      display: none;
+      flex-direction: column;
+      width: 300px;
+      max-width: 82vw;
+      max-height: 45vh;
+      overflow-y: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-tech, 2px);
       box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+      padding: 6px;
+      gap: 2px;
     }
-    /* Whirlpool ring — fades in when chip is in capture range and spins
-       continuously, then bursts on drop. */
-    #dock-trash-zone .whirlpool {
-      position: absolute; inset: -8px;
-      border-radius: 50%;
-      border: 2px solid transparent;
-      border-top-color: rgba(255,255,255,0.9);
-      border-right-color: rgba(255,255,255,0.55);
-      border-bottom-color: rgba(255,255,255,0.25);
-      opacity: 0;
-      pointer-events: none;
-      animation: whirlpool-spin 0.85s linear infinite;
-      transition: opacity 0.15s ease;
-    }
-    #dock-trash-zone.engaged .whirlpool { opacity: 1; }
-    #dock-trash-zone.dropping .whirlpool {
-      opacity: 1;
-      animation: whirlpool-burst 0.36s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    }
-    @keyframes whirlpool-spin { to { transform: rotate(360deg); } }
-    @keyframes whirlpool-burst {
-      0%   { transform: rotate(0deg) scale(1);   opacity: 1; }
-      60%  { transform: rotate(540deg) scale(1.5); opacity: 0.6; }
-      100% { transform: rotate(900deg) scale(2.2); opacity: 0; }
-    }
-
-    /* Email chip badges:
-       - email-lib-modal chip: "1" badge when an email is expanded
-         inside (JS sets data-has-expanded).
-       - email-reader-* chips: auto-numbered 1, 2, 3 … via CSS counter,
-         so multiple opened-email windows are visually distinguishable. */
-    .minimized-dock-chip[data-modal-id="email-lib-modal"],
-    .minimized-dock-chip[data-modal-id^="email-reader-"] {
+    #minimized-dock.expanded .minimized-strip-panel { display: flex; }
+    .minimized-strip-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border-radius: var(--radius-tech, 2px);
+      cursor: pointer;
+      color: var(--fg);
       position: relative;
     }
-    .minimized-dock-chip[data-modal-id^="email-reader-"][data-tab-num]::after {
+    .minimized-strip-row:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+    .minimized-strip-row-icon {
+      flex: 0 0 auto; width: 16px; height: 16px; opacity: 0.7;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .minimized-strip-row-icon svg { display: block; }
+    .minimized-strip-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    .minimized-strip-row-title {
+      font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .minimized-strip-row-x {
+      flex: 0 0 auto;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px; border-radius: var(--radius-tech, 2px);
+      border: none; background: transparent; color: var(--fg);
+      font-size: 14px; line-height: 1; opacity: 0.4;
+      cursor: pointer; padding: 0;
+      font-family: inherit;
+    }
+    .minimized-strip-row-x:hover {
+      opacity: 1;
+      background: color-mix(in srgb, var(--fg) 12%, transparent);
+    }
+    /* Email row badges (slot number / unread) */
+    .minimized-strip-row[data-modal-id^="email-reader-"][data-tab-num]::after {
       content: attr(data-tab-num);
       position: absolute;
-      top: -4px;
-      right: -4px;
+      top: 2px;
+      right: 28px;
       min-width: 16px;
       height: 16px;
       padding: 0 4px;
@@ -1426,14 +1619,14 @@ body.bg-pattern-fog {
       line-height: 16px;
       text-align: center;
       border-radius: var(--radius-tech, 2px);
-      box-shadow: 0 0 0 2px var(--bg);
+      box-shadow: 0 0 0 2px var(--panel);
       pointer-events: none;
     }
-    .minimized-dock-chip[data-modal-id="email-lib-modal"][data-email-unread-label]::after {
+    .minimized-strip-row[data-modal-id="email-lib-modal"][data-email-unread-label]::after {
       content: attr(data-email-unread-label);
       position: absolute;
-      top: -6px;
-      right: 10px;
+      top: 2px;
+      right: 28px;
       height: 16px;
       padding: 0 6px;
       background: var(--accent, var(--red));
@@ -1443,20 +1636,11 @@ body.bg-pattern-fog {
       line-height: 16px;
       white-space: nowrap;
       border-radius: var(--radius-tech, 2px);
-      box-shadow: 0 0 0 2px var(--bg);
+      box-shadow: 0 0 0 2px var(--panel);
       pointer-events: none;
     }
-
-    .minimized-dock-x {
-      display: inline-flex; align-items: center; justify-content: center;
-      width: 16px; height: 16px; border-radius: 50%;
-      font-size: 14px; line-height: 1; opacity: 0.4;
-      margin-left: 3px;
-    }
-    .minimized-dock-x:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent); }
-    @keyframes dock-chip-in {
-      from { opacity: 0; transform: translateY(20px) scale(0.85); }
-      to   { opacity: 1; transform: translateY(0)   scale(1); }
+    @media (max-width: 768px) {
+      #minimized-dock { bottom: 78px; left: 10px; }
     }
     .rail-new-chat svg { transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
     .rail-new-chat:hover svg { transform: rotate(90deg); }
@@ -1489,7 +1673,6 @@ body.bg-pattern-fog {
     }
     #rail-admin,
     #rail-settings { color: var(--fg); }
-    .rail-separator { width: 20px; height: 1px; background: var(--border); margin: 4px auto; }
     /* Knowledge group (Brain + Links): one visual affordance in the rail while
        remaining two separate panes. Subtle shared pill so the pair reads as a
        single "Knowledge" area without merging the tools. */
@@ -1497,8 +1680,8 @@ body.bg-pattern-fog {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 2px;
-      padding: 3px 2px;
+      gap: 4px;
+      padding: 4px 3px;
       border-radius: var(--radius-tech, 2px);
       background: color-mix(in srgb, var(--fg) 5%, transparent);
     }
@@ -1520,69 +1703,63 @@ body.bg-pattern-fog {
     /* ── Sidebar sections (flat layout) ── */
     .section { padding: 0; border: none; background: none; border-radius: 0; box-shadow: none; margin: 0; }
 
-    /* Section header row — identical sizing to .list-item */
+    /* Section header row — shares 34px icon-stamped chrome with tool rows */
     .section-header-flex {
-      display: flex; align-items: center; gap: 6px;
-      padding: 8px 8px; margin: 1px 0; border-radius: var(--radius-tech, 2px);
+      display: flex; align-items: center; gap: 10px;
+      padding: 0 8px; margin: 0 0 4px; border-radius: var(--radius-tech, 2px);
       background: transparent; cursor: pointer;
-      transition: background 0.08s;
-      height: 29px;
+      transition: background 0.12s ease;
+      height: 34px;
+      min-height: 34px;
       box-sizing: border-box;
     }
-    .section-header-flex:hover { background: color-mix(in srgb, var(--red) 8%, transparent); }
-    .section-header-flex::after { content: none; }
+    .section-header-flex:hover { background: color-mix(in srgb, var(--accent, var(--red)) 6%, transparent); }
     .section-header-flex h4::before { content: none; }
 
-    /* Section title text — same font as .list-item .grow */
+    /* Section title text — same weight as stamped sidebar labels */
     .section-header-flex h4,
     .section-header-flex .section-title {
       flex: 1; cursor: pointer; user-select: none;
-      display: flex; align-items: center; gap: 6px;
+      display: flex; align-items: center; gap: 10px;
       margin: 0; padding: 0; border: none;
-      font-size: 11px; font-weight: 400; font-family: inherit;
-      /* 1.3 (not 1) so Fira Code's tall glyph box isn't vertically clipped in
-         Chromium/Edge — mirrors the .list-item fix. The title is flex-centred
-         in a fixed-height (29px) header, so this adds headroom without reflow. */
-      line-height: 1.3; letter-spacing: 0; text-transform: none;
+      font-size: 13px; font-weight: 600; font-family: inherit;
+      line-height: 1.25; letter-spacing: 0.01em; text-transform: none;
       color: var(--fg);
+      min-width: 0;
     }
     .section-icon,
     .sidebar-action-icon {
       flex-shrink: 0;
       stroke: var(--accent, var(--red));
       position: relative;
-      left: -1px;
+      left: 0;
       color: var(--accent, var(--red));
     }
     /* Knowledge sub-group inside the Tools list: a quiet label + a left bracket
        clustering Brain and Links so they read as one "Knowledge" area (still two
        separate panes). The bracket is a pseudo-element, so it adds no layout
        shift and never misaligns the other tool rows. */
-    /* U7: readable section header instead of a tiny uppercase micro-label. */
+    /* U7: readable category header — slightly larger than the old micro-label,
+       still quieter than the tool rows so Knowledge / Explore / Plan read as
+       groups inside the Tools cascade. */
     .tool-subgroup-label {
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 600;
       letter-spacing: 0.01em;
-      opacity: 0.55;
-      padding: 6px 8px 3px 10px;
+      line-height: 1.25;
+      opacity: 0.62;
+      padding: 8px 8px 4px 10px;
       user-select: none;
     }
     .tool-group-item { position: relative; }
-    .tool-group-item::before {
-      content: '';
-      position: absolute;
-      left: 3px;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: color-mix(in srgb, var(--accent, var(--fg)) 32%, transparent);
-    }
-    .tool-group-item-first::before { top: 2px; border-radius: 2px 2px 0 0; }
-    .tool-group-item-last::before { bottom: 2px; border-radius: 0 0 2px 2px; }
+    .tool-group-item::before { content: none; }
     .tool-subgroup-sep {
-      height: 1px;
-      margin: 7px 10px 5px;
-      background: color-mix(in srgb, var(--border) 55%, transparent);
+      width: 22px;
+      height: 2px;
+      margin: 8px auto 6px;
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      box-shadow: var(--shadow-hard, 2px 2px 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent)));
+      border-radius: 1px;
     }
     /* Shared notification dot for sidebar section titles. Single source of
        truth so chats / email / assistant / future-section dots all sit at
@@ -1678,24 +1855,35 @@ body.bg-pattern-fog {
 
     /* Domino expand: every time a section goes from .collapsed → open
        (toggleCollapse in section-management.js adds .section-just-expanded
-       for ~700ms), the .list-item children cascade in one after another,
-       same feel as the chat input's tools menu. Each row springs in
-       from a tiny offset below + scaled-down, staggered by nth-child. */
-    .section.section-just-expanded :is(.list-item, .models-row) {
+       for ~1.2s), the row children cascade in one after another,
+       same feel as the chat input's tools menu. Tool category labels +
+       separators join the cascade so Tools doesn't flash headers first.
+       Each row springs in from a tiny offset below + scaled-down,
+       staggered by nth-child (counts all siblings, including the header). */
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep) {
       animation: section-domino-in 0.36s cubic-bezier(0.22, 1.61, 0.36, 1) backwards;
     }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(1)  { animation-delay: 0.04s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(2)  { animation-delay: 0.08s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(3)  { animation-delay: 0.12s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(4)  { animation-delay: 0.16s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(5)  { animation-delay: 0.20s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(6)  { animation-delay: 0.24s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(7)  { animation-delay: 0.28s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(8)  { animation-delay: 0.32s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(9)  { animation-delay: 0.36s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(10) { animation-delay: 0.40s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(11) { animation-delay: 0.44s; }
-    .section.section-just-expanded :is(.list-item, .models-row):nth-child(12) { animation-delay: 0.48s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(1)  { animation-delay: 0.04s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(2)  { animation-delay: 0.08s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(3)  { animation-delay: 0.12s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(4)  { animation-delay: 0.16s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(5)  { animation-delay: 0.20s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(6)  { animation-delay: 0.24s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(7)  { animation-delay: 0.28s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(8)  { animation-delay: 0.32s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(9)  { animation-delay: 0.36s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(10) { animation-delay: 0.40s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(11) { animation-delay: 0.44s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(12) { animation-delay: 0.48s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(13) { animation-delay: 0.52s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(14) { animation-delay: 0.56s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(15) { animation-delay: 0.60s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(16) { animation-delay: 0.64s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(17) { animation-delay: 0.68s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(18) { animation-delay: 0.72s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(19) { animation-delay: 0.76s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(20) { animation-delay: 0.80s; }
+    .section.section-just-expanded :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-child(n+21) { animation-delay: 0.84s; }
     @keyframes section-domino-in {
       0%   { opacity: 0; transform: translateY(8px) translateX(-4px) scale(0.92); }
       60%  { opacity: 1; }
@@ -1703,27 +1891,36 @@ body.bg-pattern-fog {
     }
 
     /* Domino collapse: when toggleCollapse goes open → closed, JS adds
-       .section-just-collapsing for ~530ms before flipping in .collapsed.
+       .section-just-collapsing before flipping in .collapsed.
        During that window the items fade/slide DOWN one after another so
        you see them peel off instead of vanishing as a block. Uses
        nth-last-child so the BOTTOM item leaves first and the cascade
        rolls upward — mirrors the "stacked deck" feeling of the open
-       animation reversed. */
-    .section.section-just-collapsing :is(.list-item, .models-row) {
+       animation reversed. Categories leave with their rows. */
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep) {
       animation: section-domino-out 0.22s ease-in forwards;
     }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(1)  { animation-delay: 0.00s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(2)  { animation-delay: 0.025s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(3)  { animation-delay: 0.05s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(4)  { animation-delay: 0.075s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(5)  { animation-delay: 0.10s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(6)  { animation-delay: 0.125s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(7)  { animation-delay: 0.15s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(8)  { animation-delay: 0.175s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(9)  { animation-delay: 0.20s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(10) { animation-delay: 0.225s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(11) { animation-delay: 0.25s; }
-    .section.section-just-collapsing :is(.list-item, .models-row):nth-last-child(12) { animation-delay: 0.275s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(1)  { animation-delay: 0.00s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(2)  { animation-delay: 0.025s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(3)  { animation-delay: 0.05s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(4)  { animation-delay: 0.075s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(5)  { animation-delay: 0.10s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(6)  { animation-delay: 0.125s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(7)  { animation-delay: 0.15s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(8)  { animation-delay: 0.175s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(9)  { animation-delay: 0.20s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(10) { animation-delay: 0.225s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(11) { animation-delay: 0.25s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(12) { animation-delay: 0.275s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(13) { animation-delay: 0.30s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(14) { animation-delay: 0.325s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(15) { animation-delay: 0.35s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(16) { animation-delay: 0.375s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(17) { animation-delay: 0.40s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(18) { animation-delay: 0.425s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(19) { animation-delay: 0.45s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(20) { animation-delay: 0.475s; }
+    .section.section-just-collapsing :is(.list-item, .models-row, .tool-subgroup-label, .tool-subgroup-sep):nth-last-child(n+21) { animation-delay: 0.50s; }
     @keyframes section-domino-out {
       0%   { opacity: 1; transform: translateY(0)   translateX(0)   scale(1); }
       100% { opacity: 0; transform: translateY(6px) translateX(-3px) scale(0.94); }
@@ -1733,7 +1930,22 @@ body.bg-pattern-fog {
     .list-item:hover,
     .models-row:hover {
       background: color-mix(in srgb, var(--red) 8%, transparent);
-      border-color: var(--red);
+    }
+    #sidebar-search-btn:hover,
+    #sidebar-new-chat-btn:hover,
+    #sidebar-new-project-btn:hover,
+    #tools-section .list-item:hover,
+    #session-list .session-item:hover {
+      background: color-mix(in srgb, var(--accent, var(--red)) 6%, transparent);
+      border-color: transparent;
+    }
+    #sidebar-search-btn:hover > svg,
+    #sidebar-new-chat-btn:hover > svg,
+    #sidebar-new-project-btn:hover > svg,
+    #tools-section .list-item:hover > svg:first-of-type,
+    .section-header-flex:hover .section-icon,
+    #session-list .session-item:hover .session-icon {
+      background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
     }
     /* Disabled tool — dimmed to signal its feature is turned off globally */
     .list-item.tool-disabled {
@@ -1792,6 +2004,8 @@ body.bg-pattern-fog {
       opacity: 0.35;
       display: inline-flex;
       align-items: center;
+      justify-content: center;
+      line-height: 0;
     }
     .session-icon.has-docs {
       color: inherit;
@@ -1836,17 +2050,19 @@ body.bg-pattern-fog {
       opacity: 1;
     }
     .list-item.active-session {
-      background: color-mix(in srgb, var(--red) 10%, transparent);
-      border-color: var(--red);
-      border-left-color: var(--red);
+      background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
     }
     .list-item .provider-logo { opacity: 0.4 !important; }
     .list-item:has(.session-star.processing) .provider-logo { opacity: 1 !important; }
     .list-item.stream-complete .provider-logo { opacity: 1 !important; }
     .list-item.active {
-      background: color-mix(in srgb, var(--red) 10%, transparent);
-      border-color: var(--red);
-      border-left-color: var(--red);
+      background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
+    }
+    #tools-section .list-item.active {
+      background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
+    }
+    #session-list .session-item.active-session .session-icon {
+      background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
     }
     /* Only show the red focus ring for keyboard navigation (Tab). Mouse
        clicks shouldn't leave a sticky red outline on a sidebar item. */
@@ -2666,12 +2882,13 @@ body.bg-pattern-fog {
     }
     .chat-input-left {
       display: flex;
-      gap: 4px;
+      gap: 6px;
       align-items: center;
       flex-wrap: nowrap;
-      overflow: hidden;
+      overflow: visible;
       min-width: 0;
       flex: 1;
+      padding-bottom: 2px;
     }
     /* Collapsible buttons shrink away; collapsed ones disappear */
     .chat-input-left > .input-icon-btn {
@@ -2699,32 +2916,35 @@ body.bg-pattern-fog {
       gap: 8px;
       align-items: center;
       flex-shrink: 0;
+      overflow: visible;
+      padding-bottom: 2px;
     }
     .input-icon-btn {
-      background: none;
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
       border: 1px solid transparent;
-      color: var(--fg);
-      opacity: 0.5;
+      color: color-mix(in srgb, var(--fg) 72%, transparent);
+      opacity: 1;
       cursor: pointer;
       padding: 6px;
       border-radius: var(--radius-tech, 2px);
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: opacity 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+      transition: background 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
       position: relative;
     }
     .input-icon-btn:hover {
-      opacity: 0.8;
-      background: color-mix(in srgb, var(--accent) 8%, transparent);
-      border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+      color: var(--fg);
+      background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+      border-color: transparent;
     }
     .input-icon-btn.active,
     .input-icon-btn.expanded {
       opacity: 1;
       color: var(--fg);
-      background: color-mix(in srgb, var(--accent) 10%, transparent);
-      border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+      background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+      border-color: transparent;
     }
     /* While the menu is open the chevron stays in its highlighted state
        — don't run the opacity fade transition so we never flash from
@@ -2771,7 +2991,7 @@ body.bg-pattern-fog {
     /* Document indicator — hidden by default, shown when docs exist */
     #doc-indicator-btn { display: none !important; }
     #doc-indicator-btn.visible { display: inline-flex !important; }
-    /* On mobile, the minimized-dock chip replaces this indicator — keep
+    /* On mobile, the minimized corner strip replaces this indicator — keep
        it hidden regardless of `.visible`. */
     @media (max-width: 768px) {
       #doc-indicator-btn,
@@ -2801,7 +3021,7 @@ body.bg-pattern-fog {
          to white and rendered the send button invisible. */
       background: var(--send-btn-bg, var(--red));
       color: #fff;
-      border: 1px solid var(--send-btn-bg, var(--red));
+      border: 1px solid transparent;
       border-radius: var(--radius-tech, 2px);
       min-width: 32px;
       width: 32px;
@@ -2811,9 +3031,10 @@ body.bg-pattern-fog {
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: background 0.25s, border-color 0.25s, color 0.25s, width 0.3s cubic-bezier(0.34, 1, 0.64, 1), padding 0.3s, border-radius 0.3s, opacity 0.1s;
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+      transition: background 0.25s, border-color 0.25s, color 0.25s, width 0.3s cubic-bezier(0.34, 1, 0.64, 1), padding 0.3s, border-radius 0.3s, opacity 0.1s, box-shadow 0.08s ease, transform 0.08s ease;
       flex-shrink: 0;
-      overflow: hidden;
+      overflow: visible;
     }
     /* Instant feedback while the send handler is spinning up before streaming begins */
     .send-btn.send-pending {
@@ -2941,14 +3162,16 @@ body.bg-pattern-fog {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.7; }
     }
-    /* Mode toggle — Agent / Plan / Chat */
+    /* Mode toggle — joined Agent / Plan / Chat bar, stamped as one plate */
     .mode-toggle {
       display: inline-flex;
       flex-shrink: 0;
       height: 28px;
-      border: 1px solid var(--border);
+      border: 1px solid transparent;
       border-radius: var(--radius-tech, 2px);
-      overflow: hidden;
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+      overflow: visible;
       position: relative;
     }
     .mode-toggle::before {
@@ -2959,10 +3182,11 @@ body.bg-pattern-fog {
       width: var(--mode-pill-w, 33.333%);
       height: 100%;
       background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
-      border-radius: 0;
+      border-radius: var(--radius-tech, 2px);
       transform: translateX(var(--mode-pill-x, 0px));
       transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
       z-index: 0;
+      pointer-events: none;
     }
     .mode-toggle-btn:first-child {
       border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
@@ -2973,6 +3197,7 @@ body.bg-pattern-fog {
     .mode-toggle-btn {
       background: none;
       border: none;
+      box-shadow: none;
       color: color-mix(in srgb, var(--fg) 40%, transparent);
       cursor: pointer;
       padding: 0 10px;
@@ -2997,32 +3222,41 @@ body.bg-pattern-fog {
     .mode-toggle-btn:not(.active):hover {
       color: color-mix(in srgb, var(--fg) 60%, transparent);
     }
-    .mode-toggle-btn:hover {
-      background: none !important;
-      border-color: transparent !important;
-    }
     .mode-toggle-btn.active,
     .mode-toggle-btn.active:hover,
     .mode-toggle-btn.active:focus {
-      color: var(--fg) !important;
-      background: none !important;
-      border-color: transparent !important;
+      color: var(--fg);
+      background: none;
       cursor: default;
     }
-    .mode-toggle-btn + .mode-toggle-btn {
-      border-left: none;
-    }
-    /* Ask / Auto permission toggle (Agent & Plan modes) */
+    /* Ask / Auto — same joined stamped bar */
     .perm-toggle {
       display: inline-flex;
       flex-shrink: 0;
       height: 28px;
-      border: 1px solid var(--border);
+      border: 1px solid transparent;
       border-radius: var(--radius-tech, 2px);
-      overflow: hidden;
-      margin-left: 6px;
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+      overflow: visible;
+      position: relative;
       transform-origin: left center;
     }
+    .perm-toggle::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 50%;
+      height: 100%;
+      background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
+      border-radius: var(--radius-tech, 2px);
+      transform: translateX(0);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .perm-toggle[data-perm="auto"]::before { transform: translateX(100%); }
     .chat-input-right .perm-toggle {
       /* Don't let Ask/Auto crowd the send button on dense layouts */
       max-width: 96px;
@@ -3037,21 +3271,43 @@ body.bg-pattern-fog {
     }
     @media (prefers-reduced-motion: reduce) {
       .perm-toggle.perm-toggle-pop { animation: none; }
+      .mode-toggle::before,
+      .perm-toggle::before { transition: none; }
     }
     .perm-toggle-btn {
       background: none;
       border: none;
+      box-shadow: none;
       color: color-mix(in srgb, var(--fg) 40%, transparent);
       cursor: pointer;
       padding: 0 8px;
       font-size: 11px;
       font-weight: 500;
       font-family: var(--font-ui, 'Iosevka', monospace);
+      letter-spacing: 0;
+      text-transform: uppercase;
+      height: 100%;
+      flex: 1 1 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      z-index: 1;
     }
-    .perm-toggle-btn + .perm-toggle-btn { border-left: 1px solid var(--border); }
-    .perm-toggle-btn.active {
+    .perm-toggle-btn:first-child {
+      border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
+    }
+    .perm-toggle-btn:last-child {
+      border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0;
+    }
+    .perm-toggle-btn:not(.active):hover {
+      color: color-mix(in srgb, var(--fg) 60%, transparent);
+    }
+    .perm-toggle-btn.active,
+    .perm-toggle-btn.active:hover {
       color: var(--fg);
-      background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
+      background: none;
+      cursor: default;
     }
     .steer-queue-chip {
       font-size: 11px;
@@ -3091,20 +3347,29 @@ body.bg-pattern-fog {
     .tool-approval-actions {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
+      gap: 8px;
     }
     .tool-approval-actions button {
+      font-family: var(--font-ui, 'Iosevka', monospace);
       font-size: 11px;
-      padding: 3px 8px;
-      border: 1px solid var(--border);
-      background: var(--bg);
+      font-weight: 500;
+      letter-spacing: var(--tracking-label, 0.06em);
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border: 1px solid transparent;
+      background: var(--panel);
       color: var(--fg);
       border-radius: var(--radius-tech, 2px);
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
       cursor: pointer;
+      transition: background 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
     }
-    .tool-approval-actions button.primary {
-      border-color: var(--accent, var(--red));
-      color: var(--accent, var(--red));
+    .tool-approval-actions button.primary,
+    .tool-approval-actions .btn-primary {
+      background: var(--accent, var(--red));
+      border-color: transparent;
+      color: var(--bg);
+      font-weight: 600;
     }
     .change-tape {
       margin: 8px 0 4px;
@@ -3499,6 +3764,7 @@ body.bg-pattern-fog {
       opacity: 1;
       height: 28px;
       box-sizing: border-box;
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
     }
     .overflow-wrapper {
       position: relative;
@@ -3520,10 +3786,13 @@ body.bg-pattern-fog {
     }
     .overflow-menu {
       position: fixed;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: var(--radius-tech, 2px);
-      padding: 4px;
+      padding: 8px;
       min-width: 170px;
       box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
       z-index: 1000;
@@ -3557,15 +3826,16 @@ body.bg-pattern-fog {
       gap: 8px;
       width: 100%;
       padding: 8px 12px;
-      background: none;
-      border: none;
+      background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+      border: 1px solid transparent;
       color: var(--fg);
-      opacity: 0.7;
+      opacity: 1;
       cursor: pointer;
       border-radius: var(--radius-tech, 2px);
       font-size: 13px;
       font-family: inherit;
-      transition: background 0.15s, opacity 0.15s, color 0.15s;
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+      transition: background 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
       /* Domino-style cascade: each item slides up + fades in with a tiny
          delay after the previous one (set via nth-last-child below so the
          BOTTOM item appears first and the cascade rolls upward — visually
@@ -3609,8 +3879,8 @@ body.bg-pattern-fog {
       100% { opacity: 0; transform: translateY(6px) translateX(-3px) scale(0.92); }
     }
     .overflow-menu-item:hover {
-      opacity: 1;
-      background: color-mix(in srgb, var(--red) 10%, transparent);
+      background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+      border-color: transparent;
     }
     #overflow-attach-btn {
       position: relative;
@@ -3620,8 +3890,9 @@ body.bg-pattern-fog {
       transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
     .overflow-menu-item.active {
-      opacity: 1;
       color: var(--fg);
+      background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
+      border-color: transparent;
     }
     .overflow-active-dot {
       width: 6px;
@@ -4606,7 +4877,7 @@ body.bg-pattern-fog {
         z-index: 200;
         width: 80% !important;
         max-width: 340px;
-        box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+        box-shadow: 2px 0 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
         transition: transform 0.25s ease, opacity 0.25s ease !important;
         opacity: 1 !important;
         overflow: visible !important;
@@ -4622,7 +4893,7 @@ body.bg-pattern-fog {
       }
       .sidebar.right-side {
         left: auto; right: 0;
-        box-shadow: -4px 0 20px rgba(0,0,0,0.5);
+        box-shadow: -2px 0 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
       }
       /* Backdrop behind sidebar */
       #sidebar-backdrop {
@@ -4645,11 +4916,12 @@ body.bg-pattern-fog {
       .sidebar:not(.hidden) {
         overscroll-behavior: auto;
       }
-      /* Sidebar header — align with fixed hamburger triad */
+      /* Sidebar header — logo row + project chip below; align with fixed hamburger */
       .sidebar-header {
         padding: 12px 12px 8px 42px;
         min-height: 50px;
         gap: 8px;
+        row-gap: 8px;
       }
       .sidebar.right-side .sidebar-header {
         padding: 12px 42px 8px 12px;
@@ -4677,8 +4949,7 @@ body.bg-pattern-fog {
       }
       .section-icon,
       .sidebar-action-icon {
-        width: 16px !important;
-        height: 16px !important;
+        /* Mobile stamp wells override size below; don't force bare glyph dims. */
         left: 0 !important;
       }
       /* List items — bigger touch targets, bigger text */
@@ -4695,15 +4966,46 @@ body.bg-pattern-fog {
       /* Search, New Chat & Assistant */
       #sidebar-search-btn,
       #sidebar-new-chat-btn,
+      #sidebar-new-project-btn,
+      #tools-section .list-item,
+      #session-list .session-item,
+      .section-header-flex,
       .sidebar-assistant-entry {
-        padding: 12px 10px !important;
+        padding: 0 10px !important;
+        height: 48px !important;
         min-height: 48px !important;
+        gap: 12px !important;
+        background: transparent !important;
+        box-shadow: none !important;
       }
       #sidebar-search-btn .grow,
       #sidebar-new-chat-btn .grow,
+      #sidebar-new-project-btn .grow,
+      #tools-section .list-item .grow,
+      #session-list .session-item .grow,
       .sidebar-assistant-entry .grow {
         font-size: 14px !important;
         left: 0 !important;
+      }
+      #sidebar-search-btn > svg,
+      #sidebar-new-chat-btn > svg,
+      #sidebar-new-project-btn > svg,
+      #tools-section .list-item > svg:first-of-type,
+      .section-header-flex .section-icon {
+        box-sizing: border-box !important;
+        width: 30px !important;
+        height: 30px !important;
+        padding: 7px !important;
+      }
+      #session-list .session-item .session-icon {
+        box-sizing: border-box !important;
+        width: 30px !important;
+        height: 30px !important;
+        padding: 0 !important;
+      }
+      #session-list .session-item .session-icon svg {
+        width: 16px !important;
+        height: 16px !important;
       }
       /* Section separator — more breathing room */
       .section {
@@ -4750,11 +5052,11 @@ body.bg-pattern-fog {
         top: 0; bottom: 0; left: 0;
         z-index: 200;
         width: 48px;
-        box-shadow: 2px 0 12px rgba(0,0,0,0.4);
+        box-shadow: 2px 0 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
       }
       .icon-rail.mobile-mini.right-side {
         left: auto; right: 0;
-        box-shadow: -2px 0 12px rgba(0,0,0,0.4);
+        box-shadow: -2px 0 0 var(--shadow-ink, color-mix(in srgb, black 18%, transparent));
       }
       /* Chat bubbles — AI stretches full width, user stays compact */
       .msg { font-size: 0.85em; }
@@ -4831,6 +5133,7 @@ body.bg-pattern-fog {
         min-height: 44px;
         width: 44px;
         height: 44px;
+        flex: 0 0 44px;
         font-size: 14px;
       }
       /* Code block buttons — slightly bigger touch targets */
@@ -4892,16 +5195,11 @@ body.bg-pattern-fog {
         height: 34px;
         border-radius: var(--radius-tech, 2px);
       }
-      .mode-toggle::before {
-        border-radius: var(--radius-tech, 2px);
-      }
       .mode-toggle-btn {
         padding: 0 14px;
         font-size: 12px;
         min-height: 34px;
       }
-      #mode-agent-btn { border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px); }
-      #mode-chat-btn { border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0; }
       /* Diff mode — stack toolbar, bigger buttons */
       .diff-toolbar {
         padding: 8px 12px;
@@ -5551,24 +5849,39 @@ body.bg-pattern-fog {
       letter-spacing:-0.03em;
       color:var(--red);
     }
+    /* Title icon sits tight against the label (beats inline margin-right:6px). */
+    .modal-header h4 svg,
+    .research-pane-header h4 svg,
+    .notes-pane-header .notes-pane-title svg {
+      margin-right: 4px !important;
+    }
+    /* Window top controls — perfect 24×24 squares; flex may not stretch them. */
+    .close-btn,
+    .modal-close,
+    .modal-minimize-btn,
+    .minimize-btn {
+      box-sizing: border-box;
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      min-height: 24px;
+      aspect-ratio: 1;
+      padding: 0;
+      flex: 0 0 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
     .close-btn,
     .modal-close {
       background:var(--bg);
       color:var(--fg);
       border:1px solid var(--fg);
       font-size:12px;
-      width:24px;
-      height:24px;
-      padding:0;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      line-height:1;
       text-indent:0;
       cursor:pointer;
       border-radius: var(--radius-tech, 2px);
-      line-height:1;
-      flex-shrink:0;
     }
     .close-btn:hover,
     .modal-close:hover {
@@ -5582,18 +5895,10 @@ body.bg-pattern-fog {
       border:1px solid var(--fg);
       font-size:14px;
       font-weight:700;
-      width:24px;
-      height:24px;
-      padding:0 0 6px 0; /* nudge the underscore visually toward the middle */
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      line-height:1;
       cursor:pointer;
       border-radius: var(--radius-tech, 2px);
-      flex-shrink:0;
       margin-left:auto; /* push to the right so it docks next to .close-btn */
-      margin-right:4px;
+      margin-right:2px;
     }
     .minimize-btn:hover {
       background:var(--fg);
@@ -5685,7 +5990,7 @@ body.bg-pattern-fog {
       white-space:pre-line;
     }
     .styled-confirm-box .modal-footer {
-      display:flex; justify-content:flex-end; gap:8px; padding-top:6px;
+      display:flex; justify-content:flex-end; gap:10px; padding-top:6px;
       border-top:1px solid var(--border); margin-top:4px;
     }
     @media (max-width:768px) {
@@ -5719,10 +6024,10 @@ body.bg-pattern-fog {
       letter-spacing: var(--tracking-label, 0.06em);
       text-transform: uppercase;
       cursor:pointer;
-      border:1px solid var(--border);
-      box-shadow: none;
+      border:1px solid transparent;
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
       max-width: 100%;
-      overflow: hidden;
+      overflow: visible;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
@@ -5732,11 +6037,11 @@ body.bg-pattern-fog {
          with the label sitting slightly high). */
       .confirm-btn { padding:2px 16px 4px; }
     }
-    .confirm-btn-secondary { background:var(--panel); color:var(--fg); border-color: var(--border); }
-    .confirm-btn-secondary:hover { background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel)); border-color: var(--accent, var(--red)); }
-    .confirm-btn-primary { background:var(--accent-primary, var(--red, #4a9eff)); color:var(--bg); border-color:var(--accent-primary, var(--red)); }
-    .confirm-btn-primary:hover { filter:none; background: color-mix(in srgb, var(--accent-primary, var(--red)) 88%, var(--fg)); }
-    .confirm-btn-danger { background:transparent; color:var(--color-error); border-color:var(--color-error); }
+    .confirm-btn-secondary { background:var(--panel); color:var(--fg); border-color: transparent; }
+    .confirm-btn-secondary:hover { background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel)); border-color: transparent; }
+    .confirm-btn-primary { background:var(--accent-primary, var(--red, #4a9eff)); color:var(--bg); border-color: transparent; }
+    .confirm-btn-primary:hover { filter:none; background: color-mix(in srgb, var(--accent-primary, var(--red)) 88%, var(--fg)); border-color: transparent; }
+    .confirm-btn-danger { background:var(--panel); color:var(--color-error); border-color: transparent; }
     .confirm-btn-danger:hover { background:var(--color-error); color:#fff; }
     /* Styled prompt — text-input dialog (used in place of window.prompt) */
     #styled-prompt-overlay {
@@ -6997,15 +7302,16 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       font-size: 11px; color: var(--red); margin-top: 2px; display: none;
     }
     /* Import/Export */
-    .theme-io-row { display: flex; gap: 6px; margin-top: 6px; }
+    .theme-io-row { display: flex; gap: 10px; margin-top: 6px; }
     .theme-io-btn {
-      flex: 1; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius-tech, 2px);
-      background: transparent; color: var(--fg); cursor: pointer;
+      flex: 1; padding: 5px 10px; border: 1px solid transparent; border-radius: var(--radius-tech, 2px);
+      background: var(--panel); color: var(--fg); cursor: pointer;
       font-size: 11px; font-weight: 500; letter-spacing: var(--tracking-label, 0.06em); text-transform: uppercase;
-      opacity: 0.85; transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-      font-family: var(--font-ui, inherit); box-shadow: none;
+      opacity: 0.85; transition: background 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
+      font-family: var(--font-ui, inherit);
+      box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
     }
-    .theme-io-btn:hover { opacity: 1; border-color: var(--accent, var(--red)); background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent); }
+    .theme-io-btn:hover { opacity: 1; border-color: transparent; background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel)); }
     .theme-import-area {
       width: 100%; margin-top: 6px; padding: 6px 8px;
       border: 1px solid var(--border); border-radius: var(--radius-tech, 2px);
@@ -7014,7 +7320,7 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     }
     .theme-import-area:focus { outline: none; border-color: var(--red); }
     .theme-import-area.hidden { display: none; }
-    .theme-import-actions { display: flex; gap: 6px; margin-top: 4px; }
+    .theme-import-actions { display: flex; gap: 10px; margin-top: 4px; }
     .theme-import-actions.hidden { display: none; }
     /* Font & Density */
     .theme-fd-row { display: flex; gap: 8px; margin-bottom: 8px; }
@@ -10891,8 +11197,8 @@ textarea.memory-add-input {
 
 
 .memory-toolbar-btn {
-  background: transparent;
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid transparent;
   color: color-mix(in srgb, var(--fg) 70%, transparent);
   font-size: 11px;
   font-family: var(--font-ui, 'Iosevka', monospace);
@@ -10903,28 +11209,28 @@ textarea.memory-add-input {
   padding: 0 8px;
   border-radius: var(--radius-tech, 2px);
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
   white-space: nowrap;
-  box-shadow: none;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
 }
 
 
 
 .memory-toolbar-btn:hover {
-  background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
-  border-color: var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+  border-color: transparent;
   color: var(--fg);
 }
 
 .memory-toolbar-btn.active {
-  background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
-  border-color: var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
+  border-color: transparent;
   color: var(--accent, var(--red));
 }
 
 .memory-toolbar-btn.danger {
   color: var(--color-error);
-  border-color: var(--color-error);
+  border-color: transparent;
 }
 
 .memory-toolbar-btn.danger:hover {
@@ -12442,10 +12748,6 @@ textarea.memory-add-input {
   height: 22px;
   min-height: 22px;
   padding: 0 6px;
-  opacity: 0.55;
-}
-.doc-md-toolbar .doc-action-icon-btn.md-toolbar-doc-action:hover {
-  opacity: 1;
 }
 .doc-md-toolbar .doc-split-btn-group {
   height: 22px;
@@ -12969,39 +13271,41 @@ textarea.memory-add-input {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 1px;
-  padding: 2px 8px;
+  gap: 4px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   flex-shrink: 0;
-  overflow: hidden;
-  height: 36px;
+  overflow: visible;
+  min-height: 36px;
+  height: auto;
   position: relative;
   /* No full-bar edge mask — Undo/type/Copy live on this row and must stay crisp.
      Format items scroll inside .md-toolbar-items instead. */
 }
 .doc-md-toolbar button {
-  background: none;
-  border: none;
-  color: var(--fg);
-  opacity: 0.35;
+  background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--fg) 72%, transparent);
+  opacity: 1;
   padding: 4px 7px;
-  font-family: inherit;
+  font-family: var(--font-ui, 'Iosevka', monospace);
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
   line-height: 1.3;
-  transition: opacity 0.1s;
+  border-radius: var(--radius-tech, 2px);
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
   min-height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .doc-md-toolbar button:hover {
-  opacity: 1;
-}
-.doc-md-toolbar button:active {
-  opacity: 0.6;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+  border-color: transparent;
 }
 /* Active formatting state — set by the email WYSIWYG sync. Mirrors the
    selection's current marks (B/I/S, heading level, list) so the toolbar
@@ -13009,10 +13313,11 @@ textarea.memory-add-input {
 .doc-md-toolbar button.is-active {
   opacity: 1;
   color: var(--accent, var(--red));
-  background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
+  background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
+  border-color: transparent;
 }
 .doc-md-toolbar button.is-active:hover {
-  background: color-mix(in srgb, var(--accent, var(--red)) 22%, transparent);
+  background: color-mix(in srgb, var(--accent, var(--red)) 18%, var(--panel));
 }
 /* No black tap-flash / focus background on the doc toolbar + tab controls —
    they're icon buttons, the opacity change is the only feedback we want. */
@@ -13028,8 +13333,8 @@ textarea.memory-add-input {
 .doc-tab-new:focus-visible,
 .doc-tab-arrow:focus,
 .doc-tab-arrow:focus-visible {
-  outline: none;
-  background: none;
+  outline: 2px dotted var(--accent, var(--red));
+  outline-offset: 2px;
 }
 /* Grouped formatting dropdown toggles (heading / code / list) */
 .md-dd-toggle { gap: 1px !important; }
@@ -13055,12 +13360,13 @@ textarea.memory-add-input {
 .md-toolbar-items {
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 4px;
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
   scroll-behavior: smooth;
+  padding-bottom: 2px;
 }
 .md-toolbar-items::-webkit-scrollbar { display: none; }
 /* On a PDF, the annotation tools (text / checkmark / signature) are the primary
@@ -13739,24 +14045,25 @@ mark.doc-find-mark.current {
   margin-right: auto;
 }
 .diff-toolbar-btn {
-  background: none;
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+  border: 1px solid transparent;
   color: var(--fg);
   font-size: 10px;
   padding: 3px 10px;
   border-radius: var(--radius-tech, 2px);
   cursor: pointer;
   font-family: inherit;
-  transition: border-color 0.15s, background 0.15s;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  transition: background 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
 }
 .diff-toolbar-btn:hover {
-  border-color: var(--accent, var(--red));
-  background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
 }
-.diff-toolbar-btn-accept { color: var(--green); border-color: color-mix(in srgb, var(--green) 30%, transparent); }
-.diff-toolbar-btn-accept:hover { border-color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
-.diff-toolbar-btn-reject { color: var(--red); border-color: color-mix(in srgb, var(--red) 30%, transparent); }
-.diff-toolbar-btn-reject:hover { border-color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.diff-toolbar-btn-accept { color: var(--green); border-color: transparent; }
+.diff-toolbar-btn-accept:hover { border-color: transparent; background: color-mix(in srgb, var(--green) 10%, var(--panel)); }
+.diff-toolbar-btn-reject { color: var(--red); border-color: transparent; }
+.diff-toolbar-btn-reject:hover { border-color: transparent; background: color-mix(in srgb, var(--red) 10%, var(--panel)); }
 .diff-line-del {
   display: block;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -14258,9 +14565,10 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
   }
   /* ── Markdown toolbar — same height as tab bar ── */
   .doc-md-toolbar {
-    height: 40px !important;
+    height: auto !important;
+    min-height: 40px;
     padding: 4px 8px;
-    gap: 2px;
+    gap: 4px;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -15059,8 +15367,8 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 
 /* Buttons */
 .admin-btn-delete {
-  background: transparent;
-  border: 1px solid var(--color-error);
+  background: var(--panel);
+  border: 1px solid transparent;
   color: var(--color-error);
   padding: 4px 10px;
   border-radius: var(--radius-tech, 2px);
@@ -15070,21 +15378,21 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   font-weight: 500;
   letter-spacing: var(--tracking-label, 0.06em);
   text-transform: uppercase;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-  box-shadow: none;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .admin-btn-delete:hover {
   background: var(--color-error);
-  border-color: var(--color-error);
+  border-color: transparent;
   color: #fff;
 }
 .admin-btn-add {
   padding: 4px 10px;
-  border: 1px solid var(--accent, var(--red));
+  border: 1px solid transparent;
   border-radius: var(--radius-tech, 2px);
   background: var(--accent, var(--red));
   color: var(--bg);
@@ -15094,12 +15402,12 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   font-family: var(--font-ui, 'Iosevka', monospace);
   letter-spacing: var(--tracking-label, 0.06em);
   text-transform: uppercase;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-  box-shadow: none;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
 }
 .admin-btn-add:hover {
   background: color-mix(in srgb, var(--accent, var(--red)) 88%, var(--fg));
-  border-color: color-mix(in srgb, var(--accent, var(--red)) 88%, var(--fg));
+  border-color: transparent;
 }
 .admin-btn-add:disabled {
   opacity: 0.5;
@@ -15107,7 +15415,7 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
 }
 .admin-btn-sm {
   padding: 3px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius-tech, 2px);
   background: var(--panel);
   color: var(--fg);
@@ -15117,11 +15425,11 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   font-weight: 500;
   letter-spacing: var(--tracking-label, 0.06em);
   text-transform: uppercase;
-  box-shadow: none;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
 }
 .admin-btn-sm:hover {
   background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
-  border-color: var(--accent, var(--red));
+  border-color: transparent;
 }
 .admin-spinner {
   display: inline-block;
@@ -17515,34 +17823,35 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 
 /* Document library toolbar buttons */
 .doclib-toolbar-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--panel) 92%, var(--fg));
+  border: 1px solid transparent;
+  color: var(--fg-muted, color-mix(in srgb, var(--fg) 72%, transparent));
   font-size: 11px;
   padding: 5px 10px;
   border-radius: var(--radius-tech, 2px);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
   white-space: nowrap;
   font-family: inherit;
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
 }
 .doclib-toolbar-btn:hover {
   color: var(--fg);
-  border-color: var(--fg);
+  border-color: transparent;
 }
 .doclib-toolbar-btn.active {
-  background: color-mix(in srgb, var(--red) 15%, transparent);
-  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 15%, var(--panel));
+  border-color: transparent;
   color: var(--red);
 }
 .doclib-toolbar-btn.danger {
   color: var(--color-error, #e55);
 }
 .doclib-toolbar-btn.danger:hover:not(:disabled) {
-  border-color: var(--color-error, #e55);
+  border-color: transparent;
 }
 .doclib-toolbar-btn:disabled {
   opacity: 0.4;
@@ -23364,6 +23673,11 @@ select.task-form-input { text-overflow: ellipsis; }
   align-items: center;
   gap: 8px;
 }
+.settings-row:has(> .admin-btn-sm),
+.settings-row:has(> .admin-btn-add),
+.settings-row:has(> .confirm-btn) {
+  gap: 10px;
+}
 .settings-col {
   display: flex;
   flex-direction: column;
@@ -23906,15 +24220,18 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   align-items: center;
   gap: 6px;
   margin-top: 12px;
-  padding: 8px 16px;
-  border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+  padding: 4px 10px;
+  border: 1px solid transparent;
   border-radius: var(--radius-tech, 2px);
-  background: color-mix(in srgb, var(--red) 10%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, var(--panel));
   color: var(--fg);
-  font-family: inherit;
-  font-size: 0.88em;
+  font-family: var(--font-ui, 'Iosevka', monospace);
+  font-size: 11px;
   font-weight: 500;
-  transition: background 0.15s ease;
+  letter-spacing: var(--tracking-label, 0.06em);
+  text-transform: uppercase;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
   cursor: pointer;
 }
 .view-report-btn:hover:not(:disabled) {
@@ -24028,9 +24345,6 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
 .plan-card-actions .btn {
   min-height: 30px;
   padding: 4px 12px;
-}
-.plan-card-actions .btn-primary {
-  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
 }
 .plan-card.is-started .plan-card-start,
 .plan-card.is-started .plan-card-details-btn {
@@ -26663,18 +26977,19 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
 }
 .ge-btn {
   padding: 4px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius-tech, 2px);
   background: var(--bg);
   color: var(--fg);
   font-size: 11px;
   cursor: pointer;
-  transition: background 0.15s;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  transition: background 0.15s, box-shadow 0.08s ease, transform 0.08s ease;
 }
 .ge-btn:hover { background: color-mix(in srgb, var(--fg) 10%, var(--bg)); }
 .ge-btn.active {
   background: color-mix(in srgb, var(--accent, var(--red)) 16%, var(--bg));
-  border-color: var(--accent, var(--red));
+  border-color: transparent;
   color: var(--accent, var(--red));
 }
 .ge-btn-sm { padding: 3px 6px; font-size: 10px; }
@@ -26692,6 +27007,8 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
 .ge-mask-vis-btn {
   background: none !important;
   border: none !important;
+  box-shadow: none !important;
+  transform: none !important;
   padding: 2px 4px !important;
   display: inline-flex;
   align-items: center;
@@ -26708,6 +27025,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   padding: 4px 8px;
   opacity: 0.6;
   border: 1px solid var(--border);
+  box-shadow: none;
 }
 .ge-inpaint-mode-btn:hover { opacity: 0.85; }
 .ge-inpaint-mode-btn.active {
@@ -26724,6 +27042,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   padding: 4px 6px;
   opacity: 0.6;
   border: 1px solid var(--border);
+  box-shadow: none;
 }
 .ge-wand-mode-btn:hover { opacity: 0.85; }
 .ge-wand-mode-btn.active {
@@ -27095,7 +27414,7 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
 .ge-btn-primary {
   background: var(--red);
   color: #fff;
-  border-color: var(--red);
+  border-color: transparent;
   font-weight: 600;
 }
 .ge-btn-primary:hover { background: color-mix(in srgb, var(--red) 85%, #000); }
@@ -28000,17 +28319,14 @@ button .spinner-whirlpool {
     border-radius: var(--radius-tech, 2px) !important;
     border-bottom: 1px solid var(--border) !important;
   }
-  /* The × glyph in close buttons also sits visually low — lift it 4 px
-     to match the +/- button alignment. Same asymmetric-padding trick. */
-  .modal-close,
-  .close-btn,
+  /* GE popup head glyphs sit visually low — nudge with transform so we
+     do not distort global modal .close-btn / .modal-close squares. */
   .ge-adj-close,
   .ge-adj-min {
-    padding-top: 0 !important;
-    padding-bottom: 8px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
+    transform: translateY(-2px);
   }
   .ge-transform-spin button[data-spin="down"] { margin-right: 4px; }
   .ge-transform-spin button[data-spin="up"]   { margin-left: 4px; }
@@ -30017,10 +30333,6 @@ body.doc-find-active mark.doc-find-mark.current {
     0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 22%, transparent),
     0 0 18px color-mix(in srgb, var(--accent, var(--red)) 18%, transparent),
     var(--shadow-lg, 0 18px 50px rgba(0, 0, 0, 0.35));
-}
-#email-lib-modal .email-lib-header-actions .minimize-btn {
-  position: relative;
-  left: 6px;
 }
 /* Per-card prev/next nav — only visible on the currently expanded card,
    sits at the right of the title row next to the done check. */
@@ -36586,7 +36898,7 @@ body.research-panel-view #research-divider { display:none; }
 /* Match Library's inline SVG alignment inside the h4 */
 .research-pane-header h4 svg {
   vertical-align: -2px;
-  margin-right: 6px;
+  margin-right: 4px;
 }
 .research-pane-header-actions {
   display: flex; align-items: center; gap: 2px;
@@ -40548,19 +40860,27 @@ body.projects-ui-hidden #research-project-setting-wrap {
   display: inline-flex;
   align-items: center;
   gap: 0;
-  margin-left: 0;
-  /* Fill leftover header width; header end padding is cleared via :has() below */
-  flex: 1 1 auto;
-  flex-shrink: 1;
+  /* Own row under Nobody + hamburger; span full sidebar width */
+  flex: 1 1 100%;
+  width: calc(100% + 42px);
+  max-width: none;
   min-width: 0;
+  margin-left: -42px;
   margin-right: 0;
-  height: 30px;
-  align-self: center;
+  /* Match sidebar chrome rows (#sidebar-search-btn, New Chat, …) */
+  height: 34px;
+  min-height: 34px;
+  align-self: stretch;
   animation: project-chip-enter 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+/* Author display:inline-flex outranks the UA [hidden] rule */
+#project-active-chip[hidden] {
+  display: none !important;
+}
 .sidebar.right-side .project-active-chip {
-  margin-right: 0;
+  width: calc(100% + 42px);
   margin-left: 0;
+  margin-right: -42px;
 }
 /* When the chip is visible, pin it to the chat-side edge (no end padding). */
 .sidebar-header:has(#project-active-chip:not([hidden])) {
@@ -40580,7 +40900,8 @@ body.projects-ui-hidden #research-project-setting-wrap {
   gap: 6px;
   box-sizing: border-box;
   width: 100%;
-  height: 30px;
+  height: 34px;
+  min-height: 34px;
   max-width: none;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -40641,6 +40962,12 @@ body.projects-ui-hidden #research-project-setting-wrap {
   .sidebar.right-side .sidebar-header:has(#project-active-chip:not([hidden])) {
     padding-right: 42px;
     padding-left: 0;
+  }
+  /* Match mobile chrome row touch targets (Search / New Chat = 48px) */
+  .project-active-chip,
+  .project-active-chip-btn {
+    height: 48px;
+    min-height: 48px;
   }
 }
 
@@ -40783,25 +41110,26 @@ body.project-chip-menu-open .project-active-chip-btn {
   min-height: 44px;
   margin: 0;
   text-align: left;
-  border: 0;
-  background: transparent;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--panel) 92%, var(--fg));
   color: var(--fg);
   border-radius: var(--radius-tech, 2px);
   padding: 10px 12px;
   font: inherit;
   line-height: 1.35;
   cursor: pointer;
-  transition: background 0.12s;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  transition: background 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
 }
 .project-chip-menu-item:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  background: color-mix(in srgb, var(--fg) 7%, var(--panel));
 }
 .project-chip-menu-item:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .project-chip-menu-item.is-selected {
-  background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
+  background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
 }
 .project-chip-menu-item.project-chip-menu-danger {
   color: color-mix(in srgb, var(--red, #c44) 85%, var(--fg));
@@ -41964,7 +42292,7 @@ body.project-context-active .chat-top-bar {
 .project-workspace-header-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 }
 .project-workspace-icon-btn {
@@ -41976,16 +42304,16 @@ body.project-context-active .chat-top-bar {
   height: 24px;
   padding: 0;
   border-radius: var(--radius-tech, 2px);
-  border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
-  background: transparent;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--panel) 92%, var(--fg));
   color: color-mix(in srgb, var(--fg) 75%, transparent);
   cursor: pointer;
-  box-shadow: none;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
 }
 .project-workspace-icon-btn:hover {
-  background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
-  border-color: color-mix(in srgb, var(--accent, var(--red)) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+  border-color: transparent;
   color: var(--fg);
 }
 .project-workspace-icon-btn:focus-visible {
@@ -41994,8 +42322,8 @@ body.project-context-active .chat-top-bar {
 }
 .project-workspace-icon-btn--danger:hover {
   color: var(--danger, #e55);
-  border-color: color-mix(in srgb, var(--danger, #e55) 40%, transparent);
-  background: color-mix(in srgb, var(--danger, #e55) 10%, transparent);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--danger, #e55) 10%, var(--panel));
 }
 .project-workspace-warning {
   flex: 1 1 100%;
@@ -43353,9 +43681,15 @@ body.project-workspace-resizing {
 }
 .styled-choice-footer {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: stretch;
   justify-content: flex-end;
+}
+.styled-choice-footer .confirm-btn {
+  width: 100%;
+  justify-content: center;
 }
 .project-editor-wrap.doc-editor-wrap {
   max-width: none;
@@ -43429,8 +43763,8 @@ body.project-workspace-resizing {
 }
 .project-empty-btn {
   appearance: none;
-  border: 1px solid color-mix(in srgb, var(--border) 85%, var(--fg));
-  background: transparent;
+  border: 1px solid transparent;
+  background: var(--panel);
   color: var(--fg);
   font-family: var(--font-ui, 'Iosevka', monospace);
   font-size: 11px;
@@ -43440,24 +43774,24 @@ body.project-workspace-resizing {
   padding: 6px 12px;
   border-radius: var(--radius-tech, 2px);
   cursor: pointer;
-  box-shadow: none;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.08s ease, transform 0.08s ease;
 }
 .project-empty-btn:hover {
-  background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
-  border-color: var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 8%, var(--panel));
+  border-color: transparent;
 }
 .project-empty-btn:focus-visible {
   outline: 2px dotted var(--accent, var(--red));
   outline-offset: 2px;
 }
 .project-empty-btn--breadth {
-  border-color: color-mix(in srgb, var(--project-breadth-accent) 45%, var(--border));
+  border-color: transparent;
   background: var(--project-breadth-surface);
   color: var(--project-breadth-accent);
 }
 .project-empty-btn--depth {
-  border-color: color-mix(in srgb, var(--project-depth-accent) 45%, var(--border));
+  border-color: transparent;
   background: var(--project-depth-surface);
   color: var(--project-depth-accent);
 }
@@ -44065,22 +44399,27 @@ body.sidebar-collapsed.hamburger-right .chat-container.project-active .project-m
 .msg,
 .msg-user,
 .msg-ai,
-.minimized-dock-chip,
+.minimized-strip-pill,
+.minimized-strip-panel,
+.minimized-strip-row,
 .activity-strip-pill,
 .activity-strip-panel {
   border-radius: var(--radius-tech, 2px);
 }
 
-/* Menus / dropdowns / popovers */
-[class*="-menu"],
-[class*="-popover"],
-[class*="-dropdown"],
+/* Menus / dropdowns / popovers — floating surfaces only, not descendants
+   whose class happens to contain -menu / -item. */
+[class*="-menu"]:not([class*="-menu-"]):not(button):not([class*="-btn"]),
+[class*="-popover"]:not([class*="-popover-"]):not(button),
+[class*="-dropdown"]:not([class*="-dropdown-"]):not(button),
+.dropdown,
 .export-menu,
 .overflow-menu,
 .ctx-menu,
 .search-results,
 .session-menu,
-.memory-kebab-menu {
+.memory-kebab-menu,
+.gallery-album-menu-pop {
   border-radius: var(--radius-tech, 2px) !important;
   box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent)) !important;
 }
@@ -44093,29 +44432,139 @@ body.sidebar-collapsed.hamburger-right .chat-container.project-active .project-m
 .memory-toolbar-btn,
 .theme-io-btn,
 .mode-toggle-btn,
+.perm-toggle-btn,
 .send-btn-label,
 .doclib-toolbar-btn,
 .diff-toolbar-btn,
 .project-empty-btn,
 .project-workspace-icon-btn,
+.view-report-btn {
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label, 0.06em);
+  font-family: var(--font-family, var(--font-ui, inherit));
+  border-radius: var(--radius-tech, 2px);
+}
+/* Raised plates: fill + bottom-right drop only. A visible 1px stroke on
+   all four sides reads as lines on the lit (top/left) edges. Keep the
+   1px transparent border for layout so press doesn't jump. */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.admin-btn-sm,
+.admin-btn-add,
+.admin-btn-delete,
+.confirm-btn,
+.confirm-btn-primary,
+.confirm-btn-secondary,
+.confirm-btn-danger,
+.memory-toolbar-btn,
+.theme-io-btn,
+.send-btn,
+.input-icon-btn,
+.overflow-menu-item,
+.project-chip-menu-item,
+.project-empty-btn,
+.project-empty-btn--breadth,
+.project-empty-btn--depth,
+.project-workspace-icon-btn,
+.view-report-btn,
+.ge-btn:not(.ge-mask-vis-btn):not(.ge-inpaint-mode-btn):not(.ge-wand-mode-btn),
+.ge-btn-primary,
+.doclib-toolbar-btn,
+.diff-toolbar-btn,
+.diff-toolbar-btn-accept,
+.diff-toolbar-btn-reject,
+.doc-md-toolbar button,
+.tool-approval-actions button,
+.mode-toggle,
+.perm-toggle,
+.icon-rail-btn,
+#sidebar-new-chat-btn,
+#sidebar-new-project-btn,
+#sidebar-search-btn,
+#tools-section .list-item,
+.section-header-flex,
+#session-list .session-item {
+  border-color: transparent;
+}
+.btn:hover,
+.btn:active,
+.btn.active,
+.btn-primary:hover,
+.btn-secondary:hover,
+.btn-danger:hover,
+.admin-btn-sm:hover,
+.admin-btn-add:hover,
+.admin-btn-delete:hover,
+.confirm-btn:hover,
+.confirm-btn-primary:hover,
+.confirm-btn-secondary:hover,
+.confirm-btn-danger:hover,
+.memory-toolbar-btn:hover,
+.memory-toolbar-btn.active,
+.memory-toolbar-btn.danger,
+.memory-toolbar-btn.danger:hover,
+.theme-io-btn:hover,
+.send-btn:hover,
+.input-icon-btn:hover,
+.input-icon-btn.active,
+.input-icon-btn.expanded,
+.overflow-menu-item:hover,
+.overflow-menu-item.active,
+.project-chip-menu-item:hover,
+.project-chip-menu-item.is-selected,
+.project-empty-btn:hover,
+.project-workspace-icon-btn:hover,
+.project-workspace-icon-btn--danger:hover,
+.view-report-btn:hover,
+.ge-btn:hover:not(.ge-mask-vis-btn):not(.ge-inpaint-mode-btn):not(.ge-wand-mode-btn),
+.ge-btn.active:not(.ge-mask-vis-btn):not(.ge-inpaint-mode-btn):not(.ge-wand-mode-btn),
+.ge-btn-primary:hover,
+.doclib-toolbar-btn:hover,
+.doclib-toolbar-btn.active,
+.doclib-toolbar-btn.danger:hover,
+.diff-toolbar-btn:hover,
+.diff-toolbar-btn-accept:hover,
+.diff-toolbar-btn-reject:hover,
+.doc-md-toolbar button:hover,
+.doc-md-toolbar button.is-active,
+.tool-approval-actions button:hover,
+.tool-approval-actions button.primary,
+.mode-toggle:hover,
+.perm-toggle:hover,
+.icon-rail-btn:hover,
+.icon-rail-btn.active-section,
+#sidebar-new-chat-btn:hover,
+#sidebar-new-project-btn:hover,
+#sidebar-search-btn:hover,
+#tools-section .list-item:hover,
+#tools-section .list-item.active,
+.section-header-flex:hover,
+#session-list .session-item:hover,
+#session-list .session-item.active-session {
+  border-color: transparent;
+}
 .project-active-chip-btn {
   text-transform: uppercase;
   letter-spacing: var(--tracking-label, 0.06em);
   font-family: var(--font-family, var(--font-ui, inherit));
-  /* Asymmetric — open side is square so it meets the slate / divider */
-  border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px);
 }
-/* Mode toggle labels: no tracking (short uppercase words look stretched),
-   content-sized segments, first/last radii only. */
-.mode-toggle-btn {
+/* Mode / perm toggle labels: no tracking. Flush-join first/last so the
+   track reads as one segment bar; the stamp lives on the wrapper. */
+.mode-toggle-btn,
+.perm-toggle-btn {
   letter-spacing: 0 !important;
   font-family: var(--font-ui, 'Iosevka', monospace) !important;
   border-radius: 0 !important;
+  box-shadow: none !important;
 }
-.mode-toggle-btn:first-child {
+.mode-toggle-btn:first-child,
+.perm-toggle-btn:first-child {
   border-radius: var(--radius-tech, 2px) 0 0 var(--radius-tech, 2px) !important;
 }
-.mode-toggle-btn:last-child {
+.mode-toggle-btn:last-child,
+.perm-toggle-btn:last-child {
   border-radius: 0 var(--radius-tech, 2px) var(--radius-tech, 2px) 0 !important;
 }
 .sidebar.right-side .project-active-chip-btn {
@@ -44139,7 +44588,7 @@ body.sidebar-collapsed.hamburger-right .chat-container.project-active .project-m
 .project-active-chip,
 .project-workspace-status-badge,
 .project-mode-pill,
-.minimized-dock-chip,
+.minimized-strip-pill,
 .activity-strip-pill,
 .research-cat-badge,
 .research-compose-tab-badge,
@@ -44203,7 +44652,8 @@ pre, code, .hljs,
 .send-btn:focus-visible,
 .input-icon-btn:focus-visible,
 .icon-rail-btn:focus-visible,
-.mode-toggle-btn:focus-visible {
+.mode-toggle-btn:focus-visible,
+.perm-toggle-btn:focus-visible {
   outline: 2px dotted var(--accent, var(--red));
   outline-offset: 2px;
 }
@@ -44335,6 +44785,7 @@ body.theme-glass .research-pane .research-job-card {
 .memory-toolbar-btn,
 .theme-io-btn,
 .mode-toggle-btn,
+.perm-toggle-btn,
 .send-btn-label,
 .doclib-card-action-btn {
   font-family: var(--font-ui, 'Iosevka', monospace) !important;
@@ -44343,13 +44794,10 @@ body.theme-glass .research-pane .research-job-card {
   box-sizing: border-box;
 }
 .project-active-chip-btn,
-.project-empty-btn,
 .project-bottom-tab,
 .project-workspace-status-badge,
 .project-mobile-footer-grabber-label,
-.memory-toolbar-btn,
 .doclib-card-action-btn,
-.mode-toggle-btn,
 .send-btn-label {
   overflow: hidden;
   text-overflow: ellipsis;

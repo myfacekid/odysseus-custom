@@ -47,3 +47,37 @@ def test_full_form_and_no_hash():
 def test_invalid_returns_null():
     assert _rgb("nothex") is None
     assert _rgb("") is None
+
+
+def _stamps(panel_hex: str):
+    js = (
+        f"import {{ stampShadowInks }} from '{_HELPER.as_posix()}';"
+        f"console.log(JSON.stringify(stampShadowInks({json.dumps(panel_hex)})));"
+    )
+    proc = subprocess.run(
+        ["node", "--input-type=module"],
+        input=js, capture_output=True, text=True, cwd=str(_REPO), timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout.strip())
+
+
+@pytest.mark.skipif(not _HAS_NODE, reason="node binary not on PATH")
+def test_stamp_inks_are_translucent_black_drops():
+    """Operandi Tinted paper: 18% black drop, not an opaque beige plate."""
+    out = _stamps("#fbf7f0")
+    assert out["ink"] == "rgba(0, 0, 0, 0.18)"
+    assert out["press"] == "rgba(0, 0, 0, 0.14)"
+
+
+@pytest.mark.skipif(not _HAS_NODE, reason="node binary not on PATH")
+def test_stamp_inks_dark_page_stays_black_not_white():
+    """Vivendi page must drop with black, not lighten toward --fg."""
+    out = _stamps("#000000")
+    assert out["ink"].startswith("rgba(0, 0, 0,")
+    assert "255" not in out["ink"]
+
+
+@pytest.mark.skipif(not _HAS_NODE, reason="node binary not on PATH")
+def test_stamp_inks_invalid_panel():
+    assert _stamps("nope") == {"ink": None, "press": None}

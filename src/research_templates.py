@@ -132,16 +132,14 @@ def build_final_report_prompt(
     """Build the final-report LLM prompt for a research mode."""
     mode = normalize_mode(mode)
     spec = _MODE_TEMPLATES[mode]
-    sections = ", ".join(f"## {s}" for s in spec["sections"] if s != "References")
+    headings = [s for s in spec["sections"] if s != "References"]
+    sections = ", ".join(f"## {s}" for s in headings)
     return f"""\
-Write a rigorous **academic {spec['title']}** answering this research question:
+Write a rigorous **academic {spec['title']}** answering this research question.
 
 **Question:** {question}
 
 **Mode focus:** {spec['focus']}
-
-**Collected evidence and draft synthesis:**
-{report}
 
 Requirements:
 {_SHARED_REQUIREMENTS.format(min_words=min_words)}
@@ -150,6 +148,12 @@ Requirements:
   population, or debate). Do NOT use a generic word like "Report", "Background",
   "Summary", or a section name as the title.
 - After the title, structure the body with clear ## headings: {sections}, References
+- The block labeled **Source notes** is raw evidence for you to synthesize.
+  It is NOT the report. Do NOT copy `[N] Title: excerpt` lines into the report.
+  Write prose paragraphs under the required headings and cite with [N] in sentences.
+
+**Source notes (not the report):**
+{report}
 """
 
 

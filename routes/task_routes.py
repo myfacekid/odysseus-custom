@@ -36,6 +36,7 @@ class TaskCreate(BaseModel):
     endpoint_url: Optional[str] = None
     then_task_id: Optional[str] = None            # chain: run this task after success
     notifications_enabled: Optional[bool] = None  # None lets action-specific defaults apply
+    research_config: Optional[Dict[str, Any]] = None
 
 
 class TaskUpdate(BaseModel):
@@ -56,6 +57,60 @@ class TaskUpdate(BaseModel):
     endpoint_url: Optional[str] = None
     then_task_id: Optional[str] = None
     notifications_enabled: Optional[bool] = None
+    research_config: Optional[Dict[str, Any]] = None
+
+
+_ALLOWED_RESEARCH_MODES = {
+    "literature_review", "similar_papers", "gap_analysis", "compare",
+}
+
+
+def encode_research_config(raw: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Normalize and JSON-encode a research_config payload for DB storage."""
+    if not raw or not isinstance(raw, dict):
+        return None
+    try:
+        from src.research_retrieval_plan import sanitize_approved_plan
+    except Exception:
+        sanitize_approved_plan = None
+    mode = str(raw.get("mode") or "literature_review").strip().lower()
+    if mode not in _ALLOWED_RESEARCH_MODES:
+        mode = "literature_review"
+    seeds = []
+    for item in raw.get("seed_papers") or []:
+        text = str(item or "").strip()
+        if text and text not in seeds:
+            seeds.append(text)
+    plan = raw.get("approved_plan")
+    if sanitize_approved_plan:
+        plan = sanitize_approved_plan(plan) if isinstance(plan, dict) else None
+    elif not isinstance(plan, dict):
+        plan = None
+    report_length = str(raw.get("report_length") or "standard").strip().lower()
+    if report_length not in ("standard", "extended"):
+        report_length = "standard"
+    cfg = {
+        "mode": mode,
+        "seed_papers": seeds,
+        "approved_plan": plan,
+        "include_zotero": bool(raw.get("include_zotero", True)),
+        "include_knowledge": bool(raw.get("include_knowledge", True)),
+        "include_preprints": bool(raw.get("include_preprints", True)),
+        "report_length": report_length,
+    }
+    return json.dumps(cfg)
+
+
+def decode_research_config(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not raw:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _display_task_name(t: ScheduledTask) -> str:
@@ -93,6 +148,7 @@ def _task_to_dict(t: ScheduledTask, include_last_run_result: bool = False) -> di
         "run_count": t.run_count or 0,
         "then_task_id": t.then_task_id,
         "notifications_enabled": bool(getattr(t, "notifications_enabled", True)),
+        "research_config": decode_research_config(getattr(t, "research_config", None)),
         "webhook_token": t.webhook_token if (t.trigger_type or "schedule") == "webhook" else None,
         "created_at": t.created_at.isoformat() + "Z" if t.created_at else None,
         "updated_at": t.updated_at.isoformat() + "Z" if t.updated_at else None,
@@ -128,10 +184,14 @@ def _run_to_dict(r: TaskRun) -> dict:
         "error": r.error,
         "tokens_used": r.tokens_used,
         "model": r.model,
+        "research_id": getattr(r, "research_id", None) or "",
     }
 
 
-def _run_research_id(task: ScheduledTask) -> str:
+def _run_research_id(task: ScheduledTask, run: TaskRun = None) -> str:
+    rid = getattr(run, "research_id", None) if run is not None else None
+    if rid:
+        return rid
     if (task.task_type or "llm") == "research" and task.session_id:
         return task.session_id
     return ""
@@ -408,6 +468,7 @@ def setup_task_routes(task_scheduler) -> APIRouter:
                 then_task_id=req.then_task_id or None,
                 webhook_token=webhook_token,
                 notifications_enabled=notifications_enabled,
+                research_config=encode_research_config(req.research_config),
             )
             db.add(task)
             db.commit()
@@ -504,6 +565,8 @@ def setup_task_routes(task_scheduler) -> APIRouter:
                 task.then_task_id = req.then_task_id or None
             if req.notifications_enabled is not None:
                 task.notifications_enabled = bool(req.notifications_enabled)
+            if req.research_config is not None:
+                task.research_config = encode_research_config(req.research_config)
             if req.cron_expression is not None:
                 if req.cron_expression:
                     try:
@@ -708,7 +771,7 @@ def setup_task_routes(task_scheduler) -> APIRouter:
                         "model": r.model or t.model or "",
                         "endpoint_url": _resolve_run_endpoint(db, t, r),
                         "session_id": t.session_id or "",
-                        "research_id": _run_research_id(t),
+                        "research_id": _run_research_id(t, r),
                         # Where the task delivered its result — the Activity tab
                         # uses this to filter notification rows in/out.
                         "output_target": t.output_target or "session",

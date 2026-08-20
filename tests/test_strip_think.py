@@ -23,3 +23,10 @@ def test_strip_think_cases():
     
     # 6. Multiple blocks (closed + unclosed)
     assert strip_think("Hello! <think> closed </think> Here is the answer. <think> unclosed") == "Hello! Here is the answer."
+
+    # 7. DeepSeek-style "We need answer" prompt echo
+    echoed = (
+        "We need answer user. Need write academic literature synthesis.\n\n"
+        "# Real Title\n\nBody text."
+    )
+    assert strip_think(echoed).startswith("# Real Title")

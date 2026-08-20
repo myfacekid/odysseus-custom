@@ -193,7 +193,7 @@ def ingest_ldr_links(
 
 
 def compile_gathering_draft(registry, *, max_excerpt: int = 400) -> str:
-    """Build a draft synthesis block from registry sources for the final report pass."""
+    """Build source-note lines from registry sources for the final report prompt."""
     lines: List[str] = []
     for src in registry.sources():
         excerpt = (src.content_excerpt or "").strip()

@@ -99,6 +99,9 @@ def test_build_final_report_prompt_includes_mode_focus():
     )
     assert "comparative synthesis" in prompt.lower()
     assert "Methods Comparison" in prompt
+    assert "Source notes (not the report)" in prompt
+    assert "draft synthesis" not in prompt.lower()
+    assert "Do NOT copy" in prompt
     assert normalize_mode("invalid") == "literature_review"
 
 

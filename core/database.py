@@ -546,6 +546,7 @@ class ScheduledTask(TimestampMixin, Base):
     max_steps      = Column(Integer, nullable=True)       # max agent loop iterations (null=unlimited)
     email_results  = Column(Boolean, default=True)        # email results to character.email_to
     notifications_enabled = Column(Boolean, default=True) # per-task on/off for completion notifications
+    research_config = Column(Text, nullable=True)         # JSON: mode, seeds, approved_plan, includes
 
     session = relationship("Session", backref=backref("scheduled_tasks", cascade="save-update, merge"))
     then_task = relationship("ScheduledTask", remote_side=[id], foreign_keys=[then_task_id])
@@ -602,6 +603,7 @@ class TaskRun(Base):
     tokens_used = Column(Integer, nullable=True)
     steps       = Column(Text, nullable=True)             # JSON log of agent tool calls
     model       = Column(String, nullable=True)           # model that actually ran (resolved at execution)
+    research_id = Column(String, nullable=True)           # deep-research session id for this run
 
     task = relationship("ScheduledTask", backref=backref("runs", cascade="all, delete-orphan",
                         order_by="TaskRun.started_at.desc()"))
@@ -1381,6 +1383,23 @@ def _migrate_drop_ping_notes_tasks():
         logging.getLogger(__name__).debug(f"drop_ping_notes_tasks: {e}")
 
 
+def _migrate_add_task_research_columns():
+    """Persist Deep Research knobs on tasks and per-run research ids."""
+    try:
+        with engine.connect() as conn:
+            task_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(scheduled_tasks)"))]
+            if "research_config" not in task_cols:
+                conn.execute(text("ALTER TABLE scheduled_tasks ADD COLUMN research_config TEXT"))
+                logging.getLogger(__name__).info("Added research_config column to scheduled_tasks")
+            run_cols = [r[1] for r in conn.execute(text("PRAGMA table_info(task_runs)"))]
+            if "research_id" not in run_cols:
+                conn.execute(text("ALTER TABLE task_runs ADD COLUMN research_id TEXT"))
+                logging.getLogger(__name__).info("Added research_id column to task_runs")
+            conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"task research columns migration: {e}")
+
+
 def _migrate_add_notifications_enabled():
     """Per-task notification on/off toggle (default ON)."""
     try:
@@ -1621,6 +1640,7 @@ def init_db():
     _migrate_add_disabled_tools()
     _migrate_add_task_v2_columns()
     _migrate_add_notifications_enabled()
+    _migrate_add_task_research_columns()
     _migrate_drop_ping_notes_tasks()
     _migrate_add_crew_member_id()
     _migrate_add_assistant_columns()

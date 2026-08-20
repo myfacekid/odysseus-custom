@@ -101,3 +101,56 @@ async def test_build_retrieval_plan_retries_incomplete_json(monkeypatch):
     assert source == "llm"
     assert plan.sub_questions
     assert "gene ontology" in plan.avoid_topics
+
+
+@pytest.mark.asyncio
+async def test_build_retrieval_plan_fills_empty_key_topics(monkeypatch):
+    from src.research.ldr_planning import build_retrieval_plan
+
+    calls = {"n": 0}
+
+    async def _llm(**kwargs):
+        calls["n"] += 1
+        return """{
+          "search_keywords": ["SHOULD_NOT_REPLACE"],
+          "key_topics": ["structure representation"],
+          "sub_questions": ["How does Foldseek encode structure?"],
+          "success_criteria": "A sourced comparison.",
+          "anchor_terms": ["foldseek"],
+          "avoid_topics": ["gene ontology"]
+        }"""
+
+    monkeypatch.setattr("src.llm_core.llm_call_async", _llm)
+    plan, _display, source = await build_retrieval_plan(
+        question="Compare Foldseek and ESM3",
+        llm_endpoint="http://localhost/v1/chat/completions",
+        llm_model="test",
+        research_mode="compare",
+        seed_findings=[],
+        approved_plan={"search_keywords": ["foldseek structure"], "scope": "narrow_compare"},
+    )
+    assert calls["n"] >= 1
+    assert source == "approved"
+    assert plan.search_keywords == ["foldseek structure"]
+    assert "structure representation" in plan.key_topics
+
+
+@pytest.mark.asyncio
+async def test_build_retrieval_plan_approved_missing_topics_heuristic_on_llm_failure(monkeypatch):
+    from src.research.ldr_planning import build_retrieval_plan
+
+    async def _boom(**kwargs):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr("src.llm_core.llm_call_async", _boom)
+    plan, _display, source = await build_retrieval_plan(
+        question="Compare Foldseek and ESM3",
+        llm_endpoint="http://localhost/v1/chat/completions",
+        llm_model="test",
+        research_mode="compare",
+        seed_findings=[],
+        approved_plan={"search_keywords": ["foldseek structure"], "scope": "narrow_compare"},
+    )
+    assert source == "approved"
+    assert plan.search_keywords == ["foldseek structure"]
+    assert plan.key_topics

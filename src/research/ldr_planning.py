@@ -11,8 +11,11 @@ from src.research_relevance import format_seed_context
 from src.research_retrieval_plan import (
     ResearchRetrievalPlan,
     derive_retrieval_plan_fallback,
+    merge_llm_into_approved_plan,
+    missing_optional_plan_fields,
     parse_retrieval_plan,
     plan_to_display_text,
+    sanitize_approved_plan,
 )
 from src.research_utils import strip_thinking
 
@@ -91,6 +94,57 @@ async def load_seed_findings(
     return enriched, outcome.note or ""
 
 
+def _planner_prompt(
+    question: str,
+    research_mode: str,
+    seed_findings: Optional[List[dict]],
+) -> str:
+    mode_ctx = MODE_PLAN_CONTEXT.get(research_mode, "")
+    seed_ctx = format_seed_context(seed_findings or []) if seed_findings else ""
+    prompt = current_date_context() + RESEARCH_PLAN_PROMPT.format(question=question)
+    if mode_ctx:
+        prompt += f"\n\n{mode_ctx}"
+    if seed_ctx and seed_ctx != "(none)":
+        prompt += (
+            "\n\nSeed papers (pull named methods/acronyms into anchor_terms; "
+            "pull thematic gaps into key_topics; unrelated nearby fields into avoid_topics):\n"
+            f"{seed_ctx}"
+        )
+    return prompt
+
+
+async def _call_planner_llm(
+    prompt: str,
+    *,
+    llm_endpoint: str,
+    llm_model: str,
+    llm_headers: Optional[dict] = None,
+) -> Optional[Dict]:
+    from src.llm_core import llm_call_async
+
+    async def _call(user_prompt: str) -> Optional[Dict]:
+        response = await llm_call_async(
+            url=llm_endpoint,
+            model=llm_model,
+            messages=[{"role": "user", "content": user_prompt}],
+            temperature=0.3,
+            max_tokens=2048,
+            headers=llm_headers,
+            timeout=45,
+        )
+        return parse_json_object(strip_thinking(response))
+
+    parsed = await _call(prompt)
+    if not plan_has_scholarly_fields(parsed):
+        logger.warning(
+            "LDR planning JSON incomplete or unparseable; retrying once "
+            "(parsed_keys=%s)",
+            sorted(parsed.keys()) if isinstance(parsed, dict) else None,
+        )
+        parsed = await _call(prompt + _RETRY_REMINDER)
+    return parsed if plan_has_scholarly_fields(parsed) else None
+
+
 async def build_retrieval_plan(
     *,
     question: str,
@@ -106,52 +160,46 @@ async def build_retrieval_plan(
     Returns ``(plan, display, plan_source)`` where ``plan_source`` is
     ``\"approved\"``, ``\"llm\"``, or ``\"fallback\"``.
     """
-    if approved_plan:
+    approved = sanitize_approved_plan(approved_plan)
+    if approved:
+        missing = missing_optional_plan_fields(approved)
+        if missing and llm_endpoint and llm_model:
+            fill_prompt = _planner_prompt(question, research_mode, seed_findings)
+            fill_prompt += (
+                "\n\nThe user already approved these retrieval fields. Keep them "
+                "unchanged and fill ONLY the missing fields "
+                f"({', '.join(missing)}). Reply with a single JSON object that "
+                "includes the existing fields plus the missing ones.\n"
+                f"Already approved:\n{json.dumps(approved, ensure_ascii=False)}"
+            )
+            try:
+                parsed = await _call_planner_llm(
+                    fill_prompt,
+                    llm_endpoint=llm_endpoint,
+                    llm_model=llm_model,
+                    llm_headers=llm_headers,
+                )
+                if parsed:
+                    approved = merge_llm_into_approved_plan(approved, parsed, missing)
+            except Exception as exc:
+                logger.warning("LDR fill of empty optional plan fields failed: %s", exc)
         plan = parse_retrieval_plan(
-            approved_plan,
+            approved,
             question,
             seed_findings or [],
             research_mode=research_mode,
         )
         return plan, plan_to_display_text(plan), "approved"
 
-    mode_ctx = MODE_PLAN_CONTEXT.get(research_mode, "")
-    seed_ctx = format_seed_context(seed_findings or []) if seed_findings else ""
-    prompt = current_date_context() + RESEARCH_PLAN_PROMPT.format(question=question)
-    if mode_ctx:
-        prompt += f"\n\n{mode_ctx}"
-    if seed_ctx and seed_ctx != "(none)":
-        prompt += (
-            "\n\nSeed papers (pull named methods/acronyms into anchor_terms; "
-            "pull thematic gaps into key_topics; unrelated nearby fields into avoid_topics):\n"
-            f"{seed_ctx}"
-        )
-
-    from src.llm_core import llm_call_async
-
-    async def _call(user_prompt: str) -> Optional[Dict]:
-        response = await llm_call_async(
-            url=llm_endpoint,
-            model=llm_model,
-            messages=[{"role": "user", "content": user_prompt}],
-            temperature=0.3,
-            max_tokens=2048,
-            headers=llm_headers,
-            timeout=45,
-        )
-        return parse_json_object(strip_thinking(response))
-
+    prompt = _planner_prompt(question, research_mode, seed_findings)
     try:
-        parsed = await _call(prompt)
-        if not plan_has_scholarly_fields(parsed):
-            logger.warning(
-                "LDR planning JSON incomplete or unparseable; retrying once "
-                "(parsed_keys=%s)",
-                sorted(parsed.keys()) if isinstance(parsed, dict) else None,
-            )
-            parsed = await _call(prompt + _RETRY_REMINDER)
-
-        if plan_has_scholarly_fields(parsed):
+        parsed = await _call_planner_llm(
+            prompt,
+            llm_endpoint=llm_endpoint,
+            llm_model=llm_model,
+            llm_headers=llm_headers,
+        )
+        if parsed:
             plan = parse_retrieval_plan(
                 parsed,
                 question,

@@ -438,18 +438,18 @@ export function initSidebarLayout(Storage, opts) {
       const rail = document.getElementById('icon-rail');
       const backdrop = document.getElementById('sidebar-backdrop');
       // Skip if any modal is still visible (.modal without .hidden) — we only
-      // restore once the user is back to bare chat. A tool swiped DOWN to a
-      // dock chip is minimized (display:none via .modal-minimized), not closed
-      // — it's still "around", so don't bounce the sidebar open behind it. Only
-      // a full close (no minimized modal, no dock chips) should restore.
+      // restore once the user is back to bare chat. A tool minimized to the
+      // corner strip is still "around" (display:none via .modal-minimized), so
+      // don't bounce the sidebar open behind it. Only a full close (no
+      // minimized modal, no strip rows) should restore.
       const anyOpen = [...document.querySelectorAll('.modal')]
         .some(m => (!m.classList.contains('hidden') && getComputedStyle(m).display !== 'none')
                    || m.classList.contains('modal-minimized'));
-      const anyDocked = document.querySelectorAll('.minimized-dock-chip').length > 0;
+      const anyDocked = document.querySelectorAll('.minimized-strip-row[data-modal-id]').length > 0;
       if (anyOpen || anyDocked) {
-        // A tool is still minimized/docked. The user has left the "launched
+        // A tool is still minimized. The user has left the "launched
         // from the sidebar" context — drop the restore intent so that later
-        // FULLY closing the tool (e.g. dragging its chip to the trash) doesn't
+        // FULLY closing the tool (e.g. × on its strip row) doesn't
         // bounce the sidebar open. (The modal-dismissed listener that normally
         // clears these gets blocked by modalManager's stopImmediatePropagation.)
         _sidebarWasOpenBeforeTool = false;
@@ -499,7 +499,7 @@ function _initChatSwipeToOpenSidebar() {
   // Areas where a horizontal drag means something else (their own scroll/drag).
   const EXCLUDE = [
     '#sidebar', '#icon-rail', '.modal', '.input-bar', '#message',
-    '#minimized-dock', '.minimized-dock-chip', '#dock-trash-zone',
+    '#minimized-dock', '.minimized-strip-row', '.minimized-strip-pill', '.minimized-strip-panel',
     'pre', 'table', '.agent-tool-output', '.agent-thread-cmd',
     'input', 'textarea', 'select',
   ].join(', ');

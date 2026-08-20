@@ -37,6 +37,7 @@ _QWEN_THINKING_RE = re.compile(
 _PROMPT_ECHO_RES = (
     re.compile(r"^The user asks:.*?(?=\n\n#|\n\n\*\*[A-Z]|\Z)", re.DOTALL),
     re.compile(r"^We need to.*?(?=\n\n#|\n\n\*\*[A-Z]|\Z)", re.DOTALL),
+    re.compile(r"^We need answer.*?(?=\n\n#|\n\n\*\*[A-Z]|\Z)", re.DOTALL | re.IGNORECASE),
 )
 
 # Aggressive heuristic for untagged reasoning prose (models that don't wrap

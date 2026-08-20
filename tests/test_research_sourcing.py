@@ -77,6 +77,35 @@ def test_format_finding_content_blocks_title_inference():
     assert "generative model" not in text.lower()
 
 
+def test_adequate_prompt_prefers_pdf_evidence_over_title_page_summary():
+    methods = ("Methods and results of the folding experiments. " * 40).strip()
+    title_page = "Journal of Folding\nVol 12\nAuthor Affiliation Street"
+    evidence = title_page + "\n\n" + methods
+    finding = {
+        "title": "Folding paper",
+        "summary": evidence[:800],
+        "evidence": evidence,
+        "pdf_extracted": True,
+    }
+    text = format_finding_content_for_prompt(finding)
+    assert "Methods and results of the folding experiments" in text
+    assert not text.startswith("Journal of Folding") or "Methods and results" in text
+    assert len(text) <= 2500
+
+
+def test_adequate_prompt_uses_abstract_when_longer_than_stub():
+    abstract = "This study reports a new architecture for protein folding. " * 8
+    finding = {
+        "title": "Folding paper",
+        "abstract": abstract,
+        "summary": "Journal header line",
+        "evidence": "Journal header line\nAuthor list\n" + ("body " * 400),
+        "pdf_extracted": True,
+    }
+    text = format_finding_content_for_prompt(finding)
+    assert "new architecture for protein folding" in text or "body" in text
+
+
 def test_sourcing_limitations_block_lists_thin_sources():
     reg = EvidenceRegistry()
     reg.register({

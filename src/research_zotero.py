@@ -82,9 +82,7 @@ def catalog_row_to_finding(
     evidence = "\n\n".join(evidence_parts)[:15000]
 
     summary = abstract[:2000] if abstract else ""
-    if not summary and evidence and len(evidence) >= 220:
-        summary = evidence[:800]
-    if not summary:
+    if not summary and not (evidence and len(evidence) >= 220):
         summary = f"Bibliographic record: {title}"
     rational = (
         "Matched from local Zotero catalog"

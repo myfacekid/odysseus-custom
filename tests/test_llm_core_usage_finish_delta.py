@@ -101,3 +101,20 @@ def test_usage_on_empty_choices_chunk_still_captured(monkeypatch):
     ]
     usage = _usage_events(_drive(monkeypatch, lines))
     assert usage and usage[-1] == {"input_tokens": 4, "output_tokens": 2}
+
+
+def test_null_choice_chunk_does_not_kill_stream(monkeypatch):
+    """DeepSeek sends choices:[null] on keepalive / usage chunks."""
+    lines = [
+        'data: ' + json.dumps({"choices": [None]}),
+        'data: ' + json.dumps({"choices": [{"delta": {"content": "Hello"}}]}),
+        'data: ' + json.dumps({
+            "choices": [None],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1},
+        }),
+        'data: [DONE]',
+    ]
+    blob = _drive(monkeypatch, lines)
+    assert "Hello" in blob
+    usage = _usage_events(blob)
+    assert usage and usage[-1] == {"input_tokens": 3, "output_tokens": 1}

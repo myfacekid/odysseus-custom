@@ -31,18 +31,30 @@ def _format_nobody_tool_results(results: List[dict], start_idx: int) -> str:
     return "\n\n".join(lines) if lines else "No results."
 
 
+def _finding_body_for_snippet(finding: dict) -> str:
+    from src.research_sourcing import best_finding_body_text
+
+    return (
+        (finding.get("content") or "").strip()
+        or best_finding_body_text(finding)
+        or ""
+    )
+
+
 def _findings_to_ldr_results(findings: List[dict]) -> List[dict]:
     out = []
     for f in findings:
         url = (f.get("url") or "").strip()
         if not url:
             continue
+        body = _finding_body_for_snippet(f)[:2000]
         out.append(
             {
                 "title": f.get("title") or "Untitled",
                 "link": url,
                 "url": url,
-                "snippet": (f.get("content") or "")[:2000],
+                "snippet": body,
+                "content": body,
                 "source_engine": f.get("search_provider") or "nobody",
                 "zotero_key": f.get("zotero_key"),
                 "paper_key": f.get("paper_key"),

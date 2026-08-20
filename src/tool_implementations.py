@@ -2577,9 +2577,32 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
 # Cookbook routes loopback. The agent's tool calls run in-process but
 # need to reach admin-gated cookbook routes; we ride the per-process
 # internal token so require_admin lets us through. See core/middleware.py.
-# Honor NOBODY_PORT / APP_PORT (native/mac often use 7860; compose defaults
-# to 7000) so app_api and cookbook helpers don't hard-fail on the wrong port.
+#
+# Prefer the ASGI bind port (set from the first inbound request) over
+# NOBODY_PORT / APP_PORT. Those env vars are the *host* publish port in
+# Docker and often differ from the port the process actually listens on
+# (native `uvicorn --port 7002` with no APP_PORT is the common miss —
+# app_api then connection-refuses on 7000).
+_bound_listen_port: Optional[int] = None
+
+
+def note_bound_port(port: Any) -> None:
+    """Record the port this process is actually listening on."""
+    global _bound_listen_port
+    if port is None:
+        _bound_listen_port = None
+        return
+    try:
+        value = int(port)
+    except (TypeError, ValueError):
+        return
+    if 1 <= value <= 65535:
+        _bound_listen_port = value
+
+
 def _cookbook_base_url() -> str:
+    if _bound_listen_port:
+        return f"http://localhost:{_bound_listen_port}"
     raw = os.environ.get("NOBODY_PORT") or os.environ.get("APP_PORT") or "7000"
     try:
         port = int(str(raw).strip())

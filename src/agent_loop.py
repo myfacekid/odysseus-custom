@@ -1781,13 +1781,16 @@ async def stream_agent_loop(
         elif _is_api_model:
             # Filter schemas by RAG-selected tools (if available)
             if _relevant_tools:
+                from src.tool_index import ALWAYS_AVAILABLE as _ALWAYS_TOOLS
+                _schema_tools = set(_relevant_tools) | set(_ALWAYS_TOOLS)
                 base_schemas = [
                     s for s in FUNCTION_TOOL_SCHEMAS
-                    if s.get("function", {}).get("name") in _relevant_tools
+                    if s.get("function", {}).get("name") in _schema_tools
                 ]
                 _mcp_filtered = [
                     s for s in mcp_schemas
                     if s.get("function", {}).get("name") in _relevant_tools
+                    or s.get("function", {}).get("name") in _ALWAYS_TOOLS
                 ]
                 all_tool_schemas = base_schemas + _mcp_filtered
             else:

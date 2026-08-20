@@ -3755,9 +3755,9 @@ export function closeEditor() {
       el.remove();
     });
   } catch {}
-  // Belt-and-suspenders: scrub any minimized-dock chip + modalManager
+  // Belt-and-suspenders: scrub any minimized-strip row + modalManager
   // entry whose id matches our ephemeral popups (in case the DOM node
-  // was already removed when the user dragged the chip to trash).
+  // was already removed when the user closed the row).
   try {
     const dock = document.getElementById('minimized-dock');
     if (dock) {

@@ -1,5 +1,6 @@
 """Keep src.search and services.search content extraction behavior aligned."""
 
+import httpx
 import pytest
 
 pytest.importorskip("bs4")
@@ -13,11 +14,17 @@ class _FakeResponse:
     headers = {"Content-Type": "text/html; charset=utf-8"}
     content = b""
 
-    def __init__(self, text: str):
+    def __init__(self, text: str, status_code: int = 200):
         self.text = text
+        self.status_code = status_code
 
     def raise_for_status(self):
-        return None
+        if self.status_code >= 400:
+            request = httpx.Request("GET", "https://example.com/blocked")
+            response = httpx.Response(self.status_code, request=request)
+            raise httpx.HTTPStatusError(
+                f"{self.status_code} error", request=request, response=response,
+            )
 
 
 @pytest.mark.parametrize("module", [src_content, service_content])
@@ -73,3 +80,20 @@ def test_content_fetcher_skips_og_image_when_disabled(module, tmp_path, monkeypa
 
     assert result["og_image"] == ""
     assert "Body text" in result["content"]
+
+
+@pytest.mark.parametrize("module", [src_content, service_content])
+def test_content_fetcher_returns_empty_on_http_error(module, tmp_path, monkeypatch):
+    """A 403/404 from the page must not raise — chat auto-fetch used to 500."""
+    monkeypatch.setattr(module, "CONTENT_CACHE_DIR", tmp_path)
+    module.content_cache_index.clear()
+    monkeypatch.setattr(
+        module, "_get_public_url",
+        lambda url, headers, timeout: _FakeResponse("nope", status_code=403),
+    )
+
+    result = module.fetch_webpage_content("https://example.com/blocked")
+
+    assert result["success"] is False
+    assert "403" in result["error"]
+    assert result["content"] == ""

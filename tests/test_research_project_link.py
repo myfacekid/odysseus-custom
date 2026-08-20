@@ -70,6 +70,7 @@ def test_research_start_route_passes_project_id(research_project_env, monkeypatc
         report_length="standard",
         category=None,
         project_id="proj-e1",
+        approved_plan=None,
     )
     result = asyncio.run(start_route(body, req))
     assert result["project_id"] == "proj-e1"
@@ -101,6 +102,7 @@ def test_research_start_route_rejects_foreign_project(research_project_env, monk
         report_length="standard",
         category=None,
         project_id="proj-e1",
+        approved_plan=None,
     )
     with pytest.raises(HTTPException) as exc:
         asyncio.run(start_route(body, req))

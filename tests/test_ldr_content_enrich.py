@@ -6,6 +6,7 @@ from src.research.ldr_content_enrich import (
     build_deep_read_context_block,
     heuristic_deep_read_candidates,
     parse_citation_picker_response,
+    seed_deep_read_citation_nums,
 )
 from src.research.ldr_doi import dedupe_raw_links_by_doi, raw_link_text_richness
 from src.research_evidence import EvidenceRegistry
@@ -83,3 +84,29 @@ def test_build_deep_read_context_block_only_includes_loaded():
     block = build_deep_read_context_block(registry, findings, {1})
     assert "Full paper body" in block
     assert "Loaded" in block
+
+
+def test_seed_deep_read_includes_adequate_seeds():
+    registry = EvidenceRegistry()
+    seed = {
+        "title": "Seed paper",
+        "url": "https://doi.org/10.1/seed",
+        "evidence": "Full seed PDF body " * 50,
+        "pdf_extracted": True,
+        "is_seed": True,
+        "sourcing_tier": "adequate",
+    }
+    other = {
+        "title": "Web hit",
+        "url": "https://doi.org/10.1/web",
+        "content": "short web snippet",
+    }
+    registry.register(seed, is_seed=True)
+    registry.register(other)
+    findings = [seed, other]
+    nums = seed_deep_read_citation_nums(registry, findings)
+    assert seed["citation_num"] in nums
+    assert other["citation_num"] not in nums
+    block = build_deep_read_context_block(registry, findings, nums)
+    assert "Seed paper" in block
+    assert "Full seed PDF body" in block

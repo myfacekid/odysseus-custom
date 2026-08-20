@@ -20,6 +20,21 @@ let _clockInterval = null;
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+function _planLinesToText(lines) {
+  return (lines || []).filter(Boolean).join('\n');
+}
+
+function _textToPlanLines(text) {
+  return (text || '')
+    .split(/[\n,]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function _seedRef(paper) {
+  return (paper?.zotero_key || paper?.doi || '').trim();
+}
+
 // ---- API ----
 
 async function _fetchTasks() {
@@ -941,6 +956,166 @@ function _showPresetPicker() {
   }
 }
 
+function _bindResearchTaskForm(existing, seeds) {
+  const chips = document.getElementById('task-form-seed-chips');
+  const input = document.getElementById('task-form-seed-input');
+  const picker = document.getElementById('task-form-seed-picker');
+  if (!chips || !input || !picker) return;
+
+  function renderChips() {
+    if (!seeds.length) {
+      chips.innerHTML = '<div class="research-seed-empty" style="font-size:11px;opacity:0.45;">No seed papers. Search below to pin specific work.</div>';
+      return;
+    }
+    chips.innerHTML = seeds.map((p, idx) => {
+      const title = _esc(p.title || p.zotero_key || 'Paper');
+      return `<div class="research-seed-chip" data-idx="${idx}">
+        <div class="research-seed-chip-text"><div class="research-seed-chip-title">${title}</div></div>
+        <button type="button" class="research-seed-chip-remove" data-idx="${idx}" title="Remove" aria-label="Remove seed paper">×</button>
+      </div>`;
+    }).join('');
+    chips.querySelectorAll('.research-seed-chip-remove').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const i = parseInt(btn.getAttribute('data-idx') || '-1', 10);
+        if (i >= 0) {
+          seeds.splice(i, 1);
+          renderChips();
+        }
+      });
+    });
+  }
+
+  function alreadyHas(paper) {
+    const key = (paper.zotero_key || '').toUpperCase();
+    const doi = (paper.doi || '').toLowerCase();
+    return seeds.some((s) => {
+      const sk = (s.zotero_key || '').toUpperCase();
+      const sd = (s.doi || '').toLowerCase();
+      return (key && sk === key) || (doi && sd === doi);
+    });
+  }
+
+  function addSeed(paper) {
+    if (!paper || alreadyHas(paper)) return;
+    seeds.push({
+      zotero_key: paper.zotero_key || paper.doi || '',
+      doi: paper.doi || '',
+      title: paper.title || paper.zotero_key || paper.doi || 'Paper',
+    });
+    renderChips();
+  }
+
+  function parsePasted(raw) {
+    const s = (raw || '').trim();
+    if (!s) return null;
+    if (/^10\.\d/i.test(s)) return { doi: s.split(/\s/)[0], zotero_key: s.split(/\s/)[0], title: `DOI ${s}` };
+    const key = s.toUpperCase();
+    if (/^[A-Z0-9]{8}$/.test(key)) return { zotero_key: key, title: key };
+    return null;
+  }
+
+  let searchTimer = null;
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = input.value.trim();
+    if (!q) {
+      picker.hidden = true;
+      picker.innerHTML = '';
+      return;
+    }
+    searchTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/research/papers?limit=12&search=${encodeURIComponent(q)}`, { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('search failed');
+        const data = await res.json();
+        const papers = data.papers || [];
+        if (!papers.length) {
+          picker.innerHTML = '<div class="research-seed-empty" style="padding:8px;font-size:11px;">No catalog matches. Press Enter to add a DOI or Zotero key.</div>';
+          picker.hidden = false;
+          return;
+        }
+        picker.innerHTML = papers.map((p, i) => `
+          <button type="button" class="research-seed-picker-item" data-idx="${i}">
+            <div class="research-seed-chip-title">${_esc(p.title || p.zotero_key)}</div>
+            <div class="research-seed-chip-meta">${_esc([p.authors, p.year].filter(Boolean).join(' · '))}</div>
+          </button>
+        `).join('');
+        picker.hidden = false;
+        picker.querySelectorAll('.research-seed-picker-item').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const i = parseInt(btn.getAttribute('data-idx') || '-1', 10);
+            if (i >= 0 && papers[i]) addSeed(papers[i]);
+            input.value = '';
+            picker.hidden = true;
+          });
+        });
+      } catch (_) {
+        picker.hidden = true;
+      }
+    }, 280);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const pasted = parsePasted(input.value);
+    if (pasted) {
+      addSeed(pasted);
+      input.value = '';
+      picker.hidden = true;
+    }
+  });
+
+  document.getElementById('task-form-draft-plan')?.addEventListener('click', async () => {
+    const query = (document.getElementById('task-form-prompt')?.value || '').trim();
+    const mode = document.getElementById('task-form-research-mode')?.value || 'literature_review';
+    const refs = seeds.map(_seedRef).filter(Boolean);
+    if (!query && !refs.length) {
+      if (uiModule) uiModule.showError('Enter a research question or add a seed paper first');
+      return;
+    }
+    const btn = document.getElementById('task-form-draft-plan');
+    const status = document.getElementById('task-form-plan-status');
+    if (btn) { btn.disabled = true; btn.textContent = 'Drafting…'; }
+    if (status) status.textContent = '';
+    try {
+      const res = await fetch(`${API_BASE}/api/research/plan`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: query || 'Literature synthesis from selected seed papers.',
+          mode,
+          seed_papers: refs,
+        }),
+      });
+      if (!res.ok) throw new Error('Plan request failed');
+      const data = await res.json();
+      const plan = data.retrieval_plan || {};
+      const set = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.value = val ?? '';
+      };
+      set('task-form-plan-keywords', _planLinesToText(plan.search_keywords));
+      set('task-form-plan-anchors', _planLinesToText(plan.anchor_terms));
+      set('task-form-plan-avoid', _planLinesToText(plan.avoid_topics));
+      set('task-form-plan-subq', _planLinesToText(plan.sub_questions));
+      set('task-form-plan-topics', _planLinesToText(plan.key_topics));
+      set('task-form-plan-success', plan.success_criteria || '');
+      const scopeEl = document.getElementById('task-form-plan-scope');
+      if (scopeEl && plan.scope) scopeEl.value = plan.scope;
+      const advanced = document.querySelector('#task-form-type-opts .research-plan-advanced');
+      if (advanced && (plan.key_topics || []).length) advanced.open = true;
+      if (status) status.textContent = 'Draft ready — edit keywords and optional fields, then save.';
+    } catch (err) {
+      if (uiModule) uiModule.showError(err.message || 'Failed to draft plan');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Draft plan'; }
+    }
+  });
+
+  renderChips();
+}
+
 // ---- Form ----
 
 function _showForm(existing, initTaskType, initTriggerType) {
@@ -951,6 +1126,14 @@ function _showForm(existing, initTaskType, initTriggerType) {
 
   const curTaskType = existing?.task_type || initTaskType || 'llm';
   const curTriggerType = existing?.trigger_type || initTriggerType || 'schedule';
+  const taskFormSeeds = [];
+  const existingSeeds = existing?.research_config?.seed_papers;
+  if (Array.isArray(existingSeeds)) {
+    existingSeeds.forEach((ref) => {
+      const text = String(ref || '').trim();
+      if (text) taskFormSeeds.push({ zotero_key: text, title: text });
+    });
+  }
 
   body.innerHTML = `
     <div class="admin-card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
@@ -1016,12 +1199,61 @@ function _showForm(existing, initTaskType, initTriggerType) {
 
   function renderTypeOpts() {
     typeOpts.innerHTML = '';
-    if (taskType === 'llm' || taskType === 'research') {
-      const placeholder = taskType === 'research' ? 'What should be researched?' : 'What should the AI do?';
+    if (taskType === 'llm') {
       typeOpts.innerHTML = `
-        <label class="task-form-label">${taskType === 'research' ? 'Research question' : 'Prompt'}</label>
-        <textarea id="task-form-prompt" class="task-form-input task-form-textarea" rows="4" placeholder="${placeholder}">${existing?.prompt || ''}</textarea>
+        <label class="task-form-label">Prompt</label>
+        <textarea id="task-form-prompt" class="task-form-input task-form-textarea" rows="4" placeholder="What should the AI do?">${existing?.prompt || ''}</textarea>
       `;
+    } else if (taskType === 'research') {
+      const cfg = existing?.research_config || {};
+      const plan = cfg.approved_plan || {};
+      const mode = cfg.mode || 'literature_review';
+      typeOpts.innerHTML = `
+        <label class="task-form-label">Research question</label>
+        <textarea id="task-form-prompt" class="task-form-input task-form-textarea" rows="4" placeholder="What should be researched?">${existing?.prompt || ''}</textarea>
+        <label class="task-form-label">Mode</label>
+        <select id="task-form-research-mode" class="task-form-input">
+          <option value="literature_review" ${mode === 'literature_review' ? 'selected' : ''}>Literature review</option>
+          <option value="similar_papers" ${mode === 'similar_papers' ? 'selected' : ''}>Similar papers</option>
+          <option value="gap_analysis" ${mode === 'gap_analysis' ? 'selected' : ''}>Gap analysis</option>
+          <option value="compare" ${mode === 'compare' ? 'selected' : ''}>Compare (2+ papers)</option>
+        </select>
+        <label class="task-form-label">Seed papers <span style="opacity:0.5;font-weight:normal;font-size:10px;">(optional)</span></label>
+        <div id="task-form-seed-chips" class="research-seed-chips"></div>
+        <div class="research-seed-search-wrap" style="position:relative;margin-top:4px;">
+          <input type="search" id="task-form-seed-input" class="task-form-input" placeholder="Search library, or paste a DOI / Zotero key…" autocomplete="off" />
+          <div id="task-form-seed-picker" class="research-seed-picker" hidden></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;">
+          <button type="button" id="task-form-draft-plan" class="memory-toolbar-btn">Draft plan</button>
+          <span id="task-form-plan-status" class="memory-desc" style="margin:0;"></span>
+        </div>
+        <label class="task-form-label">Search keywords</label>
+        <textarea id="task-form-plan-keywords" class="task-form-input task-form-textarea" rows="2" placeholder="foldseek, esm3, structure representation…">${_esc(_planLinesToText(plan.search_keywords))}</textarea>
+        <div style="font-size:10px;opacity:0.45;margin-top:2px;">Required. Draft a plan or type query phrases sent to academic search.</div>
+        <label class="task-form-label">Scope</label>
+        <select id="task-form-plan-scope" class="task-form-input">
+          <option value="balanced" ${(plan.scope || 'balanced') === 'balanced' ? 'selected' : ''}>Balanced</option>
+          <option value="narrow_compare" ${plan.scope === 'narrow_compare' ? 'selected' : ''}>Narrow / compare</option>
+          <option value="gap_analysis" ${plan.scope === 'gap_analysis' ? 'selected' : ''}>Gap analysis</option>
+          <option value="field_overview" ${plan.scope === 'field_overview' ? 'selected' : ''}>Field overview</option>
+        </select>
+        <details class="research-disclosure research-plan-advanced" ${['anchor_terms','avoid_topics','sub_questions','key_topics'].some(k => (plan[k] || []).length) || plan.success_criteria ? 'open' : ''}>
+          <summary style="cursor:pointer;font-size:11px;opacity:0.7;margin:8px 0 4px;">Refine plan (optional)</summary>
+          <label class="task-form-label">Anchor terms</label>
+          <textarea id="task-form-plan-anchors" class="task-form-input task-form-textarea" rows="2" placeholder="foldseek, esm3, 3di…">${_esc(_planLinesToText(plan.anchor_terms))}</textarea>
+          <label class="task-form-label">Avoid topics</label>
+          <textarea id="task-form-plan-avoid" class="task-form-input task-form-textarea" rows="2" placeholder="gene ontology, function prediction…">${_esc(_planLinesToText(plan.avoid_topics))}</textarea>
+          <label class="task-form-label">Sub-questions</label>
+          <textarea id="task-form-plan-subq" class="task-form-input task-form-textarea" rows="2">${_esc(_planLinesToText(plan.sub_questions))}</textarea>
+          <label class="task-form-label">Key topics</label>
+          <textarea id="task-form-plan-topics" class="task-form-input task-form-textarea" rows="2" placeholder="structural alphabet, search space coverage…">${_esc(_planLinesToText(plan.key_topics))}</textarea>
+          <div style="font-size:10px;opacity:0.45;margin-top:2px;">Leave blank and the model generates key topics when research runs.</div>
+          <label class="task-form-label">Success criteria</label>
+          <textarea id="task-form-plan-success" class="task-form-input task-form-textarea" rows="2">${_esc(plan.success_criteria || '')}</textarea>
+        </details>
+      `;
+      _bindResearchTaskForm(existing, taskFormSeeds);
     } else {
       typeOpts.innerHTML = `
         <label class="task-form-label">Action</label>
@@ -1350,7 +1582,7 @@ function _showForm(existing, initTaskType, initTriggerType) {
     if (taskType === 'llm' || taskType === 'research') {
       const prompt = document.getElementById('task-form-prompt')?.value?.trim();
       if (!prompt) {
-        if (uiModule) uiModule.showError('Prompt is required');
+        if (uiModule) uiModule.showError(taskType === 'research' ? 'Research question is required' : 'Prompt is required');
         return;
       }
       payload.prompt = prompt;
@@ -1361,6 +1593,33 @@ function _showForm(existing, initTaskType, initTriggerType) {
         return;
       }
       payload.action = action;
+    }
+
+    if (taskType === 'research') {
+      const keywords = _textToPlanLines(document.getElementById('task-form-plan-keywords')?.value);
+      const hadPlan = !!(existing?.research_config?.approved_plan);
+      if (!keywords.length && (!existing?.id || hadPlan)) {
+        if (uiModule) uiModule.showError('Add at least one search keyword (Draft plan, or type them).');
+        return;
+      }
+      const approved = { search_keywords: keywords };
+      const scope = document.getElementById('task-form-plan-scope')?.value;
+      if (scope) approved.scope = scope;
+      const anchors = _textToPlanLines(document.getElementById('task-form-plan-anchors')?.value);
+      const avoid = _textToPlanLines(document.getElementById('task-form-plan-avoid')?.value);
+      const subq = _textToPlanLines(document.getElementById('task-form-plan-subq')?.value);
+      const topics = _textToPlanLines(document.getElementById('task-form-plan-topics')?.value);
+      const success = (document.getElementById('task-form-plan-success')?.value || '').trim();
+      if (anchors.length) approved.anchor_terms = anchors;
+      if (avoid.length) approved.avoid_topics = avoid;
+      if (subq.length) approved.sub_questions = subq;
+      if (topics.length) approved.key_topics = topics;
+      if (success) approved.success_criteria = success;
+      payload.research_config = {
+        mode: document.getElementById('task-form-research-mode')?.value || 'literature_review',
+        seed_papers: taskFormSeeds.map(_seedRef).filter(Boolean),
+        approved_plan: keywords.length ? approved : null,
+      };
     }
 
     // Trigger specifics

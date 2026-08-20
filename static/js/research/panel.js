@@ -157,15 +157,21 @@ function _fillPlanReviewForm(plan) {
 
 function _readApprovedPlanFromForm() {
   const scopeEl = document.getElementById('research-plan-scope');
-  return {
+  const plan = {
     search_keywords: _textToPlanLines(document.getElementById('research-plan-keywords')?.value),
-    anchor_terms: _textToPlanLines(document.getElementById('research-plan-anchors')?.value),
-    avoid_topics: _textToPlanLines(document.getElementById('research-plan-avoid')?.value),
-    sub_questions: _textToPlanLines(document.getElementById('research-plan-subq')?.value),
-    key_topics: _textToPlanLines(document.getElementById('research-plan-topics')?.value),
-    success_criteria: (document.getElementById('research-plan-success')?.value || '').trim(),
     scope: scopeEl?.value || 'balanced',
   };
+  const anchors = _textToPlanLines(document.getElementById('research-plan-anchors')?.value);
+  const avoid = _textToPlanLines(document.getElementById('research-plan-avoid')?.value);
+  const subq = _textToPlanLines(document.getElementById('research-plan-subq')?.value);
+  const topics = _textToPlanLines(document.getElementById('research-plan-topics')?.value);
+  const success = (document.getElementById('research-plan-success')?.value || '').trim();
+  if (anchors.length) plan.anchor_terms = anchors;
+  if (avoid.length) plan.avoid_topics = avoid;
+  if (subq.length) plan.sub_questions = subq;
+  if (topics.length) plan.key_topics = topics;
+  if (success) plan.success_criteria = success;
+  return plan;
 }
 
 function _validateComposeStep() {
@@ -1248,7 +1254,7 @@ function _buildPanelHTML() {
               <label class="research-plan-field research-plan-field--wide">
                 <span>Key topics</span>
                 <textarea id="research-plan-topics" rows="2" placeholder="structural alphabet, search space coverage…"></textarea>
-                <span class="research-plan-field-hint">Thematic coverage goals (concepts, populations, outcomes).</span>
+                <span class="research-plan-field-hint">Thematic coverage goals (concepts, populations, outcomes). Leave blank and the model generates these when research starts.</span>
               </label>
               <label class="research-plan-field research-plan-field--wide">
                 <span>Success criteria</span>

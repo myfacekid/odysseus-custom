@@ -18,5 +18,20 @@ test('tool-subgroup-label is a readable section header, not a 9px uppercase micr
   const body = m[1];
   assert.ok(!/text-transform:\s*uppercase/.test(body), 'no longer uppercase');
   assert.ok(!/font-size:\s*9px/.test(body), 'no longer 9px');
-  assert.match(body, /font-size:\s*11px/);
+  assert.match(body, /font-size:\s*13px/);
+});
+
+test('tools expand animation includes category labels and separators', () => {
+  const expand = css.match(
+    /\.section\.section-just-expanded :is\(([^)]+)\)/
+  );
+  assert.ok(expand, 'expand :is() selector exists');
+  assert.match(expand[1], /\.tool-subgroup-label/);
+  assert.match(expand[1], /\.tool-subgroup-sep/);
+  const collapse = css.match(
+    /\.section\.section-just-collapsing :is\(([^)]+)\)/
+  );
+  assert.ok(collapse, 'collapse :is() selector exists');
+  assert.match(collapse[1], /\.tool-subgroup-label/);
+  assert.match(collapse[1], /\.tool-subgroup-sep/);
 });

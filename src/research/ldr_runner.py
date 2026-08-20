@@ -505,7 +505,6 @@ async def run_ldr_research(
         )
 
     draft = prior_report.strip() or compile_gathering_draft(session.evidence_registry)
-    session.evolving_report = draft
 
     report = await synthesize_academic_report(
         question=question,
@@ -518,6 +517,7 @@ async def run_ldr_research(
         report_length=report_length,
         max_report_tokens=max_report_tokens,
         deep_read_context=deep_read_context,
+        findings=session.findings,
     )
     session.evolving_report = report
 

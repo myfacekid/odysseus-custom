@@ -15,6 +15,7 @@ from src.research_sourcing import (
     SOURCING_TIER_UNSOURCED,
     annotate_finding_sourcing,
     assess_finding_sourcing,
+    best_finding_body_text,
     format_finding_content_for_prompt,
     is_thin_sourcing,
 )
@@ -304,6 +305,24 @@ def heuristic_deep_read_candidates(
     return [n for _, _, n in scored[:limit]]
 
 
+def seed_deep_read_citation_nums(
+    registry: EvidenceRegistry,
+    findings: List[dict],
+    *,
+    min_body_chars: int = 80,
+) -> Set[int]:
+    """Seeds that already have body text belong in the synthesis full-text block."""
+    nums: Set[int] = set()
+    for src in registry.sources():
+        f = _finding_for_source(registry, findings, src.citation_num) or {}
+        if not (src.is_seed or f.get("is_seed")):
+            continue
+        body = (best_finding_body_text(f) or src.content_excerpt or "").strip()
+        if len(body) >= min_body_chars:
+            nums.add(src.citation_num)
+    return nums
+
+
 async def pick_sources_for_deep_read(
     question: str,
     registry: EvidenceRegistry,
@@ -507,6 +526,8 @@ async def run_ldr_content_enrichment(
         if ok:
             loaded.add(num)
             _sync_registry_from_finding(registry, finding)
+
+    loaded.update(seed_deep_read_citation_nums(registry, findings))
 
     if progress_callback and loaded:
         progress_callback(

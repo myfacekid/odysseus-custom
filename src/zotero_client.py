@@ -698,6 +698,21 @@ class ZoteroClient:
             return 0, str(e)
 
 
+def collapse_extracted_pdf_text(text: str) -> str:
+    """Join visual PDF line breaks into paragraphs; keep blank-line breaks."""
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    paragraphs = re.split(r"\n\s*\n", text)
+    collapsed = []
+    for para in paragraphs:
+        line = re.sub(r"[ \t]*\n[ \t]*", " ", para)
+        line = re.sub(r" {2,}", " ", line).strip()
+        if line:
+            collapsed.append(line)
+    return "\n\n".join(collapsed)
+
+
 def _extract_pdf_text(data: bytes, max_chars: int = 15000) -> str:
     """Extract text from PDF bytes. Uses pypdf (required); pdfminer as fallback."""
     if not data or not data.startswith(b"%PDF"):
@@ -718,6 +733,7 @@ def _extract_pdf_text(data: bytes, max_chars: int = 15000) -> str:
             text = (extract_text(io.BytesIO(data)) or "").strip()
         except Exception as e:
             logger.warning(f"PDF text extraction failed: {e}")
+    text = collapse_extracted_pdf_text(text)
     if len(text) > max_chars:
         text = text[:max_chars] + "\n[PDF content truncated]"
     return text

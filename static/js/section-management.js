@@ -68,7 +68,7 @@ export function initSectionCollapse(Storage) {
           Promise.allSettled(dominoOut.map(a => a.finished)).then(lockCollapsed);
           // Safety net: if an animation never settles (e.g. element removed),
           // still lock in the collapse so the section can't get stuck open.
-          setTimeout(lockCollapsed, 600);
+          setTimeout(lockCollapsed, 900);
         }
       } else {
         // Expand path — remove .collapsed and replay the inbound domino.
@@ -79,7 +79,7 @@ export function initSectionCollapse(Storage) {
         setTimeout(() => {
           if (section._collapseGen !== gen) return; // superseded by a newer toggle
           section.classList.remove('section-just-expanded');
-        }, 700);
+        }, 1300);
       }
     }
 

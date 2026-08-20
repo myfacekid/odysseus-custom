@@ -132,6 +132,7 @@ def test_cookbook_ambient_tools_always_available():
     assert "list_downloads" in ALWAYS_AVAILABLE
     assert "list_cached_models" in ALWAYS_AVAILABLE
     assert "list_served_models" in ALWAYS_AVAILABLE
+    assert "app_api" in ALWAYS_AVAILABLE
 
 
 def test_search_vault_not_advertised():

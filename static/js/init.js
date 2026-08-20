@@ -2,6 +2,9 @@
 // ES6 module — extracted from index.html inline scripts
 
 import Storage from './storage.js';
+import { IS_MAC } from './platform.js';
+
+if (IS_MAC) document.body.classList.add('is-mac');
 
 function clearFreshComposerRestore() {
   const msgInput = document.getElementById('message');
@@ -168,8 +171,8 @@ window.addEventListener('pageshow', clearFreshComposerRestore);
   window.addEventListener('resize', _sync);
 }
 
-/* Keep minimized tool chips above the composer. Both the current modalManager
-   dock and the legacy fallback dock consume this root-level clearance. */
+/* Keep the legacy #modal-dock above the composer. The minimized corner strip
+   (#minimized-dock) is fixed bottom-left and does not use this clearance. */
 {
   const root = document.documentElement;
   const chatBar = document.querySelector('.chat-input-bar');
