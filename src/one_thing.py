@@ -26,8 +26,8 @@ HORIZON_LABELS = {
 }
 
 HORIZON_TAGLINES = {
-    "focus": "Concrete commitments — each task links to an intermediate goal.",
-    "build": "Shorter-term outcomes — each goal links to your long horizon.",
+    "focus": "Concrete commitments. Each task links to an intermediate goal.",
+    "build": "Shorter-term outcomes. Each goal links to your long horizon.",
     "aim": "Directional goals for the year ahead.",
     "misc": "Tasks that do not fit the other categories.",
 }

@@ -87,17 +87,21 @@ function _oneThingSelectedParentIds(root) {
     .filter(Boolean);
 }
 
-function _oneThingRenderLinkPicker(horizon, selectedIds = [], { inputName = 'one-thing-parent' } = {}) {
+const _ONE_THING_LINK_TRIGGER_LABEL = 'Link to higher goal';
+
+function _oneThingRenderLinkPicker(horizon, selectedIds = [], { inputName = 'one-thing-parent', compact = false } = {}) {
   const rules = _oneThingLinkingRules(horizon);
   if (!rules.parent_horizon) return '';
   const required = !!rules.required;
   const label = rules.parent_label || 'parent goals';
   const candidates = _oneThingParentCandidates(horizon);
   const selected = new Set(selectedIds || []);
-  let html = `<div class="one-thing-link-picker" data-required="${required ? '1' : '0'}">`;
-  html += `<div class="one-thing-link-picker-label">Link to ${ _esc(label)}${required ? ' <span class="one-thing-link-required">*</span>' : ''}</div>`;
+  let html = `<div class="one-thing-link-picker" data-required="${required ? '1' : '0'}" data-parent-label="${_esc(label)}">`;
+  if (!compact) {
+    html += `<div class="one-thing-link-picker-label">Link to ${ _esc(label)}${required ? ' <span class="one-thing-link-required">*</span>' : ''}</div>`;
+  }
   if (!candidates.length) {
-    html += `<div class="one-thing-link-empty">Create a ${ _esc(label)} goal first — linking keeps daily work tied to longer-term outcomes.</div>`;
+    html += `<div class="one-thing-link-empty">Create a ${ _esc(label)} goal first. Linking keeps daily work tied to longer-term outcomes.</div>`;
   } else {
     html += '<div class="one-thing-link-options">';
     for (const candidate of candidates) {
@@ -108,6 +112,30 @@ function _oneThingRenderLinkPicker(horizon, selectedIds = [], { inputName = 'one
   }
   html += '</div>';
   return html;
+}
+
+function _oneThingLinkTriggerText(host) {
+  const count = _oneThingSelectedParentIds(host).length;
+  return count ? `${_ONE_THING_LINK_TRIGGER_LABEL} (${count})` : _ONE_THING_LINK_TRIGGER_LABEL;
+}
+
+function _syncOneThingLinkTrigger(trigger, host) {
+  if (!trigger) return;
+  const count = _oneThingSelectedParentIds(host).length;
+  trigger.textContent = _oneThingLinkTriggerText(host);
+  trigger.classList.toggle('has-links', count > 0);
+  trigger.classList.toggle('is-empty', count === 0);
+}
+
+function _oneThingRenderLinkDropdown(horizon, selectedIds = [], { inputName = 'one-thing-parent', hostClass = 'one-thing-add-links' } = {}) {
+  if (!_oneThingHorizonHasParentLinks(horizon)) return '';
+  const required = !!_oneThingLinkingRules(horizon).required;
+  const count = (selectedIds || []).length;
+  const triggerText = count ? `${_ONE_THING_LINK_TRIGGER_LABEL} (${count})` : _ONE_THING_LINK_TRIGGER_LABEL;
+  return `<div class="one-thing-link-dropdown">
+    <button type="button" class="one-thing-link-trigger one-thing-add-field${count ? ' has-links' : ' is-empty'}" title="${_esc(_ONE_THING_LINK_TRIGGER_LABEL)}" aria-haspopup="dialog" aria-expanded="false"${required ? ' data-required="1"' : ''}>${_esc(triggerText)}</button>
+    <div class="${hostClass} one-thing-link-host">${_oneThingRenderLinkPicker(horizon, selectedIds, { inputName, compact: true })}</div>
+  </div>`;
 }
 
 function _oneThingHorizonHasParentLinks(horizon) {
@@ -191,7 +219,7 @@ function _showNotesFirstOpenHint(pane) {
   hint.id = 'notes-first-open-hint';
   hint.className = 'tour-hint';
   hint.innerHTML = `
-    <div class="tour-hint-text"><b>Todos</b> tracks Immediate Tasks, Intermediate Goals, Long Horizon, and Miscellaneous — linked in <b>Links</b>.</div>
+    <div class="tour-hint-text"><b>Todos</b> tracks Immediate Tasks, Intermediate Goals, Long Horizon, and Miscellaneous, linked in <b>Links</b>.</div>
     <button type="button" class="tour-hint-dismiss">OK</button>
   `;
   document.body.appendChild(hint);
@@ -1659,12 +1687,12 @@ function _oneThingDatePopoverOutside(e) {
   _closeOneThingDatePopover();
 }
 
-function _positionOneThingDatePopover(pop, anchor) {
+function _positionOneThingPopover(pop, anchor, { fallbackW = 260, fallbackH = 280 } = {}) {
   const rect = anchor.getBoundingClientRect();
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const pw = pop.offsetWidth || 260;
-  const ph = pop.offsetHeight || 280;
+  const pw = pop.offsetWidth || fallbackW;
+  const ph = pop.offsetHeight || fallbackH;
   let top = rect.bottom + 6;
   let left = rect.left;
   if (top + ph > vh - 8) top = Math.max(8, rect.top - ph - 6);
@@ -1674,8 +1702,138 @@ function _positionOneThingDatePopover(pop, anchor) {
   pop.style.left = `${left}px`;
 }
 
+function _positionOneThingDatePopover(pop, anchor) {
+  _positionOneThingPopover(pop, anchor, { fallbackW: 260, fallbackH: 280 });
+}
+
+let _oneThingLinkPopoverState = null;
+
+function _closeOneThingLinkPopover() {
+  const pop = document.querySelector('.one-thing-link-popover');
+  const state = _oneThingLinkPopoverState;
+  if (state?.picker) {
+    if (state.onChange) state.picker.removeEventListener('change', state.onChange);
+    state.picker.querySelectorAll('.one-thing-link-option.is-filtered-out')
+      .forEach(el => el.classList.remove('is-filtered-out'));
+    state.picker.querySelector('.one-thing-link-filter-empty')?.remove();
+    if (state.host?.isConnected) state.host.appendChild(state.picker);
+  }
+  if (state?.trigger?.isConnected) state.trigger.setAttribute('aria-expanded', 'false');
+  pop?.remove();
+  _oneThingLinkPopoverState = null;
+  document.removeEventListener('keydown', _oneThingLinkPopoverKeydown, true);
+  document.removeEventListener('mousedown', _oneThingLinkPopoverOutside, true);
+}
+window._closeOneThingLinkPopover = _closeOneThingLinkPopover;
+window._closeOneThingDatePopover = _closeOneThingDatePopover;
+
+function _oneThingLinkPopoverKeydown(e) {
+  if (e.key !== 'Escape') return;
+  const pop = document.querySelector('.one-thing-link-popover');
+  const search = pop?.querySelector('.one-thing-link-search');
+  if (search && search.value) {
+    e.stopPropagation();
+    search.value = '';
+    _filterOneThingLinkOptions(pop, '');
+    search.focus();
+    return;
+  }
+  _closeOneThingLinkPopover();
+}
+
+function _oneThingLinkPopoverOutside(e) {
+  const pop = document.querySelector('.one-thing-link-popover');
+  if (!pop || pop.contains(e.target) || e.target.closest('.one-thing-link-trigger')) return;
+  _closeOneThingLinkPopover();
+}
+
+function _filterOneThingLinkOptions(root, query) {
+  if (!root) return;
+  const q = (query || '').trim().toLowerCase();
+  const options = root.querySelectorAll('.one-thing-link-option');
+  let visible = 0;
+  options.forEach(opt => {
+    const text = (opt.textContent || '').toLowerCase();
+    const match = !q || text.includes(q);
+    opt.classList.toggle('is-filtered-out', !match);
+    if (match) visible += 1;
+  });
+  let empty = root.querySelector('.one-thing-link-filter-empty');
+  if (q && options.length && !visible) {
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.className = 'one-thing-link-empty one-thing-link-filter-empty';
+      empty.textContent = 'No matches';
+      const opts = root.querySelector('.one-thing-link-options');
+      if (opts) opts.after(empty);
+      else root.querySelector('.one-thing-link-picker')?.appendChild(empty);
+    }
+  } else {
+    empty?.remove();
+  }
+}
+
+function _showOneThingLinkPopover(trigger, host) {
+  if (!trigger || !host) return;
+  if (_oneThingLinkPopoverState?.trigger === trigger) {
+    _closeOneThingLinkPopover();
+    return;
+  }
+  _closeOneThingLinkPopover();
+  _closeOneThingDatePopover();
+
+  const picker = host.querySelector('.one-thing-link-picker');
+  if (!picker) return;
+
+  const label = picker.dataset.parentLabel
+    || _oneThingLinkingRules(_oneThingHorizon).parent_label
+    || 'goals';
+
+  const pop = document.createElement('div');
+  pop.className = 'one-thing-link-popover';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', _ONE_THING_LINK_TRIGGER_LABEL);
+
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'one-thing-link-search one-thing-add-field';
+  search.placeholder = `Search ${label}…`;
+  search.setAttribute('aria-label', `Search ${label}`);
+  search.autocomplete = 'off';
+
+  const accentWrap = trigger.closest('.one-thing-wrap');
+  if (accentWrap) {
+    const accent = getComputedStyle(accentWrap).getPropertyValue('--todo-accent').trim();
+    if (accent) pop.style.setProperty('--todo-accent', accent);
+  }
+
+  pop.appendChild(search);
+  pop.appendChild(picker);
+  document.body.appendChild(pop);
+
+  const onChange = () => _syncOneThingLinkTrigger(trigger, picker);
+  picker.addEventListener('change', onChange);
+  _oneThingLinkPopoverState = { trigger, host, picker, onChange };
+  trigger.setAttribute('aria-expanded', 'true');
+  _syncOneThingLinkTrigger(trigger, picker);
+
+  search.addEventListener('input', () => {
+    _filterOneThingLinkOptions(pop, search.value);
+    requestAnimationFrame(() => _positionOneThingPopover(pop, trigger, { fallbackW: 280, fallbackH: 240 }));
+  });
+  search.addEventListener('keydown', (e) => e.stopPropagation());
+
+  requestAnimationFrame(() => {
+    _positionOneThingPopover(pop, trigger, { fallbackW: 280, fallbackH: 240 });
+    search.focus();
+  });
+  document.addEventListener('keydown', _oneThingLinkPopoverKeydown, true);
+  setTimeout(() => document.addEventListener('mousedown', _oneThingLinkPopoverOutside, true), 0);
+}
+
 function _showOneThingDatePopover(anchor, { value = '', onPick, onClear } = {}) {
   if (!anchor) return;
+  _closeOneThingLinkPopover();
   _closeOneThingDatePopover();
   let viewDate = value ? new Date(`${value}T12:00:00`) : new Date();
   if (isNaN(viewDate.getTime())) viewDate = new Date();
@@ -1787,9 +1945,10 @@ function _oneThingPriorityOptions(selected) {
 
 function _oneThingRenderEditPanel(task) {
   const dueValue = task.due_date || '';
-  const linkPicker = _oneThingHorizonHasParentLinks(_oneThingHorizon)
-    ? `<div class="one-thing-edit-links">${_oneThingRenderLinkPicker(_oneThingHorizon, task.parent_ids || [], { inputName: `edit-links-${task.id}` })}</div>`
-    : '';
+  const linkDropdown = _oneThingRenderLinkDropdown(_oneThingHorizon, task.parent_ids || [], {
+    inputName: `edit-links-${task.id}`,
+    hostClass: 'one-thing-edit-links',
+  });
   return `<div class="one-thing-row-edit-panel" data-task-id="${_esc(task.id)}">
     <label class="one-thing-edit-label">Title</label>
     <input type="text" class="one-thing-edit-text" data-task-id="${_esc(task.id)}" value="${_esc(task.text || '')}" maxlength="500" />
@@ -1799,8 +1958,8 @@ function _oneThingRenderEditPanel(task) {
       <button type="button" class="one-thing-date-trigger one-thing-edit-due-trigger one-thing-add-field" data-task-id="${_esc(task.id)}" title="Planned completion">Due date</button>
       <input type="hidden" class="one-thing-edit-due" data-task-id="${_esc(task.id)}" value="${_esc(dueValue)}" />
       <select class="one-thing-edit-priority one-thing-add-field" data-task-id="${_esc(task.id)}" title="Priority">${_oneThingPriorityOptions(task.priority)}</select>
+      ${linkDropdown}
     </div>
-    ${linkPicker}
     <div class="one-thing-edit-actions">
       <button type="button" class="one-thing-edit-save" data-task-id="${_esc(task.id)}">Save changes</button>
       <button type="button" class="one-thing-edit-delete" data-task-id="${_esc(task.id)}" title="Delete task">Delete</button>
@@ -1971,6 +2130,7 @@ async function _handleOneThingEditSave(taskId, body, btn) {
   }
   const details = panel.querySelector('.one-thing-edit-details')?.value?.trim() || '';
   const dueInput = panel.querySelector('.one-thing-edit-due');
+  _closeOneThingLinkPopover();
   const linkRoot = panel.querySelector('.one-thing-edit-links');
   const parentIds = linkRoot ? _oneThingSelectedParentIds(linkRoot) : null;
   if (linkRoot && _TODO_LINKS_REQUIRED.has(_oneThingHorizon) && !(parentIds || []).length) {
@@ -2047,38 +2207,58 @@ async function _handleOneThingDueClick(dueBtn, body) {
   });
 }
 
+function _wireOneThingLinkDropdown(root) {
+  if (!root) return;
+  const trigger = root.querySelector('.one-thing-link-trigger');
+  const host = root.querySelector('.one-thing-link-host');
+  if (!trigger || !host || trigger.dataset.wired === '1') return;
+  trigger.dataset.wired = '1';
+  _syncOneThingLinkTrigger(trigger, host);
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _showOneThingLinkPopover(trigger, host);
+  });
+}
+
 function _wireOneThingEditPanels(body) {
   body.querySelectorAll('.one-thing-row-edit-panel').forEach(panel => {
     const dueTrigger = panel.querySelector('.one-thing-edit-due-trigger');
     const dueInput = panel.querySelector('.one-thing-edit-due');
-    if (!dueTrigger || dueTrigger.dataset.wired === '1') return;
-    dueTrigger.dataset.wired = '1';
-    _syncOneThingDueTrigger(dueTrigger, dueInput);
-    dueTrigger.addEventListener('click', (e) => {
-      e.stopPropagation();
-      _showOneThingDatePopover(dueTrigger, {
-        value: dueInput?.value || '',
-        onPick: (ymd) => {
-          if (dueInput) dueInput.value = ymd;
-          _syncOneThingDueTrigger(dueTrigger, dueInput);
-        },
-        onClear: () => {
-          if (dueInput) dueInput.value = '';
-          _syncOneThingDueTrigger(dueTrigger, dueInput);
-        },
+    if (dueTrigger && dueTrigger.dataset.wired !== '1') {
+      dueTrigger.dataset.wired = '1';
+      _syncOneThingDueTrigger(dueTrigger, dueInput);
+      dueTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _showOneThingDatePopover(dueTrigger, {
+          value: dueInput?.value || '',
+          onPick: (ymd) => {
+            if (dueInput) dueInput.value = ymd;
+            _syncOneThingDueTrigger(dueTrigger, dueInput);
+          },
+          onClear: () => {
+            if (dueInput) dueInput.value = '';
+            _syncOneThingDueTrigger(dueTrigger, dueInput);
+          },
+        });
       });
-    });
-    panel.querySelector('.one-thing-edit-text')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        panel.querySelector('.one-thing-edit-save')?.click();
-      }
-    });
+    }
+    _wireOneThingLinkDropdown(panel.querySelector('.one-thing-link-dropdown'));
+    if (panel.dataset.editKeysWired !== '1') {
+      panel.dataset.editKeysWired = '1';
+      panel.querySelector('.one-thing-edit-text')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          panel.querySelector('.one-thing-edit-save')?.click();
+        }
+      });
+    }
   });
 }
 
 async function _renderOneThingView(body, { refresh = 'full' } = {}) {
   const token = ++_oneThingRenderToken;
+  _closeOneThingLinkPopover();
+  _closeOneThingDatePopover();
   if (refresh === 'full') {
     await _fetchOneThingMeta();
     await _fetchOneThingBoard({ skipVault: false });
@@ -2094,7 +2274,7 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
   const bucket = horizons[_oneThingHorizon] || {};
   const tasks = _filterOneThingTasks(bucket.tasks);
   const tagline = _showingArchived
-    ? 'Completed tasks from prior weeks — read-only history.'
+    ? 'Completed tasks from prior weeks. Read-only history.'
     : (bucket.tagline || '');
 
   const hzCls = _ONE_THING_HORIZON_CLASS[_oneThingHorizon] || '';
@@ -2108,6 +2288,7 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
       <div class="one-thing-section-tagline">${_esc(tagline)}</div>
     </div>`;
   if (!_showingArchived) {
+    const linkDropdown = _oneThingRenderLinkDropdown(_oneThingHorizon);
     html += `<div class="one-thing-add">
       <div class="one-thing-add-main">
         <input type="text" class="one-thing-add-text" placeholder="Title" maxlength="500" />
@@ -2121,19 +2302,17 @@ async function _renderOneThingView(body, { refresh = 'full' } = {}) {
           <option value="elevated">Elevated</option>
           <option value="critical">Critical</option>
         </select>
-        <button type="button" class="one-thing-add-btn">Add</button>
+        ${linkDropdown}
+        <button type="button" class="btn btn-primary one-thing-add-btn">Add</button>
       </div>
     </div>`;
-    if (_TODO_LINKS_REQUIRED.has(_oneThingHorizon)) {
-      html += `<div class="one-thing-add-links">${_oneThingRenderLinkPicker(_oneThingHorizon)}</div>`;
-    }
   }
   html += `<div class="one-thing-list">`;
 
   if (!tasks.length) {
     const emptyMsg = _showingArchived
       ? (_searchQuery ? 'No archived tasks match your search.' : 'No archived tasks in this category yet.')
-      : (_searchQuery ? 'No tasks match your search.' : 'Nothing here yet — add one clear commitment.');
+      : (_searchQuery ? 'No tasks match your search.' : 'Nothing here yet. Add one clear commitment.');
     html += `<div class="notes-empty one-thing-empty">${emptyMsg}</div>`;
   } else {
     for (const task of tasks) {
@@ -2243,12 +2422,14 @@ function _wireOneThingView(body) {
       },
     });
   });
+  _wireOneThingLinkDropdown(addForm.querySelector('.one-thing-link-dropdown'));
 
   const submitAdd = async () => {
     const text = (addInput?.value || '').trim();
     if (!text) return;
     const details = (detailsInput?.value || '').trim() || null;
-    const linkRoot = body.querySelector('.one-thing-add-links');
+    _closeOneThingLinkPopover();
+    const linkRoot = addForm.querySelector('.one-thing-add-links');
     const parentIds = _oneThingSelectedParentIds(linkRoot);
     if (_TODO_LINKS_REQUIRED.has(_oneThingHorizon) && !parentIds.length) {
       const label = _oneThingLinkingRules(_oneThingHorizon).parent_label || 'parent goal';

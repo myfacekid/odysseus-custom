@@ -7,7 +7,7 @@ your hardware, with your data. Built for people who want the polished assistant
 experience without surrendering the keys. Local-first, privacy-first, and nobody
 else's business.
 
-[Quick Start](#quick-start) · Setup Guide · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [License](#license)
+[Quick Start](#quick-start) · Setup Guide · [Styling](docs/styling.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [License](#license)
 
 ## Features
 

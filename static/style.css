@@ -210,6 +210,8 @@ body {
 @font-face { font-family: 'Fraunces'; font-weight: 600; font-style: normal; font-display: swap; src: url('/static/fonts/Fraunces-SemiBold.woff2') format('woff2'); }
 
 /* ── Blueprint primitives ── */
+/* Raised-stamp recipes (labeled buttons, icon wells, segments, seams):
+   docs/styling.md */
 
 /*
  * Theme --font-family is for reading/content. Compact chrome (uppercase
@@ -992,13 +994,20 @@ body.bg-pattern-fog {
     .sidebar-brand {
       display: flex;
       align-items: center;
-      flex: 1 1 auto;
+      justify-content: center;
+      flex: 1 1 100%;
       min-width: 0;
       height: 30px;
       min-height: 30px;
       padding: 0;
-      /* Fill leftover width on the logo row (chip sits on the row below) */
-      width: 100%;
+      /* Span into the hamburger gutter so “Nobody” centers on the full toolbar */
+      width: calc(100% + 42px);
+      margin-left: -42px;
+      box-sizing: border-box;
+    }
+    .sidebar.right-side .sidebar-brand {
+      margin-left: 0;
+      margin-right: -42px;
     }
     .sidebar-brand-title {
       font-size: 1rem;
@@ -1188,7 +1197,7 @@ body.bg-pattern-fog {
       padding: 8px;
     }
     .sidebar.right-side .sidebar-brand {
-      justify-content: flex-start;
+      justify-content: center;
       padding: 0;
     }
     /* Fixed hamburger — always visible, toggles sidebar */
@@ -33491,6 +33500,80 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   gap: 6px;
   align-items: center;
 }
+.one-thing-add-meta .one-thing-add-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.one-thing-link-dropdown {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.one-thing-link-host {
+  display: none;
+}
+.one-thing-link-trigger {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 400;
+  line-height: 1.35;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.one-thing-link-trigger.is-empty {
+  color: color-mix(in srgb, var(--fg) 50%, transparent);
+}
+.one-thing-link-trigger.has-links {
+  color: var(--fg);
+}
+.one-thing-link-trigger:hover,
+.one-thing-link-trigger[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 45%, var(--border));
+}
+.one-thing-link-trigger:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 55%, var(--border));
+}
+.one-thing-link-popover {
+  position: fixed;
+  z-index: 10050;
+  width: min(300px, calc(100vw - 16px));
+  max-height: min(320px, calc(100vh - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--radius-tech, 2px);
+  border: 1px solid var(--border);
+  background: var(--panel, var(--bg));
+  box-shadow: var(--shadow-hard, 2px 2px 0 color-mix(in srgb, var(--fg) 18%, transparent));
+  box-sizing: border-box;
+}
+.one-thing-link-search {
+  width: 100%;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+.one-thing-link-popover .one-thing-link-picker {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.one-thing-link-popover .one-thing-link-options {
+  max-height: 200px;
+  overflow: auto;
+}
+.one-thing-link-option.is-filtered-out {
+  display: none;
+}
 .one-thing-add-details,
 .one-thing-edit-details {
   width: 100%;
@@ -33547,14 +33630,6 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   word-break: break-word;
   max-height: 4.2em;
   overflow: hidden;
-}
-.one-thing-add-links,
-.one-thing-edit-links {
-  margin-bottom: 12px;
-  padding: 10px;
-  border-radius: var(--radius-tech, 2px);
-  border: 1px dashed color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 35%, var(--border));
-  background: color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 6%, transparent);
 }
 .one-thing-link-picker-label {
   font-size: 11px;
@@ -33693,24 +33768,10 @@ button.one-thing-date-day {
   border-color: color-mix(in srgb, var(--todo-accent, var(--accent-primary, var(--red))) 45%, var(--border));
 }
 .one-thing-wrap .one-thing-add-btn {
-  padding: 6px 12px;
-  border-radius: var(--radius-tech, 2px);
-  border: 1px solid color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 45%, var(--border));
-  background: color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 18%, transparent);
-  color: var(--todo-accent, var(--accent-warm));
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  font-family: inherit;
-  transition: border-color 0.15s, background 0.15s, color 0.15s, opacity 0.15s;
-}
-.one-thing-wrap .one-thing-add-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 28%, transparent);
-  border-color: color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 60%, var(--border));
-}
-.one-thing-wrap .one-thing-add-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--todo-accent, var(--accent-warm)) 22%, transparent);
+  /* Raised stamp via .btn / .btn-primary — keep compact padding for the meta row */
+  padding: 6px 14px;
+  font-size: 11px;
+  letter-spacing: var(--tracking-label, 0.06em);
 }
 .one-thing-wrap .one-thing-add-btn:disabled {
   opacity: 0.55;
@@ -34072,7 +34133,14 @@ button.one-thing-date-day {
     grid-template-columns: 1fr 1fr;
   }
   .one-thing-add-meta .one-thing-add-btn {
-    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+  .one-thing-add-meta .one-thing-link-dropdown {
+    min-width: 0;
+  }
+  .one-thing-add-meta .one-thing-link-trigger {
+    width: 100%;
+    max-width: none;
   }
 }
 
@@ -39189,10 +39257,8 @@ body.theme-frosted #theme-popup .admin-card {
 /* Todos + Calendar nested surfaces — stay glassy under theme-frosted */
 body.theme-frosted .notes-pane .one-thing-section,
 body.theme-frosted .notes-pane .notes-labels-bar,
-body.theme-frosted .notes-pane .one-thing-add-links,
 body.theme-frosted .notes-pane .one-thing-row-links-panel,
 body.theme-frosted .notes-pane .one-thing-row-edit-panel,
-body.theme-frosted .notes-pane .one-thing-edit-links,
 body.theme-frosted .notes-pane .one-thing-row-actions,
 body.theme-frosted .notes-pane .one-thing-link-options,
 body.theme-frosted .knowledge-modal-body .kg-node-list,
@@ -39215,7 +39281,8 @@ body.theme-frosted #calendar-modal .cal-day {
   background: color-mix(in srgb, var(--panel, var(--bg)) 12%, transparent) !important;
 }
 body.theme-frosted .one-thing-date-popover,
-body.theme-frosted .one-thing-date-popover .cal-grid {
+body.theme-frosted .one-thing-date-popover .cal-grid,
+body.theme-frosted .one-thing-link-popover {
   background-color: color-mix(in srgb, var(--panel, var(--bg)) 22%, transparent) !important;
   background-image: none !important;
   backdrop-filter: blur(10px) saturate(140%) !important;

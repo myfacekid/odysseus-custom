@@ -70,13 +70,15 @@ Please keep PRs small. Large PRs that mix unrelated cleanup, formatting, refacto
 
 Nobody has an intentional visual style. PRs that ignore it will be closed without merge, no matter how correct the underlying code is.
 
+**Full recipe (labeled stamps, icon wells, segment bars, seams):** [docs/styling.md](docs/styling.md).
+
 Before submitting any change that affects what the app looks like — buttons, icons, fonts, colors, spacing, layout, CSS, HTML, SVG, or any `static/js/` module that draws to the DOM — please:
 
 1. **Run the app locally** and view the change in a browser. Type-checks and unit tests are not enough.
 2. **Attach a screenshot or short clip** of the change in the running app. Add a mobile screenshot too if the change affects mobile.
 3. **Match the existing visual language.** Specifically:
    - Reuse existing CSS variables (`--red`, `--fg`, `--bg`, `--panel`, `--border`, `--shadow-hard`, `--shadow-press`, `--shadow-ink`, `--radius-tech`, …). Do not introduce new color values, font sizes, or spacing units.
-   - Reuse existing button, input, card, and border classes (`.btn`, `.admin-btn-sm`, `.confirm-btn`). Labeled actions use the raised stamp: fill plus `--shadow-hard` at rest (translucent black drop via `--shadow-ink`, not `--fg` or an opaque panel shade), `--shadow-press` plus a 1px translate on press. Do not add a four-sided hairline — that reads as lines on the top/left instead of a drop. Don't invent parallel button CSS.
+   - Reuse existing button, input, card, and border classes (`.btn`, `.admin-btn-sm`, `.confirm-btn`). Labeled actions and nav icons follow the raised-stamp recipes in [docs/styling.md](docs/styling.md) — translucent black `--shadow-ink`, transparent stroke, press via `--shadow-press`. Don't invent parallel button CSS.
    - **No Unicode emoji in UI or code.** Use inline SVG (matching the monochrome icon style already in `static/index.html`) or plain text.
    - Chrome type is Iosevka (`--font-ui`); reading surfaces may use `--font-family`. Don't override chrome onto a different face.
    - Default paper is light Modus Operandi Tinted; appearance work goes through the existing theme system, not hard-coded palettes.

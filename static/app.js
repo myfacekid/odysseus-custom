@@ -232,6 +232,8 @@ function initializeEventListeners() {
     document.querySelectorAll(
       '.skill-kebab-menu, .note-reminder-menu, .task-dropdown, .doclib-card-dropdown, .msg-overflow-menu'
     ).forEach(m => { if (m !== except) m.remove(); });
+    try { window._closeOneThingLinkPopover?.(); } catch {}
+    try { window._closeOneThingDatePopover?.(); } catch {}
     const exportMenuEl = el('export-dropdown-menu');
     const exportBtn = el('export-dl-btn');
     if (exportBtn && exportMenuEl && !exportMenuEl.classList.contains('open')) {
